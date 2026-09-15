@@ -1,0 +1,37 @@
+# Rust
+/target/
+**/target/
+Cargo.lock.bak
+
+# Node / Vite / React
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# ModLab runtime data (never versioned — this is user mod data, not source)
+/data/
+*.db
+*.db-wal
+*.db-shm
+
+# Claude Code local scratch
+.claude/settings.local.json

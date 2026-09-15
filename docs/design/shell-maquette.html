@@ -1,0 +1,1338 @@
+<title>ModLab Shell</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* ============ Tokens — design system v2 « deux colonnes, flottants » ============ */
+  :root{
+    --c1:#1b1a19; --c2:#232221; --c3:#2a2928; --c4:#323130; --c5:#3c3a38;
+    --sel:rgba(90,156,245,.14); --sel-line:rgba(90,156,245,.55);
+    --line:rgba(255,255,255,.055); --line2:rgba(255,255,255,.10);
+    --t1:#e8e6e2; --t2:#aaa59e; --t3:#7a766f; --t4:#4a4844;
+    --accent:#5a9cf5;
+    --green:#3fb950; --green-btn:#238636; --green-btn-h:#2ea043;
+    --warn:#d29922; --danger:#f85149; --info:#5a9cf5;
+    --win:#39d0d8; --lose:#f778ba; --gen:#a371f7; --claude:#d97757;
+    --run:#6e3a27;
+    --sh-float:0 4px 14px rgba(0,0,0,.22);
+    --row:26px; --r:10px;
+    --font-ui:"Segoe UI Variable Text","Segoe UI",-apple-system,system-ui,sans-serif;
+    --font-mono:"Cascadia Code","JetBrains Mono",Consolas,monospace;
+    color-scheme:dark;
+  }
+  :root[data-theme="light"]{
+    --c1:#e9ebee; --c2:#ffffff; --c3:#f6f8fa; --c4:#eef0f3; --c5:#e2e5ea;
+    --sel:rgba(9,105,218,.10); --sel-line:rgba(9,105,218,.55);
+    --line:rgba(31,35,40,.08); --line2:rgba(31,35,40,.14);
+    --t1:#1f2328; --t2:#59636e; --t3:#8c959f; --t4:#c1c8cf;
+    --accent:#0969da; --green:#1a7f37; --green-btn:#1f883d; --green-btn-h:#1a7f37;
+    --warn:#9a6700; --danger:#cf222e; --info:#0969da;
+    --win:#0e8a9e; --lose:#bf3989; --gen:#8250df; --claude:#b5522f; --run:#f0c4ad;
+    --sh-float:0 4px 14px rgba(31,35,40,.10);
+    color-scheme:light;
+  }
+  :root[data-density="comfortable"]{ --row:34px; }
+
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{ margin:0; background:var(--c2); color:var(--t1); font-family:var(--font-ui); font-size:13px; line-height:1.45; -webkit-font-smoothing:antialiased; overflow:hidden; }
+  button{ font:inherit; color:inherit; background:none; border:0; cursor:pointer; padding:0; }
+  input{ font:inherit; }
+  :focus-visible{ outline:2px solid var(--accent); outline-offset:-2px; border-radius:4px; }
+  .mono{ font-family:var(--font-mono); font-size:12px; }
+  .num{ font-variant-numeric:tabular-nums; }
+  .muted{ color:var(--t3); }
+  .kbd{ font-family:var(--font-mono); font-size:10.5px; color:var(--t3); border:1px solid var(--line2); border-radius:4px; padding:0 4px; line-height:15px; }
+  .ico{ width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+  .ico.sm{ width:13px; height:13px; }
+  .u{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--t3); font-weight:600; }
+  .spacer{ flex:1; }
+  /* Règle : un nom ne passe jamais sur deux lignes — il s'estompe sous ce qui est à sa droite */
+  .fade{ display:block; overflow:hidden; white-space:nowrap; min-width:0; padding-right:14px; -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 14px),transparent); mask-image:linear-gradient(90deg,#000 calc(100% - 14px),transparent); }
+  *{ scrollbar-width:thin; scrollbar-color:var(--t3) transparent; }
+  ::-webkit-scrollbar{ width:8px; height:8px; }
+  ::-webkit-scrollbar-track{ background:transparent; }
+  ::-webkit-scrollbar-thumb{ background:var(--t3); border-radius:99px; border:2px solid transparent; background-clip:padding-box; }
+  ::-webkit-scrollbar-thumb:hover{ background:var(--t2); }
+  ::-webkit-scrollbar-button{ display:none; width:0; height:0; }
+  ::-webkit-scrollbar-corner{ background:transparent; }
+
+  /* ============ Deux colonnes ============ */
+  .app{ display:grid; height:100vh; grid-template-columns:var(--sb,280px) minmax(0,1fr); grid-template-rows:minmax(0,1fr); grid-template-areas:"side main"; background:var(--c2); }
+  .app.no-side{ --sb:0px; }
+  @media (max-width:900px){ .app{ --sb:0px; } }
+  .tb{ display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:6px; color:var(--t2); position:relative; }
+  .tb:hover{ background:var(--c3); color:var(--t1); }
+  .tb[aria-pressed="true"]{ color:var(--t1); background:var(--c3); }
+  .btn{ display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 10px; border-radius:6px; background:var(--c4); color:var(--t1); font-size:12px; white-space:nowrap; font-weight:500; }
+  .btn:hover{ background:var(--c5); }
+  .btn.primary{ background:var(--green-btn); color:#fff; } .btn.primary:hover{ background:var(--green-btn-h); }
+  .btn.accent{ background:var(--accent); color:#fff; } .btn.accent:hover{ filter:brightness(1.08); }
+  .btn.ghost{ background:none; color:var(--t2); } .btn.ghost:hover{ color:var(--t1); background:var(--c3); }
+  .btn.claude{ color:var(--claude); background:color-mix(in srgb,var(--claude) 12%,transparent); } .btn.claude:hover{ background:color-mix(in srgb,var(--claude) 20%,transparent); }
+  .btn.sm{ height:22px; padding:0 8px; font-size:11.5px; }
+  .btn:disabled{ opacity:.55; cursor:default; }
+  .dot{ position:absolute; top:3px; right:3px; width:7px; height:7px; border-radius:50%; background:var(--warn); }
+
+  /* ---- Panneau gauche ---- */
+  .side{ grid-area:side; display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; background:var(--c1); border-right:1px solid var(--line2); }
+  .no-side .side{ display:none; }
+  .side-tools{ display:flex; align-items:center; gap:2px; height:36px; padding:0 8px; flex:none; }
+  .side-tools .hact{ display:flex; gap:2px; }
+  .side-instance{ flex:none; border-bottom:1px solid var(--line); }
+  .side-instance:empty{ display:none; }
+  .side-body{ flex:1; overflow-y:auto; overflow-x:hidden; min-height:0; padding:0 6px 8px; }
+  .side-foot{ flex:none; height:28px; border-top:1px solid var(--line); display:flex; align-items:center; gap:2px; padding:0 8px; font-size:11px; color:var(--t3); white-space:nowrap; overflow:hidden; }
+  .side-foot .fi{ display:inline-flex; align-items:center; gap:4px; padding:0 5px; height:20px; border-radius:4px; }
+  .side-foot .fi .ico{ width:12px; height:12px; }
+  .side-foot .fi.fade{ padding-right:14px; min-width:0; }
+  .app.running .side-foot{ background:var(--run); color:#fff; }
+  .sec-h{ display:flex; align-items:center; gap:4px; height:26px; padding:0 8px 0 6px; width:100%; text-align:left; margin-top:6px; }
+  .sec-h .ico{ width:12px; height:12px; color:var(--t3); transition:transform .12s; }
+  .sec.closed .sec-h .ico{ transform:rotate(-90deg); }
+  .sec.closed .sec-b{ display:none; }
+  .sec-h .cnt{ margin-left:auto; color:var(--t3); font-size:11px; font-variant-numeric:tabular-nums; }
+  .tr{ display:flex; align-items:center; gap:6px; height:24px; padding:0 8px; margin:0 2px; border-radius:5px; color:var(--t2); width:calc(100% - 4px); text-align:left; white-space:nowrap; overflow:hidden; }
+  .tr:hover{ background:var(--c3); color:var(--t1); }
+  .tr.sel{ background:var(--c3); color:var(--t1); }
+  .tr .ico{ width:14px; height:14px; color:var(--t3); }
+  .tr .lbl{ overflow:hidden; white-space:nowrap; min-width:0; padding-right:14px; -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 14px),transparent); mask-image:linear-gradient(90deg,#000 calc(100% - 14px),transparent); }
+  .tr .tail{ margin-left:auto; color:var(--t3); font-size:11px; font-variant-numeric:tabular-nums; display:flex; gap:6px; align-items:center; }
+  .tr[data-d="2"]{ padding-left:26px; }
+  .tr-row{ display:flex; align-items:center; gap:0; height:24px; margin:0 2px; border-radius:5px; color:var(--t2); }
+  .tr-row:hover{ background:var(--c3); color:var(--t1); }
+  .tr-row.sel{ background:var(--sel); color:var(--t1); }
+  .tr-row.cur{ background:var(--c3); color:var(--t1); }
+  .tr-row .tr-chev{ display:flex; align-items:center; justify-content:center; width:22px; height:24px; flex:none; color:var(--t3); border-radius:4px; }
+  .tr-row .tr-chev:hover{ color:var(--t1); background:var(--c4); }
+  .fav-star{ display:inline-flex; align-items:center; justify-content:center; width:22px; height:24px; flex:none; color:var(--t3); border-radius:4px; opacity:0; }
+  .tr-row:hover .fav-star, .inst-card:hover .fav-star{ opacity:1; }
+  .fav-star.on{ opacity:1; color:var(--warn); }
+  .fav-star:hover{ color:var(--t1); background:var(--c4); }
+  .fav-star.on:hover{ color:var(--warn); }
+  .fav-star .ico{ width:13px; height:13px; }
+  .ico.fill{ fill:currentColor; }
+  .tr-row .tr-label{ display:flex; align-items:center; gap:6px; flex:1; min-width:0; height:24px; padding-right:4px; text-align:left; overflow:hidden; }
+  .tr-row .tr-label .lbl{ overflow:hidden; white-space:nowrap; min-width:0; padding-right:14px; -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 14px),transparent); mask-image:linear-gradient(90deg,#000 calc(100% - 14px),transparent); }
+  .tr-row .tr-label .tail{ margin-left:auto; color:var(--t3); font-size:11px; font-variant-numeric:tabular-nums; display:flex; gap:6px; align-items:center; }
+  .tr-row.inst-row{ padding-left:20px; }
+  .tr-rename-input{ flex:1; min-width:0; height:20px; background:var(--c2); border:1px solid var(--sel-line); border-radius:4px; color:var(--t1); font-size:12.5px; font-family:var(--font-ui); padding:0 5px; }
+  .hd{ width:7px; height:7px; border-radius:50%; background:var(--green); display:inline-block; flex:none; }
+  .hd.warn{ background:var(--warn); } .hd.danger{ background:var(--danger); } .hd.idle{ background:var(--t3); }
+  .chan{ display:inline-flex; align-items:center; gap:4px; height:18px; padding:0 7px; border-radius:9px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; }
+  .chan.stable{ color:var(--green); background:color-mix(in srgb,var(--green) 14%,transparent); }
+  .chan.beta{ color:var(--warn); background:color-mix(in srgb,var(--warn) 14%,transparent); }
+  .chan.alpha{ color:var(--gen); background:color-mix(in srgb,var(--gen) 14%,transparent); }
+  .chan.xs{ height:15px; padding:0 5px; font-size:9px; }
+
+  /* Bloc loadout */
+  .lo{ padding:8px 8px 6px; display:flex; flex-direction:column; gap:7px; }
+  .lo-top{ display:flex; align-items:center; gap:8px; padding:0 2px; }
+  .lo-name{ font-weight:600; font-size:14px; display:flex; align-items:center; flex:1; min-width:0; text-align:left; border-radius:4px; padding:1px 4px; margin:-1px -4px; }
+  button.lo-name:hover{ background:var(--c3); color:var(--t1); }
+  .lo-row{ display:flex; gap:6px; }
+  .vsel{ flex:1; min-width:0; display:flex; align-items:center; gap:6px; height:28px; padding:0 8px; border-radius:6px; background:var(--c2); border:1px solid var(--line2); color:var(--t1); font-family:var(--font-mono); font-size:12px; }
+  .vsel:hover{ border-color:var(--t3); }
+  .vsel .ico{ width:12px; height:12px; color:var(--t3); }
+  .vsel .d{ font-family:var(--font-ui); font-size:11px; color:var(--warn); font-weight:600; white-space:nowrap; }
+  .vsel .d.ok{ color:var(--green); }
+  .save-btn{ height:28px; position:relative; }
+  .play-btn{ display:flex; align-items:center; justify-content:center; gap:8px; width:100%; height:32px; border-radius:6px; background:var(--green-btn); color:#fff; font-weight:600; font-size:13px; position:relative; }
+  .play-btn:hover{ background:var(--green-btn-h); }
+  .play-btn .ico{ fill:currentColor; stroke:none; width:13px; height:13px; }
+  .play-btn.stop{ background:var(--c4); color:var(--t1); }
+  .play-btn .dot{ top:6px; right:8px; }
+  .share-btn{ display:flex; align-items:center; justify-content:center; gap:6px; width:100%; height:26px; margin-top:6px; border-radius:6px; background:var(--c4); color:var(--t2); font-weight:500; font-size:11.5px; }
+  .share-btn:hover{ background:var(--c5); color:var(--t1); }
+  .share-btn .ico{ width:12px; height:12px; }
+  .lo .st{ display:flex; gap:9px; color:var(--t3); font-size:11.5px; flex-wrap:wrap; font-variant-numeric:tabular-nums; padding:0 2px; }
+  .lo .st b{ color:var(--t2); font-weight:500; }
+  .caps{ display:grid; grid-template-columns:repeat(5,1fr); gap:8px 5px; padding:6px 0 2px; }
+  .cap{ display:flex; flex-direction:column; align-items:center; gap:4px; min-width:0; border-radius:6px; padding:6px 3px 5px; }
+  .cap .ico{ width:15px; height:15px; color:var(--t4); }
+  .cap .row{ display:flex; align-items:center; justify-content:center; gap:4px; max-width:100%; }
+  .cap .lbl{ font-size:9.5px; color:var(--t3); line-height:1.15; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cap .ver{ font-size:8.5px; color:var(--t4); line-height:1.1; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cap .dot{ width:6px; height:6px; border-radius:50%; background:var(--t4); flex:none; }
+  .cap.on .ico{ color:#fff; } .cap.on .lbl{ color:var(--t2); } .cap.on .ver{ color:var(--t3); } .cap.on .dot{ background:var(--green); }
+
+  /* Popovers */
+  .pop{ position:fixed; background:var(--c3); border:1px solid var(--line2); border-radius:10px; box-shadow:var(--sh-float); padding:6px; z-index:45; display:none; min-width:220px; }
+  .pop.open{ display:block; }
+  .pop .it{ display:flex; align-items:center; gap:10px; min-height:30px; padding:4px 8px; border-radius:6px; font-size:12.5px; width:100%; text-align:left; color:var(--t1); }
+  .pop .it:hover{ background:var(--c4); }
+  .pop .it .ico{ width:14px; height:14px; color:var(--t3); }
+  .pop .it .sub{ display:block; font-size:11px; color:var(--t3); }
+  .pop .it.cur{ background:var(--sel); }
+  .pop .sep{ height:1px; background:var(--line); margin:4px 2px; }
+  .pop .it .mono{ color:var(--t1); }
+  #capdlpop{ width:290px; padding:10px; }
+  .cvhead{ display:flex; align-items:center; gap:9px; padding:2px 2px 8px; }
+  .cvhead .ico{ width:18px; height:18px; color:var(--t2); flex:none; }
+  .cvtitle{ font-weight:600; font-size:13px; }
+  .cvsub{ color:var(--t3); font-size:11px; margin-top:1px; }
+  .cvsec-h{ font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--t3); font-weight:600; padding:6px 2px 4px; }
+  .cvlist{ display:flex; flex-direction:column; gap:2px; max-height:160px; overflow:auto; }
+  .cvrow{ display:flex; align-items:center; gap:8px; width:100%; text-align:left; padding:6px 6px; border-radius:6px; font-size:12px; color:var(--t2); }
+  .cvrow:hover{ background:var(--c4); color:var(--t1); }
+  .cvrow .ico{ width:13px; height:13px; color:var(--t3); flex:none; }
+  .cvrow.cur .ico{ color:var(--green); }
+  .cvname{ flex:1; min-width:0; color:var(--t1); }
+  .cvnote{ color:var(--t3); font-size:10.5px; white-space:nowrap; }
+  .cvgo{ color:var(--t3); flex:none; }
+  .cvgo .ico{ width:12px; height:12px; }
+  .cvdrop{ display:flex; align-items:center; gap:10px; margin-top:8px; padding:10px; border-radius:8px; border:1px dashed var(--line2); color:var(--t3); }
+  .cvdrop .ico{ width:18px; height:18px; flex:none; color:var(--t3); }
+  .cvdrop b{ color:var(--t2); font-size:12px; font-weight:600; }
+  .cvdrop.over{ border-color:var(--accent); background:var(--sel); color:var(--t1); }
+  .cvdrop.over b{ color:var(--t1); }
+  .cvfoot{ display:flex; gap:6px; margin-top:9px; }
+  .cvfoot .btn{ flex:1; justify-content:center; }
+
+  /* ---- Zone centrale ---- */
+  .main{ grid-area:main; position:relative; min-width:0; min-height:0; background:var(--c2); }
+  .sheet{ position:absolute; inset:0; background:var(--c2); display:flex; flex-direction:column; overflow:hidden; transition:right .2s cubic-bezier(.2,.8,.2,1); }
+  @media (min-width:1280px){ .app:not(.no-right) .sheet{ right:356px; } }
+  .tabs{ display:flex; align-items:stretch; height:36px; padding:4px 8px 0; gap:2px; flex:none; }
+  .tabs-l{ display:flex; gap:2px; overflow-x:auto; scrollbar-width:none; min-width:0; }
+  .tabs-l::-webkit-scrollbar{ display:none; }
+  .tabs-r{ margin-left:auto; display:flex; align-items:center; gap:2px; padding-bottom:2px; }
+  .tab{ display:flex; align-items:center; gap:7px; padding:0 10px; border-radius:6px 6px 0 0; color:var(--t3); font-size:12.5px; white-space:nowrap; position:relative; }
+  .tab:hover{ color:var(--t1); background:var(--c3); }
+  .tab[aria-selected="true"]{ color:var(--t1); }
+  .tab[aria-selected="true"]::after{ content:""; position:absolute; left:8px; right:8px; bottom:0; height:2px; border-radius:2px; background:var(--accent); }
+  .tab .ico{ width:14px; height:14px; }
+  .tab .x{ width:18px; height:18px; display:grid; place-items:center; border-radius:4px; color:var(--t3); opacity:0; margin-right:-4px; }
+  .tab:hover .x, .tab[aria-selected="true"] .x{ opacity:1; }
+  .tab .x:hover{ background:var(--c4); color:var(--t1); }
+  .tab .cnt{ font-size:10.5px; padding:0 5px; border-radius:8px; background:var(--c4); color:var(--t2); font-variant-numeric:tabular-nums; }
+  .tab .cnt.bad{ background:color-mix(in srgb,var(--danger) 22%,transparent); color:var(--danger); }
+  .tab .cnt.warn{ background:color-mix(in srgb,var(--warn) 22%,transparent); color:var(--warn); }
+  .ti{ display:inline-flex; align-items:center; gap:4px; height:24px; padding:0 6px; border-radius:6px; white-space:nowrap; color:var(--t3); font-size:11.5px; }
+  .ti:hover{ background:var(--c3); color:var(--t1); }
+  .ti[aria-pressed="true"]{ background:var(--c3); color:var(--t1); }
+  .ti .ico{ width:13px; height:13px; }
+  .ti.claude{ color:var(--claude); }
+  .ti .n{ font-variant-numeric:tabular-nums; }
+  .ti .bad-n{ color:var(--danger); display:inline-flex; } .ti .warn-n{ color:var(--warn); display:inline-flex; }
+  .tbar{ display:flex; align-items:center; gap:6px; height:34px; padding:0 12px 0 14px; border-bottom:1px solid var(--line); flex:none; }
+  .crumbs{ display:flex; align-items:center; gap:4px; font-size:11.5px; color:var(--t3); white-space:nowrap; }
+  .crumbs .ico{ width:12px; height:12px; }
+  .crumbs b{ color:var(--t2); font-weight:500; }
+  .chipf{ display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 8px; border-radius:6px; color:var(--t2); font-size:12px; background:var(--c3); }
+  .chipf:hover{ background:var(--c4); color:var(--t1); }
+  .chipf[aria-pressed="true"]{ background:var(--sel); color:var(--t1); box-shadow:inset 0 0 0 1px var(--sel-line); }
+  .chipf .ico{ width:13px; height:13px; }
+  .content{ flex:1; min-height:0; overflow:auto; position:relative; }
+  .split-wrap{ display:flex; flex:1; min-height:0; }
+  .split-pane{ flex:1; min-width:0; display:flex; flex-direction:column; overflow:hidden; }
+  .split-pane + .split-pane{ border-left:1px solid var(--line2); }
+  .split-head{ display:flex; align-items:center; gap:6px; height:26px; padding:0 6px 0 12px; font-size:11.5px; color:var(--t3); flex:none; border-bottom:1px solid var(--line); }
+  .split-head .ico{ width:13px; height:13px; }
+
+  /* grille des mods */
+  .grid{ display:grid; grid-template-columns:20px 28px 44px minmax(210px,36%) 200px 92px 118px minmax(80px,1fr); min-width:820px; }
+  .gh{ display:contents; }
+  .gh > div{ position:sticky; top:0; z-index:2; background:var(--c2); border-bottom:1px solid var(--line2); padding:0 8px; height:26px; display:flex; align-items:center; font-size:11px; color:var(--t3); font-weight:600; }
+  .row{ display:contents; }
+  .row > div{ height:var(--row); display:flex; align-items:center; padding:0 8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border-bottom:1px solid var(--line); }
+  .row:hover > div{ background:var(--c3); }
+  .row.sel > div{ background:var(--sel); }
+  .row.sel > div:first-child{ box-shadow:inset 2px 0 0 var(--sel-line); }
+  .row.off > div{ color:var(--t3); }
+  .row .grip{ color:var(--t3); opacity:0; cursor:grab; padding:0 2px; }
+  .row:hover .grip{ opacity:.8; }
+  .row .pri{ font-family:var(--font-mono); font-size:11px; color:var(--t3); justify-content:flex-end; }
+  .row .nm{ gap:6px; }
+  .row .nm .t{ overflow:hidden; white-space:nowrap; min-width:0; padding-right:14px; -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 14px),transparent); mask-image:linear-gradient(90deg,#000 calc(100% - 14px),transparent); }
+  .row .nm .gen{ color:var(--gen); } .row .nm .note{ color:var(--t3); }
+  .row .nm .tools{ display:inline-flex; gap:1px; opacity:0; flex:none; margin-left:auto; padding-left:6px; }
+  .row:hover .nm .tools, .row.sel .nm .tools{ opacity:1; }
+  .row .nm .tools .tb{ width:20px; height:20px; color:var(--t3); }
+  .row .nm .tools .tb:hover{ color:var(--t1); background:var(--c4); }
+  .row .nm .tools .tb .ico{ width:12px; height:12px; }
+  .row .nm .tools .tb.cfg{ color:var(--accent); }
+  .row .ver{ font-family:var(--font-mono); font-size:11.5px; color:var(--t2); }
+  .row .cat{ color:var(--t2); font-size:12px; }
+  .row .src{ color:var(--t3); font-size:11.5px; gap:4px; }
+  .sep{ display:contents; }
+  .sep > div{ grid-column:1 / -1; height:26px; display:flex; align-items:center; gap:8px; padding:6px 8px 0 12px; font-size:11px; font-weight:600; color:var(--t3); letter-spacing:.04em; text-transform:uppercase; }
+  .sep > div .cnt{ font-weight:400; }
+  .chk{ width:14px; height:14px; border-radius:3px; border:1px solid var(--line2); display:grid; place-items:center; background:var(--c3); }
+  .chk.on{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  .chk.on .ico{ stroke-width:3; }
+  .flags{ gap:4px; }
+  .badge{ display:inline-flex; align-items:center; gap:3px; height:18px; padding:0 6px; border-radius:9px; font-size:11px; font-variant-numeric:tabular-nums; border:1px solid transparent; line-height:1; }
+  .badge.win{ color:var(--win); border-color:color-mix(in srgb,var(--win) 40%,transparent); background:color-mix(in srgb,var(--win) 9%,transparent); }
+  .badge.lose{ color:var(--lose); border-color:color-mix(in srgb,var(--lose) 40%,transparent); background:color-mix(in srgb,var(--lose) 9%,transparent); }
+  .badge.both{ color:var(--t1); background:linear-gradient(90deg,color-mix(in srgb,var(--win) 22%,transparent),color-mix(in srgb,var(--lose) 22%,transparent)); border-color:var(--line2); }
+  .badge.plug{ color:var(--t2); border-color:var(--line2); font-family:var(--font-mono); font-size:10.5px; }
+  .badge.upd{ color:var(--warn); border-color:color-mix(in srgb,var(--warn) 40%,transparent); }
+  .badge.bad{ color:var(--danger); border-color:color-mix(in srgb,var(--danger) 40%,transparent); background:color-mix(in srgb,var(--danger) 9%,transparent); }
+  .badge.root{ color:var(--t3); border-color:var(--line2); font-size:10px; text-transform:uppercase; letter-spacing:.04em; }
+  .badge .ico{ width:11px; height:11px; }
+  .prow{ display:grid; grid-template-columns:20px 28px 44px minmax(220px,1fr) 110px 100px; align-items:center; height:var(--row); padding:0 8px; border-bottom:1px solid var(--line); }
+  .prow:hover{ background:var(--c3); }
+  .prow .pn{ font-family:var(--font-mono); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:0 8px; display:flex; gap:8px; align-items:center; }
+  .prow.off .pn{ color:var(--t3); }
+  .tc{ font-family:var(--font-mono); font-size:10.5px; padding:1px 5px; border-radius:3px; border:1px solid var(--line2); color:var(--t2); }
+  .tc.esm{ color:var(--accent); border-color:color-mix(in srgb,var(--accent) 40%,transparent); }
+  .tc.esl{ color:var(--gen); border-color:color-mix(in srgb,var(--gen) 40%,transparent); }
+  .srow{ display:grid; grid-template-columns:24px minmax(220px,1fr) 130px 90px 150px auto; align-items:center; gap:8px; height:34px; padding:0 12px; border-bottom:1px solid var(--line); font-size:12.5px; }
+  .srow:hover{ background:var(--c3); }
+  .srow .ico{ color:var(--t3); }
+  .srow > div{ min-width:0; }
+  .srow .sub{ font-size:11px; color:var(--t3); overflow:hidden; white-space:nowrap; padding-right:14px; -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 14px),transparent); mask-image:linear-gradient(90deg,#000 calc(100% - 14px),transparent); }
+  .srow .acts{ display:flex; gap:4px; justify-content:flex-end; }
+  .diag{ padding:10px 14px; display:flex; flex-direction:column; gap:6px; }
+  .dcard{ display:grid; grid-template-columns:18px 1fr auto; gap:0 10px; align-items:start; background:var(--c3); border-radius:8px; padding:9px 12px; }
+  .dcard .sv{ color:var(--sev); padding-top:2px; } .dcard .ttl{ font-weight:600; }
+  .dcard .ev{ color:var(--t2); font-size:12px; margin-top:2px; } .dcard .ev .mono{ color:var(--t1); }
+  .dcard .act{ display:flex; gap:6px; }
+  .empty{ height:100%; display:grid; place-items:center; text-align:center; color:var(--t3); padding:40px; }
+  .empty h3{ margin:8px 0 4px; color:var(--t2); font-weight:600; font-size:13px; } .empty p{ margin:0; max-width:40ch; font-size:12.5px; }
+  .modpage{ padding:18px 22px 30px; display:flex; flex-direction:column; gap:14px; }
+  .modpage h1{ margin:0; font-size:20px; font-weight:600; letter-spacing:-.01em; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .modpage .sub{ display:flex; gap:12px; color:var(--t3); font-size:12px; flex-wrap:wrap; }
+  .box{ border-radius:8px; background:var(--c3); overflow:hidden; }
+  .box > .bh{ display:flex; align-items:center; gap:8px; padding:8px 12px 4px; font-weight:600; font-size:12px; } .box > .bh .cnt{ color:var(--t3); font-weight:400; }
+  .box .br{ display:grid; grid-template-columns:140px 1fr; gap:4px 10px; padding:6px 12px 10px; font-size:12.5px; } .box .br dt{ color:var(--t3); } .box .br dd{ margin:0; }
+  .why{ padding:4px 12px 10px; font-size:12.5px; color:var(--t2); } .why b{ color:var(--t1); font-weight:600; }
+  .cfl > div{ display:grid; grid-template-columns:auto 1fr; gap:10px; padding:6px 12px 8px; align-items:start; }
+  .cfl ul{ margin:4px 0 0; padding:0; list-style:none; font-family:var(--font-mono); font-size:11px; color:var(--t3); }
+  .cfg-row{ display:grid; grid-template-columns:200px 1fr auto; gap:10px; align-items:center; padding:5px 12px; border-top:1px solid var(--line); font-size:12px; }
+  .cfg-row input{ background:var(--c2); border:1px solid var(--line2); border-radius:5px; color:var(--t1); padding:3px 8px; font-family:var(--font-mono); font-size:11.5px; width:100%; }
+  .home{ padding:20px 24px 30px; } .home h1{ margin:0 0 2px; font-size:20px; font-weight:600; } .home .sub{ color:var(--t3); margin:0 0 16px; font-size:12.5px; }
+  .hgrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:10px; }
+  .gcard{ text-align:left; border-radius:8px; background:var(--c3); padding:12px; display:grid; grid-template-columns:44px 1fr; gap:4px 12px; }
+  .gcard:hover{ background:var(--c4); }
+  .gcard .cv{ grid-row:1 / span 3; width:44px; height:44px; border-radius:7px; background:linear-gradient(145deg,var(--c1g),var(--c2g)); display:grid; place-items:center; color:#fff; font-weight:700; font-size:13px; letter-spacing:.04em; }
+  .gcard .nm{ font-weight:600; display:flex; align-items:center; gap:8px; min-width:0; } .gcard .st{ color:var(--t3); font-size:11.5px; } .gcard .lo2{ color:var(--t2); font-size:12px; }
+
+  /* Tableau de bord par jeu */
+  .dash{ padding:0 0 32px; }
+  .dpad{ padding:18px 22px 0; }
+  .dash .dh{ font-size:12px; font-weight:600; color:var(--t3); text-transform:uppercase; letter-spacing:.03em; margin:22px 0 9px; }
+  .dash .dh:first-child{ margin-top:0; }
+  .dash .dh .cnt{ text-transform:none; font-weight:400; }
+  .dash .dh.row2{ display:flex; align-items:center; gap:6px; }
+  .sortb{ display:inline-flex; align-items:center; gap:5px; height:22px; padding:0 8px; margin-left:auto; border-radius:6px; color:var(--t3); font-size:11.5px; text-transform:none; letter-spacing:0; font-weight:500; }
+  .sortb:hover{ background:var(--c3); color:var(--t1); }
+  .sortb .ico{ width:12px; height:12px; }
+  .ghero{ position:relative; padding:24px 22px 20px; overflow:hidden; border-bottom:1px solid var(--line); background:var(--c2); }
+  .ghero > .ghero-bg{ position:absolute; inset:-20px; z-index:0; pointer-events:none; background-size:cover; background-position:center; filter:blur(10px) saturate(1.05) brightness(.85); transform:scale(1.06); }
+  .ghero::after{ content:""; position:absolute; inset:0; z-index:1; pointer-events:none; background:linear-gradient(115deg,color-mix(in srgb,var(--c1g) 30%,transparent),transparent 62%),radial-gradient(ellipse at 100% 0%,color-mix(in srgb,var(--c2g) 46%,transparent),transparent 66%); }
+  .ghero.has-art::after{ background:linear-gradient(115deg,rgba(0,0,0,.4) 0%,rgba(0,0,0,.1) 45%,transparent 68%),radial-gradient(ellipse at 100% 0%,rgba(0,0,0,.18),transparent 66%); }
+  .ghero > .ghero-top, .ghero > .qa{ position:relative; z-index:2; }
+  .ghero-top{ display:flex; align-items:stretch; gap:16px; min-width:0; }
+  .ghero-top .ginfo{ flex:1; min-width:0; }
+  .ghero .art{ flex:0 0 auto; align-self:stretch; width:92px; height:92px; border-radius:9px; background:linear-gradient(145deg,var(--c1g),var(--c2g)); background-size:cover; background-position:center; display:grid; place-items:center; color:#fff; font-weight:700; font-size:22px; letter-spacing:.06em; box-shadow:0 6px 16px rgba(0,0,0,.28); }
+  .ghero .art.has-img{ width:auto; height:auto; aspect-ratio:460/215; max-width:340px; min-width:140px; }
+  .ghero h1{ margin:0; font-size:20px; font-weight:600; letter-spacing:-.01em; line-height:1.2; display:flex; align-items:center; min-width:0; }
+  .ghero .meta{ display:flex; gap:10px; flex-wrap:wrap; color:var(--t3); font-size:12px; margin-top:4px; min-width:0; }
+  .ghero .meta b{ color:var(--t2); font-weight:500; }
+  .ghero .stats{ display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; min-width:0; }
+  .ghero .qa{ margin-top:16px; }
+  .stat{ display:flex; flex-direction:column; gap:2px; padding:6px 10px; border-radius:7px; background:color-mix(in srgb,var(--c2) 72%,transparent); border:1px solid var(--line); min-width:112px; text-align:left; }
+  .stat .k{ font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--t3); font-weight:600; white-space:nowrap; }
+  .stat .v{ font-size:13px; font-weight:600; color:var(--t1); font-variant-numeric:tabular-nums; display:flex; align-items:center; gap:6px; white-space:nowrap; }
+  .stat .v .ico{ width:13px; height:13px; }
+  .stat.ok .v{ color:var(--green); } .stat.warn .v{ color:var(--warn); } .stat.bad .v{ color:var(--danger); }
+  button.stat:hover{ border-color:var(--t3); background:var(--c4); }
+  .qa{ display:flex; flex-wrap:wrap; gap:8px; }
+  .inst-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:8px; }
+  .inst-card{ display:flex; align-items:center; gap:10px; height:58px; padding:8px; text-align:left; border:1px solid var(--line2); border-radius:8px; background:var(--c3); cursor:pointer; min-width:0; }
+  .inst-card:hover{ border-color:var(--t3); background:var(--c4); }
+  .inst-card.cur{ border-color:var(--sel-line); background:var(--sel); }
+  .inst-card .thumb{ width:40px; height:40px; border-radius:6px; flex:none; background:linear-gradient(145deg,var(--c1g),var(--c2g)); display:grid; place-items:center; color:#fff; font-weight:700; font-size:11px; letter-spacing:.04em; }
+  .inst-card .ic-body{ flex:1; min-width:0; display:flex; flex-direction:column; gap:3px; }
+  .inst-card .ic-top{ display:flex; align-items:center; gap:6px; min-width:0; }
+  .inst-card .ic-top .t{ font-weight:600; font-size:12.5px; flex:1; }
+  .inst-card .ic-meta{ color:var(--t3); font-size:11px; display:flex; align-items:center; gap:8px; }
+  .inst-card .ic-meta .on{ color:var(--green); }
+  .inst-card .fav-star{ align-self:center; }
+  .inst-card.add{ justify-content:center; gap:6px; color:var(--t3); border-style:dashed; }
+  .inst-card.add:hover{ color:var(--t1); }
+  .tools-row{ display:grid; grid-template-columns:repeat(auto-fill,minmax(88px,1fr)); gap:8px; }
+  .tool-chip{ display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:14px 6px 10px; border-radius:8px; background:var(--c3); border:1px solid var(--line); font-size:11.5px; color:var(--t2); text-align:center; }
+  .tool-chip .ico{ width:22px; height:22px; }
+  .tool-chip span{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+  .tool-chip:hover{ color:var(--t1); background:var(--c4); border-color:var(--t3); }
+  .dsel-row{ display:flex; flex-wrap:wrap; gap:14px; margin-top:20px; }
+  .dsel{ display:flex; flex-direction:column; gap:5px; min-width:180px; flex:1; max-width:260px; }
+  .dsel .dsel-lbl{ font-size:11px; color:var(--t3); }
+  .dsel .dsel-btn{ display:flex; align-items:center; gap:8px; width:100%; height:32px; padding:0 10px; border-radius:6px; background:var(--c3); border:1px solid var(--line2); font-size:12.5px; color:var(--t1); font-family:var(--font-mono); }
+  .dsel .dsel-btn:hover{ border-color:var(--t3); background:var(--c4); }
+  .dsel .dsel-btn .ico{ color:var(--t3); }
+
+  /* Panneau droit flottant */
+  .right{ position:absolute; top:36px; right:8px; bottom:8px; width:340px; background:var(--c3); border:1px solid var(--line2); border-radius:var(--r); box-shadow:var(--sh-float); display:flex; flex-direction:column; overflow:hidden; z-index:6; }
+  .no-right .right{ display:none; }
+  .rhead{ display:flex; align-items:center; height:38px; padding:4px 6px 0 8px; gap:2px; }
+  .rhead .tab{ border-radius:6px; padding:0 9px; height:28px; } .rhead .tab[aria-selected="true"]{ background:var(--c4); } .rhead .tab[aria-selected="true"]::after{ display:none; }
+  .rbody{ flex:1; overflow:auto; min-height:0; padding:4px 0 10px; }
+  .rsec .sec-h{ height:26px; padding-left:10px; margin-top:4px; } .rsec .sec-b{ padding:2px 14px 8px; }
+  .kv{ display:grid; grid-template-columns:96px 1fr; gap:5px 10px; font-size:12px; } .kv dt{ color:var(--t3); } .kv dd{ margin:0; overflow-wrap:anywhere; }
+  .rtitle{ padding:6px 14px 8px; } .rtitle .eyebrow{ font-size:11px; color:var(--t3); }
+  .rtitle h2{ margin:2px 0 4px; font-size:15px; font-weight:600; line-height:1.25; text-wrap:balance; }
+  .rtitle .line{ display:flex; gap:8px; color:var(--t3); font-size:12px; flex-wrap:wrap; align-items:center; }
+  .callout{ background:var(--c2); border-radius:8px; padding:9px 11px; font-size:12.5px; color:var(--t2); } .callout b{ color:var(--t1); font-weight:600; }
+  .hist{ list-style:none; margin:0; padding:0; }
+  .hist li{ display:grid; grid-template-columns:12px 1fr; gap:8px; padding:5px 0; font-size:12px; }
+  .hist .dot2{ width:7px; height:7px; border-radius:50%; background:var(--t3); margin-top:5px; justify-self:center; }
+  .hist .dot2.claude{ background:var(--claude); } .hist .dot2.you{ background:var(--accent); }
+  .hist .when{ color:var(--t3); font-size:11px; }
+  .chat{ display:flex; flex-direction:column; height:100%; }
+  .chat .msgs{ flex:1; overflow:auto; padding:8px 14px; display:flex; flex-direction:column; gap:10px; }
+  .msg{ font-size:12.5px; line-height:1.5; }
+  .msg.me{ align-self:flex-end; background:var(--c4); border-radius:10px 10px 2px 10px; padding:7px 10px; max-width:90%; }
+  .msg.ai .who{ display:flex; align-items:center; gap:6px; color:var(--claude); font-size:11px; font-weight:600; margin-bottom:4px; }
+  .plan-card{ border-radius:8px; background:var(--c2); overflow:hidden; margin-top:6px; box-shadow:0 0 0 1px color-mix(in srgb,var(--claude) 35%,transparent); }
+  .plan-card .ph{ display:flex; align-items:center; gap:8px; padding:7px 10px; font-weight:600; font-size:12px; } .plan-card .ph .mono{ margin-left:auto; color:var(--t3); font-size:11px; }
+  .plan-card pre{ margin:0; padding:2px 10px 8px; font-family:var(--font-mono); font-size:11px; color:var(--t2); line-height:1.6; white-space:pre-wrap; }
+  .plan-card .pf{ display:flex; gap:6px; padding:8px 10px; border-top:1px solid var(--line); }
+  .chat .in{ margin:8px 12px 4px; border-radius:10px; background:var(--c2); padding:8px 10px; display:flex; flex-direction:column; gap:6px; box-shadow:0 0 0 1px var(--line2); }
+  .chat .in input{ background:none; border:0; color:var(--t1); outline:none; } .chat .in .row2{ display:flex; gap:6px; align-items:center; color:var(--t3); font-size:11px; }
+
+  /* Dock : panneau du bas, palette ancrée, bandeau d'activité, composeur, suggestions */
+  .dock{ position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:5; display:flex; flex-direction:column; align-items:center; gap:8px; width:min(720px,calc(100% - 32px)); pointer-events:none; transition:left .2s cubic-bezier(.2,.8,.2,1); }
+  .dock > *, .composer-wrap > *{ pointer-events:auto; }
+  @media (min-width:1000px){ .app:not(.no-right) .dock{ left:calc(50% - 178px); } }
+  .tpanel{ display:none; flex-direction:column; overflow:hidden; width:100%; max-height:min(46vh,380px); background:var(--c3); border:1px solid var(--line2); border-radius:var(--r); box-shadow:var(--sh-float); }
+  .tpanel.open{ display:flex; }
+  .tp-bar{ display:flex; align-items:center; height:36px; padding:4px 6px 0 8px; gap:2px; }
+  .tp-bar .tab{ border-radius:6px; padding:0 9px; height:28px; } .tp-bar .tab[aria-selected="true"]{ background:var(--c4); } .tp-bar .tab[aria-selected="true"]::after{ display:none; }
+  .tp-body{ overflow:auto; padding:6px 10px 10px; display:flex; flex-direction:column; gap:6px; }
+  .tx{ display:grid; grid-template-columns:1fr auto; gap:3px 12px; background:var(--c2); border-radius:8px; padding:9px 12px; align-items:center; }
+  .tx.claude{ box-shadow:0 0 0 1px color-mix(in srgb,var(--claude) 35%,transparent); }
+  .tx .t{ grid-column:1; grid-row:1; font-weight:600; display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; }
+  .tx .t .who{ font-size:10.5px; color:var(--claude); text-transform:uppercase; letter-spacing:.06em; }
+  .tx .d{ grid-column:1; color:var(--t2); font-size:12px; } .tx .acts{ grid-column:2; grid-row:1 / span 2; display:flex; gap:6px; align-items:center; }
+  .tx pre{ grid-column:1 / -1; margin:4px 0 0; padding:8px 10px; border-radius:6px; background:var(--c3); font-family:var(--font-mono); font-size:11px; color:var(--t2); line-height:1.6; white-space:pre-wrap; }
+  .tx pre .add{ color:var(--green); } .tx pre .cf{ color:var(--lose); } .tx pre .wn{ color:var(--win); }
+  .job{ display:grid; grid-template-columns:1fr auto; gap:4px 12px; background:var(--c2); border-radius:8px; padding:9px 12px; font-size:12.5px; }
+  .job .bar{ grid-column:1 / -1; height:4px; border-radius:2px; background:var(--c4); overflow:hidden; } .job .bar i{ display:block; height:100%; width:var(--p); background:var(--accent); }
+  .console{ font-family:var(--font-mono); font-size:11.5px; color:var(--t2); background:var(--c2); border-radius:8px; padding:8px 10px; line-height:1.6; }
+  .console .ts{ color:var(--t3); } .console .lv{ color:var(--accent); } .console .lv.w{ color:var(--warn); }
+  .prob > div{ display:grid; grid-template-columns:16px 1fr auto; gap:8px; align-items:center; height:26px; padding:0 6px; border-radius:5px; font-size:12.5px; } .prob > div:hover{ background:var(--c4); } .prob .mono{ color:var(--t3); font-size:11px; }
+  .composer-wrap{ display:flex; flex-direction:column; align-items:center; gap:6px; width:100%; transition:opacity .18s ease, transform .18s ease; }
+  .composer-wrap.hidden{ opacity:0; transform:translateY(14px); pointer-events:none; }
+  .achip{ display:flex; align-items:center; gap:6px; height:26px; padding:0 6px 0 10px; border-radius:13px; background:var(--c2); border:1px solid var(--line2); font-size:11px; color:var(--t2); position:relative; overflow:hidden; flex:0 1 auto; min-width:0; max-width:240px; }
+  .achip .pulse{ width:6px; height:6px; border-radius:50%; background:var(--warn); animation:pulse 1.6s ease-in-out infinite; flex:none; }
+  @keyframes pulse{ 0%,100%{ box-shadow:0 0 0 0 color-mix(in srgb,var(--warn) 45%,transparent);} 50%{ box-shadow:0 0 0 5px transparent;} }
+  .achip .txt{ flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--t1); } .achip .txt .muted{ margin-left:4px; }
+  .achip .btn.sm{ height:18px; padding:0 6px; font-size:10.5px; flex:none; }
+  .achip .bar{ position:absolute; left:0; bottom:0; height:2px; width:var(--p,0); background:var(--accent); }
+  .achip.claude{ color:var(--claude); } .achip.run{ background:var(--run); color:#fff; border-color:transparent; } .achip.run .txt{ color:#fff; } .achip.run .pulse{ background:#fff; animation:none; }
+  .achip .ico{ width:12px; height:12px; flex:none; }
+  .cp{ width:100%; background:var(--c3); border:1px solid var(--line2); border-radius:var(--r); box-shadow:var(--sh-float); overflow:hidden; display:none; flex-direction:column; }
+  .cp.open{ display:flex; }
+  .cp .list{ max-height:min(46vh,340px); overflow:auto; padding:6px; }
+  .cp .it{ display:grid; grid-template-columns:20px 1fr auto; gap:10px; align-items:center; height:30px; padding:0 8px; border-radius:6px; font-size:12.5px; width:100%; text-align:left; }
+  .cp .it:hover, .cp .it.cur{ background:var(--c4); }
+  .cp .it .ico{ width:14px; height:14px; color:var(--t3); } .cp .it .grp{ color:var(--t3); font-size:11px; margin-left:6px; } .cp .it .claude{ color:var(--claude); }
+  .cp .hint{ padding:6px 12px; border-top:1px solid var(--line); color:var(--t3); font-size:11px; display:flex; gap:12px; }
+  .composer{ display:flex; align-items:center; gap:8px; width:100%; height:46px; padding:0 12px 0 14px; border-radius:23px; background:var(--c3); border:1px solid var(--line2); color:var(--t2); font-size:13.5px; box-shadow:var(--sh-float); transition:box-shadow .15s; }
+  .composer.focus{ border-color:var(--sel-line); box-shadow:var(--sh-float), 0 0 0 3px var(--sel); }
+  .composer > .ico{ width:17px; height:17px; flex:none; color:var(--t3); }
+  .composer input{ flex:1; min-width:0; background:none; border:0; outline:none; color:var(--t1); font-size:13.5px; }
+  .composer input::placeholder{ color:var(--t3); }
+  .composer .tb{ width:28px; height:28px; color:var(--t3); flex:none; }
+  .composer-box{ width:100%; background:var(--c3); border:1px solid var(--line2); border-radius:23px; box-shadow:var(--sh-float); overflow:hidden; transition:box-shadow .15s; }
+  .composer-box.focus{ border-color:var(--sel-line); box-shadow:var(--sh-float), 0 0 0 3px var(--sel); }
+  .composer-box .composer{ border:0; box-shadow:none; border-radius:0; }
+  .composer-toolbar{ display:flex; align-items:center; gap:8px; padding:6px 12px 8px 14px; border-top:1px solid var(--line); }
+  .composer-wrap.cp-open .composer-toolbar{ display:none; }
+  .cb-add{ width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:transparent; color:var(--t3); font-size:18px; line-height:1; flex:none; }
+  .cb-add:hover{ background:var(--c4); color:var(--t1); }
+  .cb-select{ display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 8px; border-radius:12px; background:transparent; border:0; color:var(--t3); font-size:11.5px; }
+  .cb-select:hover{ color:var(--t1); background:var(--c4); }
+  .cb-select .ico{ width:11px; height:11px; }
+  .cb-claude{ display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 10px; border-radius:12px; background:transparent; border:1px solid var(--line2); color:var(--claude); font-size:11px; flex:none; }
+  .cb-claude:hover{ background:var(--c4); }
+  .cb-claude .ico{ width:11px; height:11px; }
+  .cb-claude.queued{ color:var(--warn); border-color:color-mix(in srgb,var(--warn) 40%,transparent); }
+  .cb-claude.queued:hover{ background:color-mix(in srgb,var(--warn) 12%,transparent); }
+
+  .tokens{ position:fixed; right:14px; top:14px; width:330px; max-height:80vh; overflow:auto; background:var(--c3); border:1px solid var(--line2); border-radius:10px; box-shadow:var(--sh-float); padding:12px 14px; z-index:30; display:none; }
+  .tokens.open{ display:block; } .tokens h3{ margin:0 0 6px; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--t3); }
+  .sw{ display:grid; grid-template-columns:20px 1fr auto; gap:8px; align-items:center; padding:2px 0; font-size:12px; } .sw i{ width:20px; height:20px; border-radius:4px; border:1px solid rgba(0,0,0,.3); } .sw .v{ font-family:var(--font-mono); font-size:11px; color:var(--t3); }
+  .tokens .lad{ display:flex; gap:4px; margin:6px 0 10px; } .tokens .lad i{ flex:1; height:24px; border-radius:5px; box-shadow:0 0 0 1px var(--line2); display:grid; place-items:center; font-size:9.5px; color:var(--t3); }
+  .toast{ position:fixed; left:50%; bottom:40px; transform:translate(-50%,6px); background:var(--c4); color:var(--t1); border:1px solid var(--line2); border-radius:8px; padding:7px 12px; font-size:12.5px; box-shadow:var(--sh-float); opacity:0; pointer-events:none; transition:opacity .15s, transform .15s; z-index:50; display:flex; gap:8px; align-items:center; max-width:80vw; }
+  .toast.show{ opacity:1; transform:translate(-50%,0); } .toast .ico{ color:var(--green); }
+  @media (prefers-reduced-motion:reduce){ *,*::before,*::after{ transition:none !important; animation:none !important; } }
+
+  /* ============ Mode Wireframes — noms des zones du shell ============ */
+  :root[data-wireframe="on"]{
+    --c1:#1c1c1c; --c2:#121212; --c3:#242424; --c4:#2e2e2e; --c5:#3a3a3a;
+    --sel:rgba(255,255,255,.08); --sel-line:#9a9a96;
+    --line:rgba(255,255,255,.16); --line2:rgba(255,255,255,.30);
+    --t1:#f0f0ee; --t2:#b8b8b4; --t3:#87877f; --t4:#5c5c58;
+    --accent:#b0b0aa; --green:#b0b0aa; --green-btn:#3a3a3a; --green-btn-h:#454545;
+    --warn:#b0b0aa; --danger:#b0b0aa; --info:#b0b0aa;
+    --win:#b0b0aa; --lose:#b0b0aa; --gen:#b0b0aa; --claude:#b0b0aa; --run:#3a3a3a;
+    --sh-float:none;
+    color-scheme:dark;
+  }
+  :root[data-wireframe="on"] .ico{ stroke-width:1.3; }
+  :root[data-wireframe="on"] .gcard .cv, :root[data-wireframe="on"] .ghero .art, :root[data-wireframe="on"] .inst-card .thumb{ background:var(--c4) !important; color:var(--t2); }
+  :root[data-wireframe="on"] .ghero::after, :root[data-wireframe="on"] .ghero-bg{ display:none; }
+  :root[data-wireframe="on"] [class]{ box-shadow:none !important; }
+  :root[data-wireframe="on"] .wf-zone, :root[data-wireframe="on"] .ghero,
+  :root[data-wireframe="on"] .side, :root[data-wireframe="on"] .side-tools, :root[data-wireframe="on"] .side-instance,
+  :root[data-wireframe="on"] .side-body, :root[data-wireframe="on"] .side-foot, :root[data-wireframe="on"] .main,
+  :root[data-wireframe="on"] .sheet, :root[data-wireframe="on"] .tabs, :root[data-wireframe="on"] .tabs-l,
+  :root[data-wireframe="on"] .tabs-r, :root[data-wireframe="on"] .tbar, :root[data-wireframe="on"] .content,
+  :root[data-wireframe="on"] .right, :root[data-wireframe="on"] .rhead, :root[data-wireframe="on"] .rbody,
+  :root[data-wireframe="on"] .dock, :root[data-wireframe="on"] .tpanel, :root[data-wireframe="on"] .tp-bar,
+  :root[data-wireframe="on"] .tp-body, :root[data-wireframe="on"] .composer-wrap,
+  :root[data-wireframe="on"] .composer, :root[data-wireframe="on"] .cp, :root[data-wireframe="on"] .composer-box,
+  :root[data-wireframe="on"] .composer-toolbar,
+  :root[data-wireframe="on"] .tokens, :root[data-wireframe="on"] .toast, :root[data-wireframe="on"] .pop,
+  :root[data-wireframe="on"] .grid, :root[data-wireframe="on"] .qa, :root[data-wireframe="on"] .inst-grid,
+  :root[data-wireframe="on"] .dsel-row, :root[data-wireframe="on"] .tools-row, :root[data-wireframe="on"] .caps
+  { position:relative; outline:1px dashed #9a9a96; outline-offset:-1px; }
+  :root[data-wireframe="on"] .side::before{ content:"Side panel"; }
+  :root[data-wireframe="on"] .side-tools::before{ content:"Side toolbar"; }
+  :root[data-wireframe="on"] .side-instance::before{ content:"Instance info"; }
+  :root[data-wireframe="on"] .side-body::before{ content:"Side accordions"; }
+  :root[data-wireframe="on"] .side-foot::before{ content:"Side footer"; }
+  :root[data-wireframe="on"] .tabs::before{ content:"Tabs bar"; }
+  :root[data-wireframe="on"] .tabs-r::before{ content:"Tab indicators"; }
+  :root[data-wireframe="on"] .tbar::before{ content:"Content toolbar"; }
+  :root[data-wireframe="on"] .content::before{ content:"Content area"; }
+  :root[data-wireframe="on"] .right::before{ content:"Right panel"; }
+  :root[data-wireframe="on"] .rhead::before{ content:"Right panel header"; }
+  :root[data-wireframe="on"] .rbody::before{ content:"Right panel body"; }
+  :root[data-wireframe="on"] .dock::before{ content:"Dock"; }
+  :root[data-wireframe="on"] .tpanel::before{ content:"Bottom panel"; }
+  :root[data-wireframe="on"] .tp-bar::before{ content:"Bottom panel tabs"; }
+  :root[data-wireframe="on"] .tp-body::before{ content:"Bottom panel body"; }
+  :root[data-wireframe="on"] .composer-wrap::before{ content:"Composer wrap"; }
+  :root[data-wireframe="on"] .cp::before{ content:"Command palette"; }
+  :root[data-wireframe="on"] .composer-box::before{ content:"Composer box"; }
+  :root[data-wireframe="on"] .composer-toolbar::before{ content:"Composer toolbar"; }
+  :root[data-wireframe="on"] .tokens::before{ content:"Tokens panel"; }
+  :root[data-wireframe="on"] .toast::before{ content:"Toast"; }
+  :root[data-wireframe="on"] .pop::before{ content:"Popover"; }
+  :root[data-wireframe="on"] .grid::before{ content:"Data grid"; }
+  :root[data-wireframe="on"] .qa::before{ content:"Quick actions"; }
+  :root[data-wireframe="on"] .inst-grid::before{ content:"Instances grid"; }
+  :root[data-wireframe="on"] .dsel-row::before{ content:"Config selects"; }
+  :root[data-wireframe="on"] .tools-row::before{ content:"Tools row"; }
+  :root[data-wireframe="on"] .caps::before{ content:"Engine & indicators"; }
+  :root[data-wireframe="on"] .ghero::before{ content:"Game header"; }
+  :root[data-wireframe="on"] .ghero::before,
+  :root[data-wireframe="on"] .side::before, :root[data-wireframe="on"] .side-tools::before,
+  :root[data-wireframe="on"] .side-instance::before, :root[data-wireframe="on"] .side-body::before,
+  :root[data-wireframe="on"] .side-foot::before,
+  :root[data-wireframe="on"] .tabs::before, :root[data-wireframe="on"] .tabs-r::before,
+  :root[data-wireframe="on"] .tbar::before, :root[data-wireframe="on"] .content::before,
+  :root[data-wireframe="on"] .right::before, :root[data-wireframe="on"] .rhead::before,
+  :root[data-wireframe="on"] .rbody::before, :root[data-wireframe="on"] .dock::before,
+  :root[data-wireframe="on"] .tpanel::before, :root[data-wireframe="on"] .tp-bar::before,
+  :root[data-wireframe="on"] .tp-body::before, :root[data-wireframe="on"] .composer-wrap::before,
+  :root[data-wireframe="on"] .cp::before, :root[data-wireframe="on"] .composer-box::before,
+  :root[data-wireframe="on"] .composer-toolbar::before,
+  :root[data-wireframe="on"] .tokens::before, :root[data-wireframe="on"] .toast::before,
+  :root[data-wireframe="on"] .pop::before, :root[data-wireframe="on"] .grid::before,
+  :root[data-wireframe="on"] .qa::before, :root[data-wireframe="on"] .inst-grid::before,
+  :root[data-wireframe="on"] .dsel-row::before, :root[data-wireframe="on"] .tools-row::before,
+  :root[data-wireframe="on"] .caps::before
+  { position:absolute; top:1px; left:1px; z-index:9999; background:#fff176; color:#1a1a1a; font:9.5px/1.5 var(--font-mono); letter-spacing:0; padding:0 4px; border:1px solid #9a9a2e; border-radius:0 0 3px 0; pointer-events:none; white-space:nowrap; }
+  :root[data-wireframe="on"] .tabs-r::before{ left:auto; right:1px; border-radius:0 0 0 3px; }
+</style>
+
+<div class="app no-right" id="app">
+  <aside class="side" id="side">
+    <div class="side-tools" id="side-tools"></div>
+    <div class="side-instance" id="side-instance"></div>
+    <div class="side-body" id="side-body"></div>
+    <div class="side-foot" id="side-foot"></div>
+  </aside>
+  <div class="main" id="main">
+    <div class="sheet" id="sheet"></div>
+    <aside class="right" id="right"></aside>
+    <div class="dock" id="dock">
+      <section class="tpanel" id="tpanel"><div class="tp-bar" id="tp-bar"></div><div class="tp-body" id="tp-body"></div></section>
+      <div class="composer-wrap" id="composer-wrap">
+        <div class="cp" id="cp"><div class="list" id="cp-list"></div><div class="hint"><span><span class="kbd">↑↓</span> naviguer</span><span><span class="kbd">↵</span> exécuter</span><span><span class="kbd">Esc</span> fermer</span><span class="spacer"></span><span>› pour Claude</span></div></div>
+        <div class="composer-box" id="composer-box">
+          <div class="composer" id="composer"><svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><button class="tb" id="composer-panel" title="Console" aria-pressed="false"><svg class="ico" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg></button><input id="cp-in" placeholder="Rechercher, commander, demander à Claude…" autocomplete="off"><span class="kbd">Ctrl K</span></div>
+          <div class="composer-toolbar" id="composer-toolbar"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="pop" id="appmenu" role="menu"></div>
+<div class="pop" id="vpop" role="menu"></div>
+<div class="pop" id="chpop" role="menu"></div>
+<div class="pop" id="capdlpop" role="menu"></div>
+<div class="pop" id="gvpop" role="menu"></div>
+<div class="pop" id="evpop" role="menu"></div>
+<div class="pop" id="ldpop" role="menu"></div>
+<div class="pop" id="recpop" role="menu"></div>
+<div class="pop" id="llmpop" role="menu"></div>
+<div class="pop" id="sortpop" role="menu"></div>
+<div class="tokens" id="tokens" role="dialog" aria-label="Tokens"></div>
+<div class="toast" id="toast"><svg class="ico sm" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg><span id="toast-txt"></span></div>
+
+<script>
+(function(){
+  'use strict';
+  const P = {
+    layers:'<path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/>',
+    search:'<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+    branch:'<line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
+    alert:'<circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/>',
+    tri:'<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+    tool:'<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+    sparkle:'<path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>',
+    globe:'<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+    gear:'<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+    chev:'<path d="m6 9 6 6 6-6"/>', chevr:'<path d="m9 18 6-6-6-6"/>', menu:'<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/>',
+    flag:'<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/>',
+    zap:'<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>',
+    check:'<path d="M20 6 9 17l-5-5"/>', up:'<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>', x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+    note:'<path d="M15 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M15 3v5h5"/><path d="M8 13h8"/><path d="M8 17h8"/>',
+    grip:'<circle cx="9" cy="6" r="1" fill="currentColor"/><circle cx="15" cy="6" r="1" fill="currentColor"/><circle cx="9" cy="12" r="1" fill="currentColor"/><circle cx="15" cy="12" r="1" fill="currentColor"/><circle cx="9" cy="18" r="1" fill="currentColor"/><circle cx="15" cy="18" r="1" fill="currentColor"/>',
+    lock:'<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+    play:'<polygon points="6 3 20 12 6 21 6 3"/>', info:'<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+    box:'<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>',
+    file:'<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>',
+    home:'<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/>',
+    folder:'<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+    history:'<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
+    wand:'<path d="M15 4V2"/><path d="M15 16v-2"/><path d="M8 9h2"/><path d="M20 9h2"/><path d="M17.8 11.8 19 13"/><path d="M15 9h.01"/><path d="M17.8 6.2 19 5"/><path d="m3 21 9-9"/><path d="M12.2 6.2 11 5"/>',
+    dl:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
+    db:'<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>',
+    send:'<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>', term:'<polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>',
+    more:'<circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/><circle cx="5" cy="12" r="1" fill="currentColor"/>',
+    disc:'<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/>', sliders:'<line x1="4" x2="4" y1="21" y2="14"/><line x1="4" x2="4" y1="10" y2="3"/><line x1="12" x2="12" y1="21" y2="12"/><line x1="12" x2="12" y1="8" y2="3"/><line x1="20" x2="20" y1="21" y2="16"/><line x1="20" x2="20" y1="12" y2="3"/><line x1="2" x2="6" y1="14" y2="14"/><line x1="10" x2="14" y1="8" y2="8"/><line x1="18" x2="22" y1="16" y2="16"/>',
+    image:'<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>', map:'<path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/>',
+    flask:'<path d="M10 2v7.527a2 2 0 0 1-.211.896L4.72 20.55a1 1 0 0 0 .9 1.45h12.76a1 1 0 0 0 .9-1.45l-5.069-10.127A2 2 0 0 1 14 9.527V2"/><path d="M8.5 2h7"/><path d="M7 16h10"/>', shield:'<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
+    share:'<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="10.51" y2="6.49"/><line x1="8.59" x2="15.42" y1="13.49" y2="17.51"/>',
+    star:'<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+  };
+  const ic = (n, cls='') => `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[n]}</svg>`;
+
+  /* ---------- Données d'exemple ---------- */
+  const games = [
+    { id:'skyrimse', name:'Skyrim Special Edition', short:'Skyrim SE', glyph:'SK', art:'img/header_skyrim.jpg', c1:'#3b6ea5', c2:'#1a2f4d', health:'warn', ver:'1.6.1170 · Steam', last:'hier 22:04', size:'184 Go', backend:'USVFS', hours:'312 h', crashes:3,
+      loadouts:[{n:'Main 2026',ch:'stable',rev:142,fav:true,mods:47,played:'2026-09-14T22:04'},{n:'Labo météo',ch:'alpha',rev:139,mods:52,played:'2026-09-11T19:30'},{n:'Bench FG',ch:'beta',rev:131,mods:31,played:'2026-09-06T15:10'},{n:'Stable 2025',ch:'stable',rev:120,mods:44,played:'2026-07-20T21:00'}], lo:0,
+      tabs:[['dashboard','Tableau de bord','sliders'],['mods','Mods','layers'],['plugins','Plugins','file'],['archives','Archives','db'],['repertoire','Répertoire','folder'],['saves','Sauvegardes','disc'],['sante','Santé','alert']],
+      engine:{ name:'SKSE', installed:true, ver:'2.2.6', versions:[['2.2.6','recommandée',true],['2.2.3','',false],['2.0.20','pour 1.5.97',false]], dl:'skse.silverlock.org',
+        gameVersions:[['1.6.1170','Steam · actuelle',true],['1.5.97','nécessite un downgrader (Downgrader universel)',false]] },
+      caps:[['ENB','Rudy',true,'image',[['Rudy ENB 4.2','recommandée · Cathedral Weathers',true],['Rudy ENB 4.0','',false],['Kotokoto ENB 1.0','plus claire, moins de perf.',false]]],['DLSS','Qualité',true,'sparkle',[['Qualité','recommandé',true],['Équilibré','',false],['Performance','',false]]],['FG','DLSS 3',true,'flask'],['Shaders','désactivé',false,'wand',[['Community Shaders 1.2','',false]]]],
+      tools:[['LOOT','0.26'],['SSEEdit','4.1.6'],['Nemesis','0.84'],['Pandora','2.1'],['DynDOLOD','3.0'],['TexGen','3.0'],['xLODGen','111'],['BodySlide','1.9'],['Synthesis','0.30'],['Wrye Bash','313'],['BethINI Pie','4.3'],['Cathedral Assets Optimizer','5.3'],['NifSkope','2.0'],['Creation Kit','1.6'],['ReSaver','6.0'],['PACT','1.9']] },
+    { id:'mc', name:'Minecraft', short:'Minecraft', glyph:'MC', c1:'#5c8f3a', c2:'#2b3f1a', health:'ok', ver:'1.21.1 · Fabric 0.16.9', last:'il y a 2 jours', size:'9 Go', backend:'dossier mods/', hours:'88 h', crashes:0,
+      loadouts:[{n:'Survie Fabric 1.21',ch:'stable',rev:37,fav:true,mods:14,played:'2026-09-13T20:15'},{n:'Serveur Amis',ch:'beta',rev:12,mods:9,played:'2026-09-05T21:40'}], lo:0,
+      tabs:[['dashboard','Tableau de bord','sliders'],['mods','Mods','layers'],['packs','Packs & shaders','image'],['worlds','Mondes','map'],['servers','Serveurs','globe'],['sante','Santé','alert']],
+      engine:{ name:'Fabric', installed:true, ver:'0.16.9', loaders:[['Fabric','0.16.9',true],['Forge','',false],['NeoForge','21.1',false]], versions:[['0.16.9','recommandée',true],['0.15.11','',false]], dl:'fabricmc.net',
+        gameVersions:[['1.21.1','actuelle',true],['1.20.1','',false],['1.19.2','',false]] },
+      caps:[['Java','21 · 8 Go',true,'tool'],['Sodium','0.6',true,'zap',[['Sodium 0.6.0','recommandée',true],['Sodium 0.5.11','',false]]],['Iris','Complementary',true,'image',[['Iris 1.8.0','recommandée',true],['Iris 1.7.4','',false]]]],
+      tools:[['Prism Launcher','9.1'],['Modrinth App','0.9'],['CurseForge','1.2'],['Fabric Loader','0.16.9'],['NeoForge','21.1'],['Java 21','Temurin']] },
+    { id:'fo4', name:'Fallout 4', short:'Fallout 4', glyph:'F4', c1:'#7d8b3a', c2:'#2f3717', health:'ok', ver:'1.10.163 · Steam', last:'il y a 9 jours', size:'61 Go', backend:'USVFS', hours:'41 h', crashes:1, loadouts:[{n:'Survie',ch:'stable',rev:58,mods:23,played:'2026-09-06T18:20'}], lo:0,
+      tabs:[['dashboard','Tableau de bord','sliders'],['mods','Mods','layers'],['plugins','Plugins','file'],['sante','Santé','alert']],
+      engine:{ name:'F4SE', installed:true, ver:'0.6.23', versions:[['0.6.23','recommandée',true],['0.6.21','',false]], dl:'f4se.silverlock.org', gameVersions:[['1.10.163','Steam · actuelle',true]] },
+      caps:[], tools:[['LOOT','0.26'],['FO4Edit','4.1.6'],['BodySlide','1.9']] },
+    { id:'starfield', name:'Starfield', short:'Starfield', glyph:'SF', c1:'#5b5aa8', c2:'#24234a', health:'ok', ver:'1.15.216 · Steam', last:'il y a 3 sem.', size:'132 Go', backend:'USVFS', hours:'26 h', crashes:0, loadouts:[{n:'Vanilla+',ch:'stable',rev:9,mods:6,played:'2026-08-24T16:45'}], lo:0,
+      tabs:[['dashboard','Tableau de bord','sliders'],['mods','Mods','layers'],['plugins','Plugins','file'],['sante','Santé','alert']],
+      engine:{ name:'SFSE', installed:true, ver:'0.2.16', versions:[['0.2.16','recommandée',true]], dl:'sfse.silverlock.org', gameVersions:[['1.15.216','Steam · actuelle',true]] },
+      caps:[], tools:[['SF1Edit','4.1.6']] },
+    { id:'cp77', name:'Cyberpunk 2077', short:'Cyberpunk 2077', glyph:'CP', c1:'#a58f1f', c2:'#3d3508', health:'idle', ver:'2.3 · GOG', last:'jamais', size:'—', backend:'REDmod', hours:'0 h', crashes:0, loadouts:[], lo:-1, tabs:[['dashboard','Tableau de bord','sliders'],['mods','Mods','layers'],['sante','Santé','alert']], caps:[], tools:[['REDmod','1.0'],['WolvenKit','8.15']] },
+    { id:'tw3', name:'The Witcher 3: Wild Hunt', short:'The Witcher 3', glyph:'W3', c1:'#8a3a3a', c2:'#3a1616', health:'idle', ver:'4.04 · GOG', last:'jamais', size:'—', backend:'dossier mods/', hours:'0 h', crashes:0, loadouts:[], lo:-1, tabs:[['dashboard','Tableau de bord','sliders'],['mods','Mods','layers'],['sante','Santé','alert']], caps:[], tools:[['Script Merger','0.10'],['REDkit','1.0']] },
+    { id:'gta5', name:'Grand Theft Auto V', short:'GTA V', glyph:'V', c1:'#3a8f6e', c2:'#12241d', health:'idle', ver:'1.0.3521 · Steam', last:'jamais', size:'—', backend:'OpenIV / mods', hours:'0 h', crashes:0, loadouts:[], lo:-1, tabs:[['dashboard','Tableau de bord','sliders'],['mods','Mods','layers'],['sante','Santé','alert']], caps:[], tools:[['ScriptHookV','1.0.3521'],['OpenIV','4.2'],['Menyoo','SP']] },
+    { id:'stardew', name:'Stardew Valley', short:'Stardew Valley', glyph:'SV', c1:'#7aa23f', c2:'#2c3e17', health:'idle', ver:'1.6.15 · Steam', last:'jamais', size:'—', backend:'SMAPI mods/', hours:'0 h', crashes:0, loadouts:[], lo:-1, tabs:[['dashboard','Tableau de bord','sliders'],['mods','Mods','layers'],['sante','Santé','alert']], caps:[], tools:[['SMAPI','4.1.2'],['Content Patcher','2.5'],['Generic Mod Config Menu','1.14']] },
+    { id:'bg3', name:'Baldur’s Gate 3', short:'BG3', glyph:'BG3', c1:'#8a3f8f', c2:'#2e1533', health:'idle', ver:'4 · Steam', last:'jamais', size:'—', backend:'BG3 Mod Manager', hours:'0 h', crashes:0, loadouts:[], lo:-1, tabs:[['dashboard','Tableau de bord','sliders'],['mods','Mods','layers'],['sante','Santé','alert']], caps:[], tools:[['BG3 Mod Manager','r7'],['Script Extender','v19']] },
+    { id:'oblivionrm', name:'The Elder Scrolls IV: Oblivion Remastered', short:'Oblivion Remastered', glyph:'OB', c1:'#a3782f', c2:'#3a2a10', health:'idle', ver:'1.2 · Steam', last:'jamais', size:'—', backend:'UE4SS mods/', hours:'0 h', crashes:0, loadouts:[], lo:-1, tabs:[['dashboard','Tableau de bord','sliders'],['mods','Mods','layers'],['sante','Santé','alert']], caps:[], tools:[['UE4SS','3.0'],['Oblivion Remastered Mod Manager','1.0']] },
+    { id:'bannerlord', name:'Mount & Blade II: Bannerlord', short:'Bannerlord', glyph:'M2', c1:'#9a4a3a', c2:'#341813', health:'idle', ver:'1.2.12 · Steam', last:'jamais', size:'—', backend:'Modules/', hours:'0 h', crashes:0, loadouts:[], lo:-1, tabs:[['dashboard','Tableau de bord','sliders'],['mods','Mods','layers'],['sante','Santé','alert']], caps:[], tools:[['Bannerlord Launcher','1.2'],['BLSE','1.2']] },
+    { id:'rdr2', name:'Red Dead Redemption 2', short:'Red Dead 2', glyph:'R2', c1:'#8a6a3a', c2:'#2f2413', health:'idle', ver:'1.0.1436 · Steam', last:'jamais', size:'—', backend:'dossier mods/', hours:'0 h', crashes:0, loadouts:[], lo:-1, tabs:[['dashboard','Tableau de bord','sliders'],['mods','Mods','layers'],['sante','Santé','alert']], caps:[], tools:[['Lenny’s Mod Loader','0.10'],['ScriptHookRDR2','1.0']] },
+    { id:'eldenring', name:'Elden Ring', short:'Elden Ring', glyph:'ER', c1:'#a08a3f', c2:'#241f14', health:'idle', ver:'2.6 · Steam', last:'jamais', size:'—', backend:'Mod Engine 2', hours:'0 h', crashes:0, loadouts:[], lo:-1, tabs:[['dashboard','Tableau de bord','sliders'],['mods','Mods','layers'],['sante','Santé','alert']], caps:[], tools:[['Mod Engine 2','2.1'],['Seamless Co-op','1.11']] },
+  ];
+  const N='Nexus', PT='Patreon', T='Outil', MR='Modrinth', CF='CurseForge';
+  const modsByGame = {
+    skyrimse: [
+      { sep:'Fondations' },
+      { id:1, on:true, name:'SKSE64', ver:'2.2.6', cat:'Utilitaires', src:'skse.silverlock.org', win:0, lose:0, plugins:[], files:5, root:true },
+      { id:2, on:true, name:'Address Library for SKSE Plugins', ver:'11', cat:'Utilitaires', src:N, nexus:32444, win:0, lose:0, plugins:[], files:6 },
+      { id:3, on:true, name:'SSE Engine Fixes', ver:'6.1.1', cat:'Utilitaires', src:N, nexus:17230, win:0, lose:0, plugins:[], files:4, cfg:'EngineFixes.toml', root:true },
+      { id:4, on:true, name:'Unofficial Skyrim Special Edition Patch', ver:'4.3.3', cat:'Correctifs', src:N, nexus:266, win:12, lose:0, plugins:['USSEP.esp'], files:9412 },
+      { id:5, on:true, name:'PapyrusUtil SE', ver:'4.6', cat:'Utilitaires', src:N, nexus:13048, win:0, lose:0, plugins:[], files:3 },
+      { id:6, on:true, name:'ConsoleUtilSSE NG', ver:'1.5', cat:'Utilitaires', src:N, nexus:76649, win:0, lose:0, plugins:[], files:2 },
+      { id:7, on:true, name:"powerofthree's Papyrus Extender", ver:'5.6', cat:'Utilitaires', src:N, nexus:22854, win:0, lose:0, plugins:[], files:3 },
+      { id:8, on:true, name:"powerofthree's Tweaks", ver:'1.10', cat:'Utilitaires', src:N, nexus:51073, win:0, lose:0, plugins:[], files:3, cfg:'po3_Tweaks.ini' },
+      { id:9, on:true, name:'Bug Fixes SSE', ver:'5.1', cat:'Correctifs', src:N, nexus:33261, win:0, lose:0, plugins:[], files:2, cfg:'BugFixesSSE.ini' },
+      { id:10, on:true, name:'Scrambled Bugs', ver:'19', cat:'Correctifs', src:N, nexus:43532, win:0, lose:0, plugins:[], files:2, cfg:'ScrambledBugs.json' },
+      { id:11, on:true, name:'MCM Helper', ver:'1.5', cat:'Utilitaires', src:N, nexus:53000, win:0, lose:0, plugins:['MCMHelper.esp'], files:8 },
+      { sep:'Interface' },
+      { id:12, on:true, name:'SkyUI', ver:'5.2SE', cat:'Interface', src:N, nexus:12604, win:3, lose:1, plugins:['SkyUI_SE.esp'], files:71, upd:'5.2SE-fix' },
+      { id:13, on:true, name:'RaceMenu', ver:'0.4.19', cat:'Interface', src:N, nexus:19080, win:2, lose:0, plugins:['RaceMenu.esp','RaceMenuPlugin.esp'], files:220, cfg:'skee64.ini' },
+      { id:14, on:true, name:'Dear Diary Dark Mode', ver:'2.0.4', cat:'Interface', src:N, nexus:23010, win:0, lose:3, plugins:[], files:412 },
+      { id:15, on:true, name:'moreHUD SE', ver:'4.0.4', cat:'Interface', src:N, nexus:12688, win:0, lose:0, plugins:['AHZmoreHUD.esp'], files:24 },
+      { sep:'Visuel & météo' },
+      { id:16, on:true, name:'Cathedral Weathers and Seasons', ver:'2.31', cat:'Météo', src:N, nexus:24791, win:0, lose:0, plugins:['Cathedral Weathers.esm'], files:98 },
+      { id:17, on:true, name:'Lux', ver:'6.6', cat:'Éclairage', src:N, nexus:43158, win:0, lose:0, plugins:['Lux - Resources.esp','Lux.esp'], files:2160 },
+      { id:18, on:true, name:'Static Mesh Improvement Mod', ver:'2.08', cat:'Modèles', src:N, nexus:659, win:0, lose:27, plugins:['SMIM-SE-Merged-All.esp'], files:5210 },
+      { id:19, on:true, name:'Skyland AIO', ver:'5.1', cat:'Textures', src:N, nexus:44465, win:27, lose:0, plugins:[], files:3898 },
+      { id:20, on:true, name:'Majestic Mountains', ver:'4.03', cat:'Textures', src:N, nexus:11052, win:6, lose:2, plugins:['MajesticMountains.esp'], files:1180 },
+      { id:21, on:true, name:'Blended Roads', ver:'1.7', cat:'Textures', src:N, nexus:8834, win:0, lose:4, plugins:['Blended Roads.esp'], files:96 },
+      { id:22, on:true, name:'Realistic Water Two', ver:'5.7', cat:'Eau', src:N, nexus:2182, win:3, lose:0, plugins:['RealisticWaterTwo.esp'], files:640 },
+      { id:23, on:true, name:'Cathedral Landscapes', ver:'4.2', cat:'Textures', src:N, nexus:21954, win:0, lose:9, plugins:['Cathedral Landscapes.esp'], files:1420 },
+      { id:24, on:true, name:'Origins of Forest', ver:'1.4', cat:'Textures', src:N, nexus:16977, win:2, lose:0, plugins:['Origins Of Forest - 3D Forest Grass.esp'], files:230 },
+      { id:25, on:true, name:'Rudy ENB for Cathedral Weathers', ver:'4.2', cat:'ENB', src:N, nexus:4796, win:0, lose:0, plugins:[], files:38, root:true, cfg:'enbseries.ini' },
+      { id:26, on:true, name:'Skyrim Upscaler — DLSS FSR XeSS + Frame Generation', ver:'1.4.0', cat:'Perf', src:PT, win:0, lose:0, plugins:[], files:9, cfg:'SkyrimUpscaler.ini', root:true },
+      { id:27, on:false, name:'Community Shaders', ver:'1.2', cat:'Perf', src:N, nexus:86870, win:0, lose:0, plugins:[], files:140, cfg:'CommunityShaders.json', note:'Désactivé : incompatible avec ENB' },
+      { sep:'Monde & PNJ' },
+      { id:28, on:true, name:'JK’s Skyrim', ver:'1.6b', cat:'Villes', src:N, nexus:6289, win:2, lose:2, plugins:['JKs Skyrim.esp'], files:1723, upd:'1.7' },
+      { id:29, on:true, name:'Immersive Citizens — AI Overhaul', ver:'0.4.0.3', cat:'PNJ', src:N, nexus:173, win:0, lose:0, plugins:['Immersive Citizens - AI Overhaul.esp'], files:12 },
+      { id:30, on:true, name:'Inigo', ver:'2.4c', cat:'Compagnons', src:N, nexus:1461, win:0, lose:0, plugins:['1nivWICCloaks.esp'], files:812 },
+      { id:31, on:true, name:'Legacy of the Dragonborn', ver:'6.0.3', cat:'Quêtes', src:N, nexus:11802, win:4, lose:1, plugins:['LegacyoftheDragonborn.esm'], files:9800 },
+      { id:32, on:false, name:'Beyond Skyrim — Bruma', ver:'1.5.1', cat:'Quêtes', src:N, nexus:10917, win:0, lose:0, plugins:['BSAssets.esm','BSHeartland.esm','BS_DLC_patch.esp'], files:4300, note:'Désactivé pour ce personnage' },
+      { sep:'Gameplay & combat' },
+      { id:33, on:true, name:'Alternate Start — Live Another Life', ver:'4.2.3', cat:'Gameplay', src:N, nexus:272, win:0, lose:0, plugins:['Alternate Start - Live Another Life.esp'], files:44 },
+      { id:34, on:true, name:'Ordinator — Perks of Skyrim', ver:'9.31', cat:'Gameplay', src:N, nexus:1137, win:0, lose:0, plugins:['Ordinator - Perks of Skyrim.esp'], files:31 },
+      { id:35, on:true, name:'Apocalypse — Magic of Skyrim', ver:'9.45', cat:'Gameplay', src:N, nexus:1090, win:0, lose:0, plugins:['Apocalypse - Magic of Skyrim.esp'], files:560 },
+      { id:36, on:true, name:'True Directional Movement', ver:'2.2.6', cat:'Combat', src:N, nexus:51614, win:0, lose:0, plugins:[], files:4, cfg:'TrueDirectionalMovement.ini' },
+      { id:37, on:true, name:'SmoothCam', ver:'1.7', cat:'Combat', src:N, nexus:41252, win:0, lose:0, plugins:[], files:3, cfg:'SmoothCam.json' },
+      { id:38, on:true, name:'Precision', ver:'2.0.4', cat:'Combat', src:N, nexus:64879, win:0, lose:0, plugins:[], files:3, cfg:'Precision.ini' },
+      { sep:'Animations & corps' },
+      { id:39, on:true, name:'Open Animation Replacer', ver:'2.3.6', cat:'Animations', src:N, nexus:92109, win:0, lose:0, plugins:[], files:5 },
+      { id:40, on:true, name:'XP32 Maximum Skeleton Special Extended', ver:'5.06', cat:'Animations', src:N, nexus:1988, win:9, lose:0, plugins:['XPMSE.esp'], files:640 },
+      { id:41, on:true, name:'Caliente’s Beautiful Bodies Enhancer (CBBE)', ver:'2.0.2', cat:'Corps', src:N, nexus:198, win:0, lose:11, plugins:['CBBE.esp'], files:1490 },
+      { id:42, on:true, name:'Faster HDT-SMP', ver:'2.4', cat:'Physique', src:N, nexus:57339, win:0, lose:0, plugins:[], files:6, cfg:'configs.xml' },
+      { id:43, on:true, name:'KS Hairdos SSE', ver:'1.9', cat:'Corps', src:N, nexus:6817, win:0, lose:0, plugins:['KS Hairdo\'s.esp'], files:3400 },
+      { sep:'Patchs & distribution' },
+      { id:44, on:false, name:'Lux – JK’s Skyrim patch', ver:'6.6', cat:'Patchs', src:N, nexus:43158, win:0, lose:0, plugins:['JKs Skyrim - Lux Patch.esp'], files:3, bad:'master manquant' },
+      { id:45, on:true, name:'Spell Perk Item Distributor', ver:'7.1.4', cat:'Distribution', src:N, nexus:36869, win:0, lose:0, plugins:[], files:2 },
+      { id:46, on:true, name:'Base Object Swapper', ver:'2.4', cat:'Distribution', src:N, nexus:60805, win:0, lose:0, plugins:[], files:2 },
+      { sep:'Sorties générées' },
+      { id:47, on:true, name:'Nemesis Output', ver:'run du 11/09', cat:'Généré', src:T, gen:true, win:4, lose:0, plugins:[], files:1364 },
+      { id:48, on:true, name:'DynDOLOD Output', ver:'run du 08/09', cat:'Généré', src:T, gen:true, win:0, lose:0, plugins:['DynDOLOD.esm','Occlusion.esp','DynDOLOD.esp'], files:18820, cfg:'DynDOLOD_SSE.ini' },
+      { id:49, on:true, name:'Synthesis Output', ver:'run du 10/09', cat:'Généré', src:T, gen:true, win:0, lose:0, plugins:['Synthesis.esp'], files:1 },
+      { id:50, on:true, name:'BodySlide Output', ver:'run du 05/09', cat:'Généré', src:T, gen:true, win:11, lose:0, plugins:[], files:2210 },
+    ],
+    mc: [
+      { sep:'Base' },
+      { id:101, on:true, name:'Fabric API', ver:'0.102.0', cat:'Bibliothèque', src:MR, win:0, lose:0, plugins:[], files:1 },
+      { id:102, on:true, name:'Mod Menu', ver:'11.0.2', cat:'Interface', src:MR, win:0, lose:0, plugins:[], files:1 },
+      { id:103, on:true, name:'Cloth Config', ver:'15.0.140', cat:'Bibliothèque', src:MR, win:0, lose:0, plugins:[], files:1 },
+      { sep:'Performance' },
+      { id:104, on:true, name:'Sodium', ver:'0.6.0', cat:'Perf', src:MR, win:0, lose:0, plugins:[], files:1, cfg:'sodium-options.json' },
+      { id:105, on:true, name:'Lithium', ver:'0.13.1', cat:'Perf', src:MR, win:0, lose:0, plugins:[], files:1 },
+      { id:106, on:true, name:'FerriteCore', ver:'7.0.0', cat:'Perf', src:MR, win:0, lose:0, plugins:[], files:1 },
+      { id:107, on:true, name:'Entity Culling', ver:'1.7.1', cat:'Perf', src:MR, win:0, lose:0, plugins:[], files:1 },
+      { id:108, on:true, name:'ImmediatelyFast', ver:'1.3.0', cat:'Perf', src:MR, win:0, lose:0, plugins:[], files:1 },
+      { sep:'Visuel' },
+      { id:109, on:true, name:'Iris Shaders', ver:'1.8.0', cat:'Shaders', src:MR, win:0, lose:0, plugins:[], files:1, cfg:'iris.properties' },
+      { id:110, on:true, name:'Distant Horizons', ver:'2.2.1', cat:'Rendu', src:MR, win:0, lose:0, plugins:[], files:1, cfg:'DistantHorizons.toml' },
+      { id:111, on:true, name:'Continuity', ver:'3.0.0', cat:'Rendu', src:MR, win:0, lose:0, plugins:[], files:1 },
+      { sep:'Utilitaires & monde' },
+      { id:112, on:true, name:'EMI', ver:'1.1.13', cat:'Interface', src:MR, win:0, lose:0, plugins:[], files:1 },
+      { id:113, on:true, name:'JourneyMap', ver:'5.10', cat:'Carte', src:CF, win:0, lose:0, plugins:[], files:1, cfg:'journeymap.cfg' },
+      { id:114, on:false, name:'Create (Fabric)', ver:'0.5.1', cat:'Tech', src:CF, win:0, lose:0, plugins:[], files:1, bad:'incompatible 1.21.1' },
+    ],
+  };
+  const plugins = [
+    { n:'Skyrim.esm', t:'ESM', on:true, lock:true }, { n:'Update.esm', t:'ESM', on:true, lock:true }, { n:'Dawnguard.esm', t:'ESM', on:true, lock:true }, { n:'HearthFires.esm', t:'ESM', on:true, lock:true }, { n:'Dragonborn.esm', t:'ESM', on:true, lock:true },
+    { n:'LegacyoftheDragonborn.esm', t:'ESM', on:true }, { n:'Cathedral Weathers.esm', t:'ESM', on:true }, { n:'DynDOLOD.esm', t:'ESM', on:true, gen:true },
+    { n:'USSEP.esp', t:'ESP', on:true }, { n:'SkyUI_SE.esp', t:'ESP', on:true }, { n:'RaceMenu.esp', t:'ESP', on:true }, { n:'SMIM-SE-Merged-All.esp', t:'ESP', on:true }, { n:'MajesticMountains.esp', t:'ESP', on:true },
+    { n:'Lux - Resources.esp', t:'ESL', on:true }, { n:'JKs Skyrim.esp', t:'ESP', on:true }, { n:'Immersive Citizens - AI Overhaul.esp', t:'ESP', on:true }, { n:'Ordinator - Perks of Skyrim.esp', t:'ESP', on:true },
+    { n:'Alternate Start - Live Another Life.esp', t:'ESP', on:true }, { n:'XPMSE.esp', t:'ESP', on:true }, { n:'Lux.esp', t:'ESP', on:true }, { n:'JKs Skyrim - Lux Patch.esp', t:'ESL', on:false, bad:'master manquant' },
+    { n:'Synthesis.esp', t:'ESP', on:true, gen:true }, { n:'Occlusion.esp', t:'ESP', on:true, gen:true }, { n:'DynDOLOD.esp', t:'ESP', on:true, gen:true },
+  ];
+  const saves = [
+    { n:'Save 42', who:'Aela', lvl:27, where:'Blancherive', when:'hier 23:10', rev:142, br:'Main 2026', ok:true },
+    { n:'Autosave 3', who:'Aela', lvl:26, where:'Rivebois', when:'hier 21:40', rev:141, br:'Main 2026', ok:true },
+    { n:'Save 41', who:'Aela', lvl:25, where:'Tertre de Bleakfalls', when:'11/09', rev:139, br:'Labo météo', ok:false, why:'2 plugins manquants (Cathedral Weathers)' },
+    { n:'Save 12', who:'Brynjar', lvl:44, where:'Solitude', when:'21/08', rev:98, br:'Main 2026', ok:false, why:'3 scripts orphelins' },
+  ];
+  const diags = [
+    { sev:'danger', ico:'alert', t:'Un plugin est désactivé parce que son master est chargé après lui', ev:'<span class="mono">JKs Skyrim - Lux Patch.esp</span> requiert <span class="mono">Lux.esp</span>. Détecté à r.141 (réordonnancement manuel, hier 22:04).', where:'plugins.txt:21', acts:['Proposer un plan','Voir dans Plugins'] },
+    { sev:'warn', ico:'tri', t:'2 mises à jour disponibles', ev:'SkyUI 5.2SE → 5.2SE-fix · JK’s Skyrim 1.6b → 1.7 (3 conflits nouveaux avec Lux).', where:'Nexus', acts:['Planifier'] },
+    { sev:'warn', ico:'tri', t:'Skyland AIO écrase 27 fichiers de SMIM', ev:'Priorité voulue (note KB : Skyland pour l’architecture, SMIM garde ses meshes).', where:'meshes/architecture/…', acts:['Ouvrir la note'] },
+    { sev:'green', ico:'check', t:'SKSE 2.2.6 compatible avec le jeu 1.6.1170', ev:'Address Library v11 · 19 DLL SKSE chargeables · aucune DLL orpheline.', where:'Data/SKSE/Plugins', acts:[] },
+    { sev:'green', ico:'check', t:'Frame Generation DLSS 3 détectée (PureDark) — RTX 4070 compatible', ev:'<span class="mono">PDPerfPlugin.dll</span> + <span class="mono">nvngx_dlssg.dll</span> · SkyrimUpscaler.ini : mUpscaleType=0, mFrameGeneration=1.', where:'racine · SkyrimUpscaler.ini', acts:['Ouvrir les réglages'] },
+    { sev:'info', ico:'info', t:'Dernier tri LOOT il y a 3 jours', ev:'Masterlist du 10/09 · 0 avertissement de plugin sale.', where:'LOOT', acts:['Relancer LOOT'] },
+  ];
+  const commands = [
+    { g:'Loadout', l:'Basculer de branche…', k:'Ctrl+Shift+L', i:'branch' }, { g:'Loadout', l:'Dériver une branche (Alpha)', i:'branch' }, { g:'Loadout', l:'Enregistrer la révision', k:'Ctrl+S', i:'db' }, { g:'Loadout', l:'Comparer r.142 avec r.141', i:'history' }, { g:'Loadout', l:'Restaurer une révision…', i:'history' },
+    { g:'Mods', l:'Installer une archive…', k:'Ctrl+I', i:'box' }, { g:'Mods', l:'Activer / désactiver la sélection', k:'Espace', i:'check' }, { g:'Mods', l:'Filtrer : conflits', i:'flag' },
+    { g:'Plugins', l:'Trier avec LOOT', i:'wand' }, { g:'Plugins', l:'Vérifier les masters manquants', i:'alert' },
+    { g:'Outils', l:'Lancer xEdit (scan conflits)', i:'tool' }, { g:'Outils', l:'Lancer Nemesis', i:'tool' }, { g:'Outils', l:'Lancer DynDOLOD', i:'tool' }, { g:'Outils', l:'Lancer BodySlide', i:'tool' },
+    { g:'Jeu', l:'Jouer avec la branche active', k:'F5', i:'play' }, { g:'Jeu', l:'Jouer en mode labo (session enregistrée)', i:'play' },
+    { g:'Claude', l:'› Diagnostique le dernier crash', i:'sparkle', c:true }, { g:'Claude', l:'› Explique ce conflit', i:'sparkle', c:true }, { g:'Claude', l:'› Prépare une mise à jour réversible de JK’s Skyrim', i:'sparkle', c:true }, { g:'Claude', l:'› Trouve le mod fautif (bisect)', i:'sparkle', c:true },
+    { g:'Affichage', l:'Panneau gauche', k:'Ctrl+B', i:'layers' }, { g:'Affichage', l:'Panneau du bas', k:'Ctrl+J', i:'layers' }, { g:'Affichage', l:'Panneau droit', k:'Ctrl+L', i:'layers' }, { g:'Affichage', l:'Accueil (bibliothèque)', i:'home' },
+  ];
+  const recipes = [['Après MAJ graphique','wand'],['Régénérer animations + LOD','wand'],['Bench A/B','wand']];
+  const llmModels = [
+    ['qwen2.5-1.5b','Qwen2.5-1.5B-Instruct','~1 Go · par défaut, le plus rapide'],
+    ['llama3.2-3b','Llama-3.2-3B-Instruct','~2 Go · bon équilibre'],
+    ['phi3.5-mini','Phi-3.5-mini-Instruct','~2,4 Go · meilleure qualité de rédaction'],
+    ['qwen3-8b','Qwen3 8B','~5,7 Go · GPU 8 Go+ détecté, tient entièrement en VRAM'],
+  ];
+  const llmModelName = id => (llmModels.find(m=>m[0]===id)||[])[1] || id;
+
+  /* ---------- État ---------- */
+  const $ = (s, r=document) => r.querySelector(s);
+  const app = $('#app');
+  const S = { act:'explorer', game:'skyrimse', tabs:[], tab:'dashboard', split:null, sel:12, rtab:'insp', ptab:'tx', filters:new Set(), running:false, secs:{}, tp:false, expanded:new Set(['skyrimse']), dlActive:true, diagQueued:false, llmModel:'qwen2.5-1.5b', instSort:'last' };
+  let lastCaps = [];
+  const G = () => games.find(g=>g.id===S.game);
+  const LO = (g=G()) => g.lo>=0 ? g.loadouts[g.lo] : null;
+  const MODS = (g=S.game) => modsByGame[g] || [];
+  // Horloge figée : les dates d'exemple se lisent pareil quel que soit le jour où l'on ouvre la maquette
+  const NOW = new Date('2026-09-15T10:00');
+  function rel(iso){
+    if(!iso) return 'jamais';
+    const d=new Date(iso), sod=x=>new Date(x.getFullYear(),x.getMonth(),x.getDate());
+    const days=Math.round((sod(NOW)-sod(d))/864e5), hm=d.toTimeString().slice(0,5);
+    if(days<=0) return 'aujourd’hui '+hm; if(days===1) return 'hier '+hm; if(days<7) return 'il y a '+days+' jours'; if(days<35) return 'il y a '+Math.round(days/7)+' sem.';
+    return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'});
+  }
+  const initials = n => n.split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();
+  const sortLabels = { last:'Dernière session', name:'Nom A→Z', chan:'Canal' };
+  const chanRank = { stable:0, beta:1, alpha:2 };
+  function sortedLoadouts(g){
+    return g.loadouts.map((l,i)=>({l,i})).sort((a,b)=>{
+      if(!!a.l.fav!==!!b.l.fav) return a.l.fav?-1:1;
+      if(S.instSort==='name') return a.l.n.localeCompare(b.l.n,'fr');
+      if(S.instSort==='chan') return (chanRank[a.l.ch]-chanRank[b.l.ch]) || (b.l.rev-a.l.rev);
+      return (b.l.played||'').localeCompare(a.l.played||'');
+    });
+  }
+  function toggleFav(gid, idx){
+    const g=games.find(x=>x.id===gid); const l=g.loadouts[idx]; l.fav=!l.fav;
+    toast(l.fav?'« '+l.n+' » ajoutée aux favoris':'« '+l.n+' » retirée des favoris');
+    renderSide(); if(S.tab==='dashboard'||(S.split&&S.split.includes('dashboard'))) renderSheet();
+  }
+  const favStar = (gid,i,l)=>`<button class="fav-star ${l.fav?'on':''}" data-favtoggle="${gid}:${i}" title="${l.fav?'Retirer des favoris':'Ajouter aux favoris'}">${ic('star',l.fav?'fill':'')}</button>`;
+  Object.values(modsByGame).forEach(list=>list.forEach(m=>{ if(!m.sep) m.base=m.on; }));
+  const serversByGame = { mc:[['Serveur Amis','Serveur Amis · Fabric 1.21','en ligne · 3/8 joueurs','r.12',true],['Test survie solo','Survie Fabric 1.21','arrêté','r.37',true],['Vanilla+ (backup)','Survie Fabric 1.21','arrêté','r.35',false]] };
+  const revs = { skyrimse:[['r.142','snapshot avant install JK’s 1.7','il y a 12 min','you'],['r.141','priorité : SkyUI 9 → 4','hier 22:04','you'],['r.140','Nemesis Output capturé','11/09 · outil','t3'],['r.127','note KB (SkyUI / Dear Diary)','04/09 · Claude','claude'],['r.98','install SkyUI 5.2SE','21/08','you']], mc:[['r.37','Sodium 0.6 + Iris 1.8','il y a 2 j','you'],['r.36','ajout Distant Horizons','05/09','you']] };
+  function baseTabs(g){ return g.tabs.map(([id,l,i])=>({id,l,i})); }
+  function setGame(id){ S.game=id; S.expanded.add(id); S.tabs=baseTabs(G()); S.tab='dashboard'; S.split=null; S.sel=null; S.act='explorer'; S.secs.games=true; setRight(false); render(); }
+  function selectInstance(gid, idx, tab='mods'){
+    const g = games.find(x=>x.id===gid); if(!g) return;
+    g.lo = idx; S.game = gid; S.expanded.add(gid);
+    S.tabs = baseTabs(g); S.tab = tab; S.split = null; S.sel = null; S.act = 'explorer';
+    setRight(false);
+    toast('Bascule vers « '+g.loadouts[idx].n+' » (r.'+g.loadouts[idx].rev+') — instantané, aucune copie');
+    render();
+  }
+  function dirty(){ let plus=0, minus=0; MODS().forEach(m=>{ if(m.sep) return; if(m.on&&!m.base) plus++; if(!m.on&&m.base) minus++; }); return {plus,minus,n:plus+minus}; }
+  function modById(id){ return MODS().find(m=>!m.sep&&m.id===id); }
+
+  /* ---------- Toast ---------- */
+  let tt; function toast(msg){ $('#toast-txt').textContent=msg; $('#toast').classList.add('show'); clearTimeout(tt); tt=setTimeout(()=>$('#toast').classList.remove('show'),2800); }
+
+  /* ---------- Popovers génériques ---------- */
+  function openPop(id, anchor, items, opts){
+    const el=$('#'+id); el.innerHTML = items.map(it=> it==='-' ? '<div class="sep"></div>' : `<button class="it ${it.cur?'cur':''}" data-k="${it.k||''}">${it.i?ic(it.i):''}<span>${it.l}${it.sub?`<span class="sub">${it.sub}</span>`:''}</span></button>`).join('');
+    const r=anchor.getBoundingClientRect(); el.style.left=Math.max(6,Math.min(r.left, window.innerWidth-260))+'px';
+    if(opts && opts.above){ el.style.top='auto'; el.style.bottom=(window.innerHeight-r.top+4)+'px'; }
+    else { el.style.bottom='auto'; el.style.top=(r.bottom+4)+'px'; }
+    el.classList.add('open');
+    el.querySelectorAll('.it').forEach((b,i)=>b.addEventListener('click',()=>{ const it=items.filter(x=>x!=='-')[i]; closePops(); if(it.fn) it.fn(); }));
+  }
+  function closePops(){ document.querySelectorAll('.pop.open').forEach(p=>p.classList.remove('open')); }
+  document.addEventListener('mousedown',e=>{ if(!e.target.closest('.pop') && !e.target.closest('[data-pop]')) closePops(); });
+  function openGameVerPop(anchor, g){
+    const e=g.engine; if(!e) return;
+    openPop('gvpop', anchor, e.gameVersions.map(([v,note,cur])=>({l:v,sub:note,i:cur?'check':'dl',cur,fn:()=>cur?null:toast('Maquette : « '+v+' » — '+(note&&note.includes('downgrader')?'ouvrirait le lien vers le downgrader (à venir, spécifique à chaque jeu)':'changer de version du jeu'))})));
+  }
+  function openEngineVerPop(anchor, g){
+    const e=g.engine; if(!e) return;
+    openPop('evpop', anchor, [
+      ...e.versions.map(([v,note,cur])=>({l:v,sub:cur?('installée'+(note?' · '+note:'')):(note||'installer cette version'),i:cur?'check':'history',cur,fn:()=>cur?null:toast('Maquette : installer '+e.name+' '+v+' — révision réversible')})),
+      '-',{l:'Page de téléchargement ↗',sub:e.dl,i:'globe',fn:()=>toast('Maquette : ouvrirait '+e.dl)},
+    ]);
+  }
+  function openLoaderPop(anchor, g){
+    const e=g.engine; if(!e||!e.loaders) return;
+    openPop('ldpop', anchor, e.loaders.map(([n,v,cur])=>({l:n,sub:cur?('installé'+(v?' · v'+v:'')):'basculer vers ce loader (migration guidée)',i:'gear',cur,fn:()=>cur?null:toast('Maquette : basculer le loader vers « '+n+' » — plan de migration, mods incompatibles listés avant application')})));
+  }
+  function openCapDlPop(el){
+    const c = lastCaps[+el.dataset.idx]; if(!c) return;
+    const [name, sub, on, icon, versions, dl] = c;
+    const pop = $('#capdlpop');
+    const verRows = (versions||[]).map(([v,note,cur])=>
+      `<button class="cvrow ${cur?'cur':''}" data-v="${v.replace(/"/g,'&quot;')}">${ic(cur?'check':'history')}<span class="cvname">${v}</span>${note?`<span class="cvnote">${note}</span>`:''}${!cur?`<span class="cvgo">${ic('dl')}</span>`:''}</button>`
+    ).join('');
+    pop.innerHTML = `
+      <div class="cvhead">${ic(icon||'box')}<div><div class="cvtitle">${name}</div><div class="cvsub">${on?'Installé · '+sub:'Non installé'}</div></div><span class="spacer"></span><span class="hd ${on?'':'idle'}"></span></div>
+      ${versions?`<div class="cvsec-h">Versions</div><div class="cvlist">${verRows||'<div class="muted" style="padding:6px 4px;font-size:11.5px">Aucune version alternative connue.</div>'}</div>`:''}
+      <div class="cvdrop" id="cvdrop">${ic('dl')}<div><b>Glisser une archive ici</b><div class="muted" style="font-size:11px">.7z .zip .rar — installe une version personnalisée, réversible</div></div></div>
+      <div class="cvfoot">
+        <button class="btn sm ghost" id="cv-settings">${ic('sliders','sm')}${on?'Réglages':'Installer'}</button>
+        ${dl?`<button class="btn sm ghost" id="cv-dl">${ic('globe','sm')}Téléchargement</button>`:''}
+      </div>`;
+    const r=el.getBoundingClientRect();
+    pop.style.left=Math.max(6,Math.min(r.left, window.innerWidth-300))+'px';
+    pop.style.bottom='auto'; pop.style.top=(r.bottom+4)+'px';
+    pop.classList.add('open');
+    pop.querySelectorAll('.cvrow:not(.cur)').forEach(b=>b.addEventListener('click',()=>{ closePops(); toast('Maquette : basculer « '+name+' » vers '+b.dataset.v+' — révision réversible'); }));
+    $('#cv-settings').addEventListener('click',()=>{ closePops(); toast('Maquette : '+(on?'ouvrir les réglages de ':'installer ')+name); });
+    const cvdl=$('#cv-dl'); if(cvdl) cvdl.addEventListener('click',()=>{ closePops(); toast('Maquette : ouvrirait '+dl); });
+    const dz=$('#cvdrop');
+    ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{ e.preventDefault(); dz.classList.add('over'); }));
+    ['dragleave'].forEach(ev=>dz.addEventListener(ev,e=>{ e.preventDefault(); dz.classList.remove('over'); }));
+    dz.addEventListener('drop',e=>{
+      e.preventDefault(); dz.classList.remove('over');
+      const f=e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      closePops();
+      toast(f?'Maquette : archive « '+f.name+' » détectée — installation de « '+name+' » proposée en révision réversible':'Maquette : archive détectée — installation de « '+name+' » proposée en révision réversible');
+    });
+  }
+
+  /* ---------- Panneau gauche ---------- */
+  function renderSideTools(){
+    const items=[['explorer','Explorateur','layers'],['search','Recherche','search'],['history','Historique','branch'],['tools','Outils','tool']];
+    $('#side-tools').innerHTML = `<button class="tb" id="t-menu" data-pop title="Menu">${ic('menu')}</button><div class="hact">${items.map(([id,t,i])=>`<button class="tb" data-act="${id}" title="${t}" aria-pressed="${S.act===id}">${ic(i)}</button>`).join('')}</div><span class="spacer"></span><button class="tb" id="t-nexus" title="Nexus Mods (connecté)">${ic('globe')}</button><button class="tb" id="t-settings" title="Réglages">${ic('gear')}</button>`;
+    $('#side-tools').querySelectorAll('[data-act]').forEach(b=>b.addEventListener('click',()=>{ if(S.act===b.dataset.act) return; S.act=b.dataset.act; renderSideTools(); renderSide(); }));
+    $('#t-menu').addEventListener('click',e=>{ e.stopPropagation(); if($('#appmenu').classList.contains('open')){ closePops(); return; }
+      openPop('appmenu', e.currentTarget, [
+        {l:'Fichier',i:'file',fn:()=>toast('Maquette : menu « Fichier »')},{l:'Loadout',i:'branch',fn:()=>toast('Maquette : menu « Loadout » (snapshot, dériver, comparer, exporter)')},{l:'Outils',i:'tool',fn:()=>toast('Maquette : menu « Outils »')},{l:'Affichage',i:'layers',fn:()=>toast('Maquette : menu « Affichage »')},{l:'Aide',i:'info',fn:()=>toast('Maquette : menu « Aide »')},'-',
+        {l:'Densité : '+(document.documentElement.dataset.density==='comfortable'?'confortable':'compact'),i:'sliders',fn:()=>{ const c=document.documentElement.dataset.density==='comfortable'; document.documentElement.dataset.density=c?'compact':'comfortable'; }},
+        {l:'Wireframes : '+(document.documentElement.dataset.wireframe==='on'?'Activé':'Désactivé'),i:'box',fn:()=>{ const on=document.documentElement.dataset.wireframe==='on'; document.documentElement.dataset.wireframe=on?'off':'on'; toast(on?'Wireframes désactivés':'Wireframes activés — noms des zones affichés'); }},
+        {l:'Thème : '+(document.documentElement.dataset.theme==='light'?'clair':'sombre'),i:'image',fn:()=>{ const l=document.documentElement.dataset.theme==='light'; document.documentElement.dataset.theme=l?'dark':'light'; if($('#tokens').classList.contains('open')) renderTokens(); }},
+        {l:'Tokens du design system',i:'flask',fn:()=>{ const o=$('#tokens').classList.toggle('open'); if(o) renderTokens(); }},
+      ]); });
+    $('#t-nexus').addEventListener('click',()=>toast('Maquette : « Nexus Mods » (connecté)'));
+    $('#t-settings').addEventListener('click',e=>{ e.stopPropagation();
+      openPop('llmpop', e.currentTarget, [
+        {l:'Diagnostic local (IA)',sub:'GPU détecté : RTX 3070 Ti · 8 Go VRAM',i:'gear',fn:()=>{}},'-',
+        ...llmModels.map(([id,name,sub])=>({l:name,sub,i:S.llmModel===id?'check':'box',cur:S.llmModel===id,fn:()=>{ S.llmModel=id; toast('Modèle local sélectionné : '+name); if(S.rtab==='claude') renderRight(); }})),
+      ]); });
+  }
+  function renderLoadout(){
+    const g=G(); const lo=LO(g); if(!lo) return `<div class="lo"><div class="lo-top"><span class="lo-name muted">Instance sans branche</span></div><button class="btn sm">${ic('branch','sm')}Créer une branche</button></div>`;
+    const d=dirty();
+    const engineCap = g.engine ? [g.engine.name, g.engine.installed?('v'+g.engine.ver):'non installé', g.engine.installed, 'gear', g.engine.versions, g.engine.dl] : null;
+    const capsList = engineCap ? [engineCap, ...g.caps] : g.caps;
+    lastCaps = capsList;
+    const caps = capsList.map((c,i)=>`<span class="cap ${c[2]?'on':''}" data-idx="${i}" title="${c[0]} · ${c[1]}">${ic(c[3]||'box')}<span class="row"><span class="dot"></span><span class="lbl">${c[0]}</span></span><span class="ver">${c[1]}</span></span>`).join('');
+    const healthLbl = g.health==='ok'?'OK':g.health==='warn'?'1 avertissement':g.health==='danger'?'bloquant':'—';
+    return `<div class="lo">
+      <div class="lo-top"><button class="lo-name" id="lo-name-btn" title="Renommer l’instance"><span class="fade">${lo.n}</span></button><button class="chan ${lo.ch}" id="chan-btn" data-pop title="Canal de la branche">${lo.ch}${ic('chev','sm')}</button></div>
+      <div class="lo-row">
+        <button class="vsel" id="vsel" data-pop title="Révision de la branche">r.${lo.rev}${d.n?`<span class="d">${d.plus?'+'+d.plus:''}${d.plus&&d.minus?' ':''}${d.minus?'−'+d.minus:''}</span>`:`<span class="d ok">✓</span>`}<span class="hd ${g.health}" title="${healthLbl}"></span><span class="spacer"></span>${ic('chev')}</button>
+        <button class="btn save-btn ${d.n?'accent':''}" id="save-btn" ${d.n?'':'disabled'} title="${d.n?'Enregistrer l’état actif/inactif comme r.'+(lo.rev+1):'Aucune modification depuis r.'+lo.rev}">${ic('db','sm')}${d.n?'Enregistrer':'À jour'}</button>
+      </div>
+      <button class="play-btn ${S.running?'stop':''}" id="play">${S.running?ic('x'):ic('play')}${S.running?'Arrêter':'Jouer'}${d.n&&!S.running?'<span class="dot" title="Modifications non enregistrées"></span>':''}</button>
+      <button class="share-btn" id="share-btn" title="Partager cette instance">${ic('share')}Partager</button>
+      <div class="st"><span><b>${MODS().filter(m=>!m.sep&&m.on).length}</b> mods</span>${g.tabs.some(t=>t[0]==='plugins')?`<span><b>${plugins.filter(p=>p.on).length}</b> plugins</span>`:''}<span><b>${g.size}</b></span><span>${g.ver.split(' · ')[0]}</span></div>
+      ${caps?`<div class="caps">${caps}</div>`:''}
+    </div>`;
+  }
+  function startRenameInstance(gid, idx, labelSpan){
+    const g = games.find(x=>x.id===gid); const l = g.loadouts[idx]; if(!l) return;
+    const input = document.createElement('input');
+    input.className = 'tr-rename-input'; input.value = l.n; input.maxLength = 60;
+    labelSpan.replaceWith(input); input.focus(); input.select();
+    let done=false;
+    const commit = ()=>{ if(done) return; done=true; const v=input.value.trim(); if(v && v!==l.n){ l.n=v; toast('Instance renommée : « '+v+' »'); } renderSide(); };
+    input.addEventListener('keydown', e=>{ e.stopPropagation(); if(e.key==='Enter') commit(); if(e.key==='Escape'){ done=true; renderSide(); } });
+    input.addEventListener('blur', commit);
+    input.addEventListener('click', e=>e.stopPropagation());
+    input.addEventListener('mousedown', e=>e.stopPropagation());
+  }
+  function renderSide(){
+    const g=G(); const lo=LO(g); let html='';
+    const sec=(id,t,b,c)=>`<div class="sec ${S.secs[id]===false?'closed':''}" data-sec="${id}"><button class="sec-h">${ic('chev')}<span class="u">${t}</span>${c!=null?`<span class="cnt">${c}</span>`:''}</button><div class="sec-b">${b}</div></div>`;
+    const instEl = $('#side-instance');
+    instEl.innerHTML = S.act==='explorer' ? renderLoadout() : '';
+    if(S.act==='explorer'){
+      const tree = games.map(x=>{ const open=S.expanded.has(x.id); const active=x.id===S.game;
+        const head = `<div class="tr-row ${active?'sel':''}"><button class="tr-chev" data-expand="${x.id}" title="${open?'Réduire':'Déplier'}">${ic(open?'chev':'chevr','sm')}</button><button class="tr-label" data-game="${x.id}"><span class="lbl">${x.name}</span></button></div>`;
+        const kids = open ? (x.loadouts.length ? x.loadouts.map((l,i)=>{ const cur=x.id===S.game&&i===x.lo;
+            return `<div class="tr-row inst-row ${cur?'cur':''}" data-d="2"><button class="tr-label" data-game2="${x.id}" data-lo="${i}">${ic('branch')}<span class="lbl">${l.n}</span><span class="tail"><span class="chan xs ${l.ch}">${l.ch}</span><span class="mono">r.${l.rev}</span></span></button>${favStar(x.id,i,l)}</div>`;
+          }).join('') : `<div class="tr muted" data-d="2" style="font-style:italic">Instance sans branche — créer…</div>`) : '';
+        return head + kids; }).join('');
+      const tools = g.tools.map(([t,v])=>`<button class="tr" data-tool="${t}">${ic('tool')}<span class="lbl">${t}</span><span class="tail mono">${v}</span></button>`).join('');
+      const catList = MODS().filter(m=>m.sep).map(s=>{ const i=MODS().indexOf(s); let n=0; for(let k=i+1;k<MODS().length && !MODS()[k].sep;k++) n++; return [s.sep,n]; });
+      const cats = catList.map(([c,n])=>`<button class="tr">${ic('folder')}<span class="lbl">${c}</span><span class="tail">${n}</span></button>`).join('') || `<div class="tr muted" style="font-style:italic">Aucun mod dans cette branche</div>`;
+      const favList=[]; games.forEach(x=>x.loadouts.forEach((l,i)=>{ if(l.fav) favList.push({x,l,i}); }));
+      if(S.secs.favs===undefined) S.secs.favs = favList.length>0;
+      const favs = favList.length ? favList.map(({x,l,i})=>{ const cur=x.id===S.game&&i===x.lo;
+          return `<div class="tr-row inst-row ${cur?'cur':''}"><button class="tr-label" data-game2="${x.id}" data-lo="${i}">${ic('branch')}<span class="lbl">${l.n}</span><span class="tail"><span class="muted" style="font-size:10px">${x.short}</span><span class="chan xs ${l.ch}">${l.ch}</span></span></button>${favStar(x.id,i,l)}</div>`;
+        }).join('') : `<div class="tr muted" style="font-style:italic">Aucun favori — cliquez l’étoile d’une instance</div>`;
+      html = sec('favs','Favoris',favs,favList.length) + sec('games','Jeux',tree,games.length) + sec('tools','Outils',tools,g.tools.length) + sec('cats','Catégories',cats,catList.length);
+    } else if(S.act==='search'){
+      html = `<div style="padding:8px 8px 6px"><div class="composer" style="height:28px;padding:0 10px;border-radius:6px;font-size:12px;box-shadow:none;background:var(--c2)">${ic('search','sm')}<span>lux</span></div><div class="muted" style="font-size:11.5px;margin:8px 2px 0">3 mods · 3 plugins · 2 160 fichiers · 1 note</div></div>` + sec('sr-mods','Mods',['Lux','Lux – JK’s Skyrim patch'].map(m=>`<button class="tr">${ic('box')}<span class="lbl">${m}</span></button>`).join(''),2) + sec('sr-plg','Plugins',['Lux.esp','Lux - Resources.esp','JKs Skyrim - Lux Patch.esp'].map(m=>`<button class="tr">${ic('file')}<span class="lbl mono">${m}</span></button>`).join(''),3);
+    } else if(S.act==='history'){
+      const rl = revs[S.game]||[];
+      html = sec('branches','Branches',g.loadouts.map((l,i)=>`<button class="tr ${i===g.lo?'sel':''}">${ic('branch')}<span class="lbl">${l.n}</span><span class="tail"><span class="chan xs ${l.ch}">${l.ch}</span>r.${l.rev}</span></button>`).join(''),g.loadouts.length) + sec('revs','Révisions',rl.map(([r,m,w,c])=>`<button class="tr" style="height:auto;padding-top:3px;padding-bottom:3px"><span class="hd" style="background:var(--${c==='you'?'accent':c})"></span><span class="lbl"><span class="mono" style="color:var(--t1)">${r}</span> ${m}<div class="muted" style="font-size:11px">${w}</div></span></button>`).join(''),lo?lo.rev:0);
+    } else {
+      html = sec('tl','Installés',g.tools.map(([t,v])=>`<button class="tr" data-tool="${t}">${ic('tool')}<span class="lbl">${t}</span><span class="tail"><span class="mono">${v}</span>${ic('play','sm')}</span></button>`).join(''),g.tools.length) + sec('rc','Recettes',recipes.map(([t,i])=>`<button class="tr">${ic(i)}<span class="lbl">${t}</span></button>`).join(''),recipes.length);
+    }
+    const body=$('#side-body'); body.innerHTML=html;
+    body.querySelectorAll('.sec-h').forEach(h=>h.addEventListener('click',()=>{const s=h.parentElement; S.secs[s.dataset.sec]=s.classList.contains('closed'); s.classList.toggle('closed');}));
+    body.querySelectorAll('[data-expand]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); const id=b.dataset.expand; if(S.expanded.has(id)) S.expanded.delete(id); else S.expanded.add(id); renderSide(); }));
+    body.querySelectorAll('.tr-label[data-game]').forEach(b=>b.addEventListener('click',()=>setGame(b.dataset.game)));
+    body.querySelectorAll('.tr-label[data-lo]').forEach(b=>b.addEventListener('click',()=>selectInstance(b.dataset.game2, +b.dataset.lo)));
+    body.querySelectorAll('[data-favtoggle]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); const [gid,idx]=b.dataset.favtoggle.split(':'); toggleFav(gid,+idx); }));
+    body.querySelectorAll('.tr[data-tool]').forEach(b=>b.addEventListener('click',()=>toast('Maquette : lancer « '+b.dataset.tool+' » dans l’environnement de la branche')));
+    const cb=$('#chan-btn'); if(cb) cb.addEventListener('click',e=>{ e.stopPropagation(); openPop('chpop', cb, ['stable','beta','alpha'].map(ch=>({l:ch[0].toUpperCase()+ch.slice(1), sub:{stable:'jouable, ne bouge plus',beta:'en test, peut casser',alpha:'expérimental, jetable'}[ch], i:{stable:'shield',beta:'flask',alpha:'flask'}[ch], cur:lo.ch===ch, fn:()=>{ lo.ch=ch; render(); toast('Canal de « '+lo.n+' » : '+ch); }}))); });
+    const lnb=$('#lo-name-btn'); if(lnb) lnb.addEventListener('click',e=>{ e.stopPropagation(); startRenameInstance(g.id, g.lo, lnb); });
+    const vs=$('#vsel'); if(vs) vs.addEventListener('click',e=>{ e.stopPropagation(); const d=dirty(); const rl=revs[S.game]||[];
+      openPop('vpop', vs, [ ...(d.n?[{l:'Modifications non enregistrées',sub:`${d.plus} activé(s) · ${d.minus} désactivé(s) depuis r.${lo.rev}`,i:'alert',fn:()=>{}},{l:'Annuler les modifications',sub:'revenir à r.'+lo.rev,i:'history',fn:()=>{ MODS().forEach(m=>{ if(!m.sep) m.on=m.base; }); render(); toast('État remis à r.'+lo.rev); }},'-']:[]),
+        ...rl.map(([r,m,w],i)=>({l:`<span class="mono">${r}</span> ${m}`,sub:w+(i===0?' · HEAD':''),i:i===0?'check':'history',cur:i===0,fn:()=>toast(i===0?'Déjà sur '+r:'Maquette : restaurer '+r+' (nouvelle révision, réversible)')})),'-',{l:'Comparer deux révisions…',i:'history',fn:()=>toast('Maquette : diff entre révisions')} ]); });
+    const sb=$('#save-btn'); if(sb) sb.addEventListener('click',()=>{ const d=dirty(); if(!d.n) return; lo.rev++; MODS().forEach(m=>{ if(!m.sep) m.base=m.on; }); (revs[S.game]=revs[S.game]||[]).unshift([`r.${lo.rev}`,`enregistré : +${d.plus} −${d.minus}`,'à l’instant','you']); render(); toast(`r.${lo.rev} enregistrée sur « ${lo.n} » (+${d.plus} −${d.minus})`); });
+    const pb=$('#play'); if(pb) pb.addEventListener('click',play);
+    const shb=$('#share-btn'); if(shb) shb.addEventListener('click',()=>toast('Maquette : partager cette instance — liste de mods et modifications de fichiers (ini, etc.) à venir'));
+    instEl.querySelectorAll('.cap[data-idx]').forEach(c=>c.addEventListener('click',e=>{ e.stopPropagation(); openCapDlPop(c); }));
+    instEl.querySelectorAll('.btn:not(#save-btn)').forEach(b=>b.addEventListener('click',()=>toast('Maquette : « '+b.textContent.trim()+' »')));
+    renderFoot();
+  }
+  function renderFoot(){
+    const g=G(); const lo=LO(g);
+    $('#side-foot').innerHTML = S.running
+      ? `<span class="fi">${ic('play')}Skyrim en cours · 00:12 · 71 fps</span><span class="spacer"></span><span class="fi">session enregistrée</span>`
+      : `<span class="fi fade" title="Contexte">${ic('box')}${g.short}${lo?' · '+lo.n+' · <span class="mono">r.'+lo.rev+'</span>':''}</span><span class="spacer"></span><span class="fi" title="Backend de déploiement">${ic('layers')}${g.backend}</span>`;
+  }
+
+  /* ---------- Feuille : onglets + corps ---------- */
+  function tabMeta(id){ return S.tabs.find(t=>t.id===id) || {id, l:id, i:'box'}; }
+  function openTab(id,l,i){ if(!S.tabs.find(t=>t.id===id)) S.tabs.push({id,l,i,close:true}); S.tab=id; S.split=null; renderSheet(); }
+  function badgeConflict(m){
+    if(m.win&&m.lose) return `<span class="badge both" title="Écrase ${m.win} fichier(s), écrasé sur ${m.lose}">${ic('zap')}${m.win}/${m.lose}</span>`;
+    if(m.win) return `<span class="badge win" title="Écrase ${m.win} fichier(s)">${ic('flag')}${m.win}</span>`;
+    if(m.lose) return `<span class="badge lose" title="${m.lose} fichier(s) écrasés">${ic('flag')}${m.lose}</span>`;
+    return '';
+  }
+  const filterMod = m => m.sep || !((S.filters.has('conflits')&&!(m.win||m.lose))||(S.filters.has('maj')&&!m.upd)||(S.filters.has('off')&&m.on)||(S.filters.has('cfg')&&!m.cfg));
+  function modRow(m, list){
+    if(m.sep){ const i=list.indexOf(m); let n=0; for(let k=i+1;k<list.length&&!list[k].sep;k++) n++; return `<div class="sep"><div>${m.sep}<span class="cnt">${n}</span></div></div>`; }
+    const tools = `<span class="tools">${m.cfg?`<button class="tb cfg" data-t="cfg" title="Réglages : ${m.cfg}">${ic('sliders')}</button>`:''}<button class="tb" data-t="folder" title="Ouvrir le dossier">${ic('folder')}</button>${m.nexus||m.src==='Modrinth'||m.src==='CurseForge'?`<button class="tb" data-t="web" title="${m.src}">${ic('globe')}</button>`:''}<button class="tb" data-t="claude" title="Demander à Claude" style="color:var(--claude)">${ic('sparkle')}</button><button class="tb" data-t="more" title="Plus…">${ic('more')}</button></span>`;
+    const pri = list.filter(x=>!x.sep).indexOf(m)+1;
+    return `<div class="row ${S.sel===m.id?'sel':''} ${m.on?'':'off'}" data-id="${m.id}" role="row" tabindex="0"><div class="grip">${ic('grip','sm')}</div><div><span class="chk ${m.on?'on':''}" role="checkbox" aria-checked="${m.on}">${m.on?ic('check','sm'):''}</span></div><div class="pri num">${String(pri).padStart(3,'0')}</div><div class="nm">${m.gen?`<span class="gen" title="Généré par un outil">${ic('tool','sm')}</span>`:''}<span class="t">${m.name}</span>${m.note?`<span class="note" title="${m.note}">${ic('note','sm')}</span>`:''}${tools}</div><div class="flags">${badgeConflict(m)}${m.plugins.length?`<span class="badge plug" title="${m.plugins.join(', ')}">${m.plugins.length} plg</span>`:''}${m.root?`<span class="badge root" title="Fichiers à la racine du jeu (backend racine, tracés)">racine</span>`:''}${m.upd?`<span class="badge upd" title="Mise à jour : ${m.upd}">${ic('up')}</span>`:''}${m.bad?`<span class="badge bad">${ic('alert')}${m.bad}</span>`:''}</div><div class="ver">${m.ver}</div><div class="cat">${m.cat}</div><div class="src">${m.src==='Outil'?ic('tool','sm'):ic('globe','sm')}${m.src}</div></div>`;
+  }
+  function cfgPage(m){
+    const kv = { 'EngineFixes.toml':[['MaxStdIO','2048'],['SaveGameMaxSize','true'],['MemoryManager','true'],['TreeLODReferenceCaching','true']], 'SkyrimUpscaler.ini':[['mUpscaleType','0  ; 0 DLSS · 1 FSR2 · 2 XeSS · 3 DLAA'],['mQualityLevel','1  ; Qualité'],['mFrameGeneration','1'],['mSharpness','0.35']], 'skee64.ini':[['bEnableBodyGen','1'],['bEnableBodyMorph','1'],['iScaleMode','1']], 'enbseries.ini':[['UseEffect','true'],['EnableDepthOfField','false'],['EnableSkyLighting','true']], 'sodium-options.json':[['quality.weather_quality','FAST'],['performance.use_entity_culling','true'],['advanced.cpu_render_ahead_limit','3']] };
+    const rows = kv[m.cfg] || [['(clé)','(valeur)'],['…','…']];
+    return `<div class="tbar"><div class="crumbs">${ic('sliders')}<b>${m.name}</b>${ic('chevr')}Réglages${ic('chevr')}<span class="mono">${m.cfg}</span></div><span class="spacer"></span><button class="btn ghost sm">${ic('history','sm')}Valeurs par défaut</button><button class="btn ghost sm">${ic('branch','sm')}Surcharge par branche</button><button class="btn sm accent">${ic('check','sm')}Enregistrer</button></div>
+      <div class="content"><div class="modpage"><div class="box"><div class="bh">${ic('file','sm')}<span class="mono">${m.cfg}</span><span class="cnt">${rows.length} clés · Data/SKSE/Plugins</span></div>${rows.map(([k,v])=>`<div class="cfg-row"><span class="mono">${k}</span><input value="${v}"><button class="tb" title="Rétablir">${ic('history','sm')}</button></div>`).join('')}</div>
+      <div class="box"><div class="bh">${ic('info','sm')}Comment ça marche</div><div class="why">Chaque mod déclare ses fichiers de configuration (INI, JSON, TOML, XML, MCM). ModLab les édite <b>sans ouvrir l’explorateur</b>, garde la valeur par défaut, et peut enregistrer une <b>surcharge par branche</b> (ex. FG activée sur « Bench FG », désactivée sur « Main 2026 »). Toute écriture est une transaction réversible.</div></div></div></div>`;
+  }
+  function bodyForTab(tabId, g){
+    const lo=LO(g); const crumb=(last)=>`<div class="crumbs">${ic('box')}<b>${g.short}</b>${ic('chevr')}<b>${lo?lo.n:'—'}</b>${ic('chevr')}${last}</div>`;
+    const list=MODS();
+    if(tabId==='dashboard'){
+      const srv = (serversByGame[g.id]||[]).filter(s=>s[2].startsWith('en ligne'));
+      const instCards = sortedLoadouts(g).map(({l,i})=>`<div class="inst-card ${i===g.lo?'cur':''}" data-lo="${i}" role="button" tabindex="0" style="--c1g:${g.c1};--c2g:${g.c2}"><span class="thumb">${initials(l.n)}</span><span class="ic-body"><span class="ic-top"><span class="t fade">${l.n}</span><span class="chan xs ${l.ch}">${l.ch}</span></span><span class="ic-meta fade"><span class="mono">r.${l.rev}</span><span>${l.mods} mods</span><span>${rel(l.played)}</span>${i===g.lo?'<span class="on">● active</span>':''}</span></span>${favStar(g.id,i,l)}</div>`).join('')
+        + `<div class="inst-card add" data-newinst="1" role="button" tabindex="0">${ic('box','sm')}<span>Nouvelle instance</span></div>`;
+      const healthLbl = g.health==='ok'?'OK':g.health==='warn'?'1 avertissement':g.health==='danger'?'Bloquant':'Non vérifié';
+      const healthCls = g.health==='ok'?'ok':g.health==='warn'?'warn':g.health==='danger'?'bad':'';
+      const hasSante = g.tabs.some(t=>t[0]==='sante');
+      const hero = `<header class="ghero ${g.art?'has-art':''}" style="--c1g:${g.c1};--c2g:${g.c2}">
+          ${g.art?`<div class="ghero-bg" style="background-image:url('${g.art}')"></div>`:''}
+          <div class="ghero-top">
+            <div class="art ${g.art?'has-img':''}" style="${g.art?`background-image:url('${g.art}')`:''}">${g.art?'':g.glyph}</div>
+            <div class="ginfo">
+              <h1><span class="fade">${g.name}</span></h1>
+              <div class="meta"><span>${g.ver}</span><span>${g.backend}</span><span><b>${g.size}</b></span><span><b>${list.filter(m=>!m.sep).length||'—'}</b> mods</span><span><b>${g.loadouts.length}</b> instance${g.loadouts.length>1?'s':''}</span></div>
+              <div class="stats">
+                <div class="stat"><span class="k">Temps de jeu</span><span class="v">${ic('history')}${g.hours}</span></div>
+                <div class="stat"><span class="k">Dernière session</span><span class="v">${ic('play')}${g.last}</span></div>
+                <button class="stat ${g.crashes?'warn':'ok'}" data-goto="${hasSante?'sante':''}" title="${hasSante?'Voir dans Santé':''}"><span class="k">Crashs · 30 j</span><span class="v">${ic(g.crashes?'tri':'check')}${g.crashes}</span></button>
+                <button class="stat ${healthCls}" data-goto="${hasSante?'sante':''}" title="${hasSante?'Voir dans Santé':''}"><span class="k">Santé</span><span class="v">${ic(g.health==='ok'?'shield':g.health==='idle'?'info':'alert')}${healthLbl}</span></button>
+              </div>
+            </div>
+          </div>
+          <div class="qa"><button class="btn sm ghost">${ic('folder','sm')}Ouvrir le dossier du jeu</button><button class="btn sm ghost">${ic('up','sm')}Vérifier les mises à jour</button><button class="btn sm ghost">${ic('history','sm')}Nettoyer les téléchargements</button>${g.tabs.some(t=>t[0]==='plugins')?`<button class="btn sm ghost">${ic('wand','sm')}Trier avec LOOT</button>`:''}</div>
+        </header>`;
+      const srvRows = srv.map(([n,pack,st])=>`<div class="srow" style="grid-template-columns:24px 1fr auto"><span>${ic('globe')}</span><div><b>${n}</b><div class="sub">${pack}</div></div><span class="badge" style="color:var(--green)">${ic('check')}${st}</span></div>`).join('');
+      const toolChips = g.tools.slice(0,10).map(([t])=>`<button class="tool-chip" data-tool="${t}" title="${t}">${ic('tool')}<span>${t}</span></button>`).join('') || `<span class="muted" style="font-size:12px">Aucun outil pour ce jeu.</span>`;
+      const e = g.engine;
+      const selRow = e ? `<div class="dsel-row">
+          <div class="dsel"><span class="dsel-lbl">Version du jeu</span><button class="dsel-btn" id="dsel-gamever">${g.ver.split(' · ')[0]}<span class="spacer"></span>${ic('chev','sm')}</button></div>
+          <div class="dsel"><span class="dsel-lbl">Version de ${e.name}</span><button class="dsel-btn" id="dsel-enginever">${e.installed?e.ver:'non installé'}<span class="spacer"></span>${ic('chev','sm')}</button></div>
+          ${e.loaders?`<div class="dsel"><span class="dsel-lbl">Loader</span><button class="dsel-btn" id="dsel-loader">${e.name}<span class="spacer"></span>${ic('chev','sm')}</button></div>`:''}
+        </div>` : '';
+      return `<div class="tbar"><div class="crumbs">${ic('box')}<b>${g.short}</b>${ic('chevr')}Tableau de bord</div></div>
+        <div class="content"><div class="dash">
+          ${hero}
+          <div class="dpad">
+            <div class="dh row2">Instances <span class="cnt">${g.loadouts.length}</span><button class="sortb" id="inst-sort" data-pop title="Trier les instances">${ic('sliders')}${sortLabels[S.instSort]}${ic('chev')}</button></div>
+            <div class="inst-grid">${instCards}</div>
+            ${selRow}
+            ${srvRows?`<div class="dh">Serveurs actifs</div><div>${srvRows}</div>`:''}
+            <div class="dh">Outils <span class="cnt">${g.tools.length}</span></div>
+            <div class="tools-row">${toolChips}</div>
+          </div>
+        </div></div>`;
+    }
+    if(tabId==='mods'){
+      if(!list.length) return `<div class="tbar">${crumb('Mods')}<span class="spacer"></span><button class="btn sm">${ic('box','sm')}Installer…</button></div><div class="content"><div class="empty"><div>${ic('box')}<h3>Aucun mod dans cette branche</h3><p>Glisse une archive ici : ModLab montre où chaque fichier ira avant d’écrire quoi que ce soit.</p></div></div></div>`;
+      return `<div class="tbar">${crumb('Mods')}<span class="spacer"></span><button class="chipf" data-f="conflits" aria-pressed="${S.filters.has('conflits')}">${ic('flag')}Conflits</button><button class="chipf" data-f="maj" aria-pressed="${S.filters.has('maj')}">${ic('up')}MAJ</button><button class="chipf" data-f="cfg" aria-pressed="${S.filters.has('cfg')}">${ic('sliders')}Réglables</button><button class="chipf" data-f="off" aria-pressed="${S.filters.has('off')}">Désactivés</button><button class="btn sm" style="margin-left:6px">${ic('box','sm')}Installer…</button></div>
+        <div class="content"><div class="grid" role="grid"><div class="gh"><div></div><div></div><div>Pri.</div><div>Mod</div><div>État</div><div>Version</div><div>Catégorie</div><div>Source</div></div>${list.filter(filterMod).map(m=>modRow(m,list)).join('')}</div></div>`;
+    }
+    if(tabId==='plugins'){
+      return `<div class="tbar">${crumb('Plugins')}<span class="muted" style="font-size:11.5px;margin-left:10px">${plugins.filter(p=>p.on).length} actifs · ${plugins.filter(p=>p.t==='ESL').length} ESL hors quota</span><span class="spacer"></span><button class="btn sm">${ic('wand','sm')}Trier avec LOOT</button></div>
+        <div class="content">${plugins.map((p,i)=>`<div class="prow ${p.on?'':'off'}"><div class="grip muted">${p.lock?ic('lock','sm'):ic('grip','sm')}</div><div><span class="chk ${p.on?'on':''}">${p.on?ic('check','sm'):''}</span></div><div class="pri num mono muted" style="text-align:right">${p.t==='ESL'?'FE':i.toString(16).toUpperCase().padStart(2,'0')}</div><div class="pn">${p.gen?`<span style="color:var(--gen)">${ic('tool','sm')}</span>`:''}${p.n}${p.bad?`<span class="badge bad">${ic('alert')}${p.bad}</span>`:''}</div><div><span class="tc ${p.t.toLowerCase()}">${p.t}</span></div><div class="muted" style="font-size:11px">${p.lock?'jeu de base':''}</div></div>`).join('')}</div>`;
+    }
+    if(tabId==='archives'){
+      const archives=[['Skyrim - Textures0.bsa','Jeu de base','904 Mo'],['Skyrim - Textures6.bsa','Jeu de base','1,2 Go'],['unofficial skyrim special edition patch - textures.bsa','USSEP','38 Mo'],['SkyUI_SE.bsa','SkyUI','2 Mo'],['Lux - Resources.bsa','Lux','412 Mo'],['RaceMenu.bsa','RaceMenu','61 Mo'],['SMIM-SE-Merged-All.bsa','Static Mesh Improvement Mod','1,8 Go'],['Skyland AIO.bsa','Skyland AIO','2,4 Go']];
+      return `<div class="tbar">${crumb('Archives')}<span class="muted" style="font-size:11.5px;margin-left:10px">${archives.length} archives Bethesda (BSA/BA2) chargées par le moteur au démarrage</span><span class="spacer"></span><button class="btn sm">${ic('search','sm')}Vérifier l’intégrité</button></div>
+        <div class="content">${archives.map(([n,src,sz])=>`<div class="srow" style="grid-template-columns:24px 1fr 160px 90px"><span>${ic('db')}</span><div><b class="mono">${n}</b><div class="sub">${src}</div></div><span class="mono">${sz}</span><div class="acts"><button class="btn sm ghost">${ic('folder','sm')}</button></div></div>`).join('')}</div>`;
+    }
+    if(tabId==='repertoire'){
+      const tree=[['meshes/','214 421 fichiers','dossier'],['textures/','389 902 fichiers','dossier'],['interface/','1 240 fichiers','dossier'],['scripts/','8 811 fichiers','dossier'],['SKSE/Plugins/','62 fichiers','dossier'],['Skyrim.esm','jeu de base','fichier'],['Update.esm','jeu de base','fichier'],['skse64_loader.exe','racine du jeu · SKSE','fichier']];
+      return `<div class="tbar">${crumb('Répertoire')}<span class="muted" style="font-size:11.5px;margin-left:10px">Ce que le jeu voit réellement dans <span class="mono">Data/</span> — fusion de tous les mods actifs</span><span class="spacer"></span><button class="btn sm">${ic('folder','sm')}Ouvrir dans l’Explorateur</button></div>
+        <div class="content">${tree.map(([n,meta,t])=>`<div class="srow" style="grid-template-columns:24px 1fr 200px"><span>${ic(t==='dossier'?'folder':'file')}</span><div><b class="mono">${n}</b></div><span class="muted" style="font-size:11.5px">${meta}</span></div>`).join('')}</div>`;
+    }
+    if(tabId==='servers'){
+      const servers=serversByGame[g.id]||[];
+      return `<div class="tbar">${crumb('Serveurs')}<span class="muted" style="font-size:11.5px;margin-left:10px">Déployés depuis un pack de mods · même révision que le client</span><span class="spacer"></span><button class="btn sm">${ic('box','sm')}Déployer depuis un pack…</button></div>
+        <div class="content">${servers.map(([n,pack,st,r,ok])=>`<div class="srow" style="grid-template-columns:24px 1fr 150px 90px auto"><span>${ic('globe')}</span><div><b>${n}</b><div class="sub">${pack}</div></div><span>${st.startsWith('en ligne')?`<span class="badge" style="color:var(--green)">${ic('check')}${st}</span>`:`<span class="muted">${st}</span>`}</span><span class="mono">${r}</span><div class="acts"><button class="btn sm ghost">${st.startsWith('en ligne')?ic('x','sm')+'Arrêter':ic('play','sm')+'Démarrer'}</button><button class="btn sm ghost">${ic('term','sm')}Console</button></div></div>`).join('')}
+        <div class="box" style="margin:10px"><div class="bh">${ic('history','sm')}Automatisation</div><div class="why">Chaque serveur suit le pack de mods de son loadout : une nouvelle révision du client propose une <b>mise à jour du serveur</b> (redémarrage planifié, sauvegarde du monde avant application). Redémarrages et sauvegardes récurrentes se programment ici.</div></div></div>`;
+    }
+    if(tabId==='saves'){
+      return `<div class="tbar">${crumb('Sauvegardes')}<span class="muted" style="font-size:11.5px;margin-left:10px">${saves.length} sauvegardes · ${saves.filter(s=>!s.ok).length} incompatible(s) avec r.${lo.rev}</span><span class="spacer"></span><button class="btn sm">${ic('history','sm')}Analyser toutes</button></div>
+        <div class="content">${saves.map(s=>`<div class="srow"><span>${ic(s.ok?'disc':'alert')}</span><div><b>${s.n}</b> · ${s.who} · niv. ${s.lvl}<div class="sub">${s.where} · ${s.when}</div></div><div><span class="mono">r.${s.rev}</span><div class="sub">${s.br}</div></div><div>${s.ok?`<span class="badge" style="color:var(--green)">${ic('check')}compatible</span>`:`<span class="badge bad">${ic('alert')}incompatible</span>`}</div><div class="sub">${s.ok?'':s.why}</div><div class="acts"><button class="btn sm ghost">${ic('history','sm')}Charger avec r.${s.rev}</button><button class="btn sm ghost">${ic('search','sm')}Analyser</button></div></div>`).join('')}</div>`;
+    }
+    if(tabId==='packs'){
+      const packs=[['Complementary Reimagined','shader','r5.4',true],['Faithless','resource pack','1.21',true],['Fresh Animations','resource pack','1.9',true],['BSL Shaders','shader','8.4',false]];
+      return `<div class="tbar">${crumb('Packs & shaders')}<span class="spacer"></span><button class="btn sm">${ic('box','sm')}Ajouter…</button></div><div class="content">${packs.map(([n,t,v,on])=>`<div class="srow" style="grid-template-columns:24px 1fr 120px 90px auto"><span>${ic('image')}</span><div><b>${n}</b><div class="sub">${t}</div></div><span class="mono">${v}</span><span>${on?`<span class="badge" style="color:var(--green)">${ic('check')}actif</span>`:'<span class="muted">inactif</span>'}</span><div class="acts"><button class="btn sm ghost">${on?'Désactiver':'Activer'}</button></div></div>`).join('')}</div>`;
+    }
+    if(tabId==='worlds'){
+      const worlds=[['Survie 2026','Survie · 1.21.1','il y a 2 jours','r.37',true],['Serveur Amis (copie locale)','Survie · 1.21.1','05/09','r.12',true],['Test DH','Créatif · 1.21','03/09','r.35',false]];
+      return `<div class="tbar">${crumb('Mondes')}<span class="spacer"></span><button class="btn sm">${ic('db','sm')}Sauvegarder le monde</button></div><div class="content">${worlds.map(([n,t,w,r,ok])=>`<div class="srow" style="grid-template-columns:24px 1fr 130px 90px auto"><span>${ic('map')}</span><div><b>${n}</b><div class="sub">${t} · ${w}</div></div><span class="mono">${r}</span><span>${ok?`<span class="badge" style="color:var(--green)">${ic('check')}compatible</span>`:`<span class="badge upd">${ic('tri')}mods retirés</span>`}</span><div class="acts"><button class="btn sm ghost">${ic('play','sm')}Jouer</button><button class="btn sm ghost">Sauvegarder</button></div></div>`).join('')}</div>`;
+    }
+    if(tabId==='sante'){
+      const dl = S.game==='skyrimse'?diags:[{sev:'green',ico:'check',t:'Tout est en ordre',ev:'Loader, Java et mods cohérents avec la version du jeu.',where:'',acts:[]}];
+      return `<div class="tbar">${crumb('Santé')}<span class="spacer"></span><button class="btn sm">${ic('history','sm')}Relancer les vérifications</button></div><div class="content"><div class="diag">${dl.map(d=>`<div class="dcard" style="--sev:var(--${d.sev})"><span class="sv">${ic(d.ico)}</span><div><div class="ttl">${d.t}</div><div class="ev">${d.ev} <span class="mono muted">${d.where}</span></div></div><div class="act">${d.acts.map((a,i)=>`<button class="btn sm ${i===0&&d.sev==='danger'?'primary':''}">${a}</button>`).join('')}</div></div>`).join('')}</div></div>`;
+    }
+    if(tabId==='home'){
+      return `<div class="tbar"><div class="crumbs">${ic('home')}Accueil</div></div><div class="content"><div class="home"><h1>Bibliothèque</h1><p class="sub">${games.length} jeux · Skyrim et Minecraft joués cette semaine</p><div class="hgrid">${games.map(x=>{ const l=x.lo>=0?x.loadouts[x.lo]:null; return `<button class="gcard" data-game="${x.id}"><span class="cv" style="--c1g:${x.c1};--c2g:${x.c2}">${x.glyph}</span><span class="nm"><span class="fade">${x.name}</span><span class="hd ${x.health}"></span></span><span class="lo2 fade">${l?l.n+' · '+x.ver:'Instance sans branche'}</span><span class="st fade">${(modsByGame[x.id]||[]).filter(m=>!m.sep).length||'—'} mods · ${x.size} · ${x.last}</span></button>`; }).join('')}</div></div></div>`;
+    }
+    if(tabId.startsWith('cfg:')){ const m=modById(+tabId.slice(4)); return cfgPage(m); }
+    if(tabId.startsWith('mod:')){
+      const m = modById(+tabId.slice(4));
+      return `<div class="tbar">${crumb('Mods')}${ic('chevr','sm')}<b style="font-size:11.5px;color:var(--t2)">${m.name}</b><span class="spacer"></span>${m.cfg?`<button class="btn ghost sm" data-cfg="${m.id}">${ic('sliders','sm')}Réglages</button>`:''}<button class="btn ghost sm">${ic('folder','sm')}Dossier</button><button class="btn ghost sm">${ic('globe','sm')}${m.src}</button><button class="btn claude sm">${ic('sparkle','sm')}Claude</button></div>
+        <div class="content"><div class="modpage"><div><h1>${m.name} ${badgeConflict(m)}${m.upd?`<span class="badge upd">${ic('up')}${m.upd} disponible</span>`:''}${m.root?`<span class="badge root">racine</span>`:''}</h1><div class="sub"><span class="mono">${m.ver}</span><span>${m.cat}</span><span>${m.src}${m.nexus?' #'+m.nexus:''}</span><span>installé r.98 · 21/08/2026</span></div></div>
+        <div class="box"><div class="bh">${ic('info','sm')}Pourquoi ce statut</div><div class="why">${whyText(m)}</div></div>
+        <div class="box"><div class="bh">${ic('flag','sm')}Conflits de fichiers <span class="cnt">${m.win+m.lose}</span></div><div class="cfl">${m.win?`<div><span class="badge win">${ic('flag')}gagne ${m.win}</span><div>sur d’autres mods de la branche<ul><li>interface/skyui/config.txt</li><li>interface/inventorymenu.swf</li></ul></div></div>`:''}${m.lose?`<div><span class="badge lose">${ic('flag')}perd ${m.lose}</span><div>face à un mod plus bas dans la liste<ul><li>interface/quest_journal.swf</li></ul></div></div>`:''}${!m.win&&!m.lose?`<div><span class="badge" style="color:var(--green)">${ic('check')}</span><div>Aucun conflit de fichier.</div></div>`:''}</div></div>
+        ${m.cfg?`<div class="box"><div class="bh">${ic('sliders','sm')}Fichiers de configuration <span class="cnt">1</span></div><dl class="br"><dt class="mono">${m.cfg}</dt><dd><button class="btn sm ghost" data-cfg="${m.id}">Modifier dans ModLab ${ic('chevr','sm')}</button></dd></dl></div>`:''}
+        <div class="box"><div class="bh">${ic('note','sm')}Note (lisible par Claude)</div><div class="why">${m.id===12?'Choix FOMOD : « SkyUI SE » + « Widgets » sans « Active Effects ». Garder Dear Diary <b>après</b> SkyUI pour le thème sombre.':'Aucune note. Écris ici ce que tu ne veux pas ré-apprendre.'}</div></div>
+        <div class="box"><div class="bh">${ic('file','sm')}Fichiers <span class="cnt">${m.files.toLocaleString('fr-FR')}</span></div><dl class="br"><dt>Plugins</dt><dd>${m.plugins.length?m.plugins.map(p=>`<span class="mono">${p}</span>`).join(', '):'aucun'}</dd>${m.root?`<dt>À la racine du jeu</dt><dd class="mono">skse64_loader.exe · skse64_1_6_1170.dll · skse64_steam_loader.dll</dd>`:''}<dt>Dans le store</dt><dd>100 % (dédup : 0 octet dupliqué)</dd><dt>Provenance</dt><dd class="mono">${m.name.replace(/[^A-Za-z0-9]+/g,'_')}-${m.nexus||'src'}-${m.ver}.7z · xxh64:9f3a…c21e</dd></dl></div></div></div>`;
+    }
+    return `<div class="content"><div class="empty"><div><h3>${tabId}</h3></div></div></div>`;
+  }
+  function whyText(m){
+    if(m.bad) return `Désactivé automatiquement : <b>${m.bad}</b>. ${m.bad.includes('master')?'Son master <span class="mono">Lux.esp</span> est chargé après lui — corriger l’ordre (LOOT) ou déplacer le patch réactive le plugin.':'La version du jeu / du loader ne correspond pas.'} <b>Réversible.</b>`;
+    if(m.gen) return `Fichiers <b>générés</b> par un outil puis capturés depuis <span class="mono">overwrite/</span>. Un changement d’animation, de corps ou de LOD demande une régénération.`;
+    if(m.root) return `Ce mod pose des fichiers <b>à la racine du jeu</b> (hors <span class="mono">Data/</span>) : ils sont déployés par le backend « racine », tracés fichier par fichier, et retirés proprement à la désactivation.`;
+    if(m.win&&m.lose) return `Ce mod <b>gagne</b> sur ${m.win} fichier(s) et <b>perd</b> sur ${m.lose} : question de priorité, pas d’erreur.`;
+    if(m.win) return `Il écrase ${m.win} fichier(s) de mods plus haut dans la liste. Aucune règle ne s’y oppose.`;
+    if(m.lose) return `${m.lose} de ses fichiers sont remplacés par un mod plus bas dans la liste. Si un visuel te semble faux, c’est le premier endroit où regarder.`;
+    return `Activé, aucun conflit de fichier, ${m.plugins.length?'plugins présents dans l’ordre de chargement':'aucun plugin'}. Rien à signaler.`;
+  }
+
+  function renderSheet(){
+    const el=$('#sheet'); const g=G(); const active=S.split||[S.tab];
+    const badSaves = S.game==='skyrimse'?saves.filter(s=>!s.ok).length:0;
+    const tabs = `<div class="tabs" role="tablist"><div class="tabs-l">${S.tabs.map(t=>`<button class="tab" role="tab" data-tab="${t.id}" aria-selected="${active.includes(t.id)}" title="Maj+clic : ouvrir côte à côte">${ic(t.i,'sm')}<span>${t.l}</span>${t.id==='sante'&&S.game==='skyrimse'?'<span class="cnt bad">1</span>':''}${t.id==='saves'&&badSaves?`<span class="cnt warn">${badSaves}</span>`:''}${t.close?`<span class="x" data-close="${t.id}">${ic('x','sm')}</span>`:''}</button>`).join('')}</div>
+      <div class="tabs-r"><button class="ti" data-open="problems" title="Problèmes" aria-pressed="${S.tp&&S.ptab==='problems'}"><span class="bad-n">${ic('alert')}</span><span class="n">1</span><span class="warn-n" style="margin-left:2px">${ic('tri')}</span><span class="n">2</span></button><button class="ti" data-open="jobs" title="Jobs" aria-pressed="${S.tp&&S.ptab==='jobs'}">${ic('dl')}<span class="n">77 %</span></button><button class="ti" data-open="console" title="Console" aria-pressed="${S.tp&&S.ptab==='console'}">${ic('term')}</button><button class="ti claude" id="ti-claude" title="Propositions de Claude">${ic('sparkle')}<span class="n">1</span></button><span class="ti" title="Nexus connecté">${ic('globe')}</span><span class="ti" title="Espace du store">${ic('db')}184 Go</span></div></div>`;
+    const content = S.split
+      ? `<div class="split-wrap">${S.split.map(id=>{ const mt=tabMeta(id); return `<div class="split-pane"><div class="split-head">${ic(mt.i,'sm')}<span>${mt.l}</span><span class="spacer"></span><button class="tb" data-split-close="${id}" title="Fermer cette moitié">${ic('x','sm')}</button></div>${bodyForTab(id,g)}</div>`; }).join('')}</div>`
+      : bodyForTab(S.tab,g);
+    el.innerHTML = tabs + content;
+    el.querySelectorAll('.tabs-l .tab').forEach(t=>t.addEventListener('click',e=>{
+      const c=e.target.closest('[data-close]');
+      if(c){ const cid=c.dataset.close; S.tabs=S.tabs.filter(x=>x.id!==cid); if(S.tab===cid) S.tab=S.tabs[0].id; if(S.split){ S.split=S.split.filter(id=>id!==cid); if(S.split.length<2) S.split=null; } renderSheet(); return; }
+      const id=t.dataset.tab;
+      if(e.shiftKey){ const base=S.split?S.split[0]:S.tab; if(id!==base){ S.split=[base,id]; S.tab=base; renderSheet(); toast('Vue divisée : '+tabMeta(base).l+' + '+tabMeta(id).l+' — clic simple pour revenir'); } return; }
+      S.split=null; S.tab=id; renderSheet();
+    }));
+    el.querySelectorAll('[data-split-close]').forEach(b=>b.addEventListener('click',()=>{ const keep=S.split.find(id=>id!==b.dataset.splitClose); S.split=null; if(keep) S.tab=keep; renderSheet(); }));
+    el.querySelectorAll('[data-open]').forEach(b=>b.addEventListener('click',()=>openTP(b.dataset.open)));
+    $('#ti-claude').addEventListener('click',()=>{ S.rtab='claude'; setRight(true); renderRight(); });
+    el.querySelectorAll('.chipf').forEach(f=>f.addEventListener('click',()=>{const k=f.dataset.f; S.filters.has(k)?S.filters.delete(k):S.filters.add(k); renderSheet();}));
+    el.querySelectorAll('.row').forEach(r=>{
+      const id=+r.dataset.id;
+      r.addEventListener('click',e=>{ const t=e.target.closest('[data-t]'); if(t){ e.stopPropagation(); rowTool(id,t.dataset.t); return; } S.sel=id; renderSheet(); S.rtab='insp'; setRight(true); renderRight(); });
+      r.addEventListener('dblclick',()=>{ const m=modById(id); openTab('mod:'+m.id,m.name,'box'); });
+      r.addEventListener('keydown',e=>{ const rows=[...el.querySelectorAll('.row')]; const i=rows.indexOf(r);
+        if(e.key==='ArrowDown'&&rows[i+1]){S.sel=+rows[i+1].dataset.id;renderSheet();renderRight();el.querySelector('.row.sel').focus();}
+        if(e.key==='ArrowUp'&&rows[i-1]){S.sel=+rows[i-1].dataset.id;renderSheet();renderRight();el.querySelector('.row.sel').focus();}
+        if(e.key===' '){e.preventDefault();toggleMod(id);} if(e.key==='Enter'){const m=modById(id); openTab('mod:'+m.id,m.name,'box');} });
+      r.querySelector('.chk').addEventListener('click',e=>{e.stopPropagation();toggleMod(id);});
+    });
+    el.querySelectorAll('[data-cfg]').forEach(b=>b.addEventListener('click',()=>{ const m=modById(+b.dataset.cfg); openTab('cfg:'+m.id,m.name+' · réglages','sliders'); }));
+    el.querySelectorAll('.gcard').forEach(c=>c.addEventListener('click',()=>setGame(c.dataset.game)));
+    el.querySelectorAll('.inst-card[data-lo]').forEach(c=>{
+      const go=()=>selectInstance(g.id, +c.dataset.lo, 'dashboard');
+      c.addEventListener('click',e=>{ if(e.target.closest('[data-favtoggle]')) return; go(); });
+      c.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); go(); } });
+    });
+    el.querySelectorAll('[data-favtoggle]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); const [gid,idx]=b.dataset.favtoggle.split(':'); toggleFav(gid,+idx); }));
+    el.querySelectorAll('.inst-card.add').forEach(c=>c.addEventListener('click',()=>toast('Maquette : créer une nouvelle instance pour '+g.short)));
+    const isb=$('#inst-sort'); if(isb) isb.addEventListener('click',e=>{ e.stopPropagation(); openPop('sortpop', isb, [
+      {l:'Favoris toujours en tête',sub:'puis tri par :',i:'star',fn:()=>{}},'-',
+      ...Object.entries(sortLabels).map(([k,l])=>({l, i:S.instSort===k?'check':(k==='last'?'history':k==='name'?'note':'flag'), cur:S.instSort===k, fn:()=>{ S.instSort=k; renderSheet(); }})),
+    ]); });
+    el.querySelectorAll('.stat[data-goto]').forEach(b=>b.addEventListener('click',()=>{ const t=b.dataset.goto; if(!t){ toast('Maquette : aucune vérification pour ce jeu pour l’instant'); return; } S.split=null; S.tab=t; renderSheet(); }));
+    el.querySelectorAll('.tool-chip[data-tool]').forEach(b=>b.addEventListener('click',()=>toast('Maquette : lancer « '+b.dataset.tool+' »')));
+    const dgv=$('#dsel-gamever'); if(dgv) dgv.addEventListener('click',e=>{ e.stopPropagation(); openGameVerPop(dgv, g); });
+    const dev=$('#dsel-enginever'); if(dev) dev.addEventListener('click',e=>{ e.stopPropagation(); openEngineVerPop(dev, g); });
+    const dld=$('#dsel-loader'); if(dld) dld.addEventListener('click',e=>{ e.stopPropagation(); openLoaderPop(dld, g); });
+    el.querySelectorAll('.tbar .btn:not([data-cfg]), .diag .btn, .modpage .btn:not([data-cfg]), .srow .btn, .qa .btn').forEach(b=>b.addEventListener('click',()=>toast('Maquette : « '+b.textContent.trim()+' » ouvrirait un plan de transaction')));
+    syncHeroArt();
+  }
+  function syncHeroArt(){
+    const art=$('.ghero .art.has-img'); const ginfo=$('.ghero .ginfo'); if(!art||!ginfo) return;
+    const h=ginfo.getBoundingClientRect().height; if(!h) return;
+    const w=Math.max(140,Math.min(340,h*460/215));
+    art.style.height=h+'px'; art.style.width=w+'px';
+  }
+  window.addEventListener('resize',()=>{ clearTimeout(window._hrt); window._hrt=setTimeout(syncHeroArt,80); });
+  function rowTool(id,t){ const m=modById(id); if(t==='cfg') openTab('cfg:'+m.id,m.name+' · réglages','sliders'); else if(t==='claude'){ S.sel=id; S.rtab='claude'; setRight(true); renderRight(); } else toast('Maquette : « '+{folder:'Ouvrir le dossier',web:m.src,more:'Plus…'}[t]+' » pour '+m.name); }
+  function toggleMod(id){ const m=modById(id); m.on=!m.on; renderSheet(); renderRight(); renderSide(); toast(`${m.on?'Activation':'Désactivation'} de « ${m.name} » — à enregistrer (r.${LO().rev+1})`); }
+
+  /* ---------- Panneau droit ---------- */
+  function setRight(open){ app.classList.toggle('no-right',!open); }
+  function renderRight(){
+    const el=$('#right'); const m=modById(S.sel);
+    const rsec=(id,t,b,c)=>`<div class="sec rsec ${S.secs['r-'+id]===false?'closed':''}" data-sec="r-${id}"><button class="sec-h">${ic('chev')}<span class="u">${t}</span>${c!=null?`<span class="cnt">${c}</span>`:''}</button><div class="sec-b">${b}</div></div>`;
+    const head = `<div class="rhead" role="tablist"><button class="tab" data-rtab="insp" aria-selected="${S.rtab==='insp'}">${ic('info','sm')}Inspecteur</button><button class="tab" data-rtab="claude" aria-selected="${S.rtab==='claude'}"><span style="color:var(--claude)">${ic('sparkle','sm')}</span>Claude <span class="cnt">1</span></button><span class="spacer"></span><button class="tb" id="r-close" title="Fermer (Ctrl+L)">${ic('x','sm')}</button></div>`;
+    let body='';
+    if(S.rtab==='insp'){
+      body = !m ? `<div class="empty" style="height:auto;padding:30px"><div>${ic('info')}<h3>Aucune sélection</h3><p>Clique sur un mod pour voir son statut et le « pourquoi ».</p></div></div>` :
+        `<div class="rtitle"><div class="eyebrow">Mod · sélection</div><h2>${m.name}</h2><div class="line"><span class="mono">${m.ver}</span><span>${m.cat}</span>${badgeConflict(m)}<button class="btn ghost sm" id="r-open" style="margin-left:auto">Ouvrir ${ic('chevr','sm')}</button></div></div>
+        ${rsec('ap','Aperçu',`<dl class="kv"><dt>Statut</dt><dd>${m.on?'Activé':'Désactivé'}${m.on!==m.base?' · <span style="color:var(--warn)">non enregistré</span>':''}</dd><dt>Source</dt><dd>${m.src}${m.nexus?' #'+m.nexus:''}</dd><dt>Fichiers</dt><dd class="num">${m.files.toLocaleString('fr-FR')}${m.root?' · racine':''}</dd><dt>Plugins</dt><dd>${m.plugins.length?m.plugins.map(p=>`<span class="mono">${p}</span>`).join(', '):'aucun'}</dd>${m.cfg?`<dt>Réglages</dt><dd><button class="btn ghost sm" data-cfg="${m.id}" style="margin-left:-8px">${ic('sliders','sm')}${m.cfg}</button></dd>`:''}</dl>`)}
+        ${rsec('why','Pourquoi ce statut',`<div class="callout">${whyText(m)}</div>`)}
+        ${rsec('cf','Conflits',`<div style="font-size:12px">${m.win?`<div style="display:flex;gap:8px;padding:3px 0"><span class="badge win">${ic('flag')}${m.win}</span><span>gagne sur des mods plus haut</span></div>`:''}${m.lose?`<div style="display:flex;gap:8px;padding:3px 0"><span class="badge lose">${ic('flag')}${m.lose}</span><span>perd face à des mods plus bas</span></div>`:''}${!m.win&&!m.lose?'<span class="muted">Aucun conflit de fichier.</span>':''}</div>`, m.win+m.lose)}
+        ${rsec('hs','Historique',`<ul class="hist"><li><span class="dot2 you"></span><div>r.141 · priorité modifiée<div class="when">hier 22:04 · toi</div></div></li><li><span class="dot2 claude"></span><div>r.127 · note KB ajoutée<div class="when">04/09 · Claude, approuvé par toi</div></div></li><li><span class="dot2"></span><div>r.98 · installé<div class="when">21/08 · toi</div></div></li></ul>`)}`;
+    } else {
+      body = `<div class="chat"><div class="callout" style="margin:8px 12px 0;font-size:11px;display:flex;align-items:center;gap:6px">${ic('gear','sm')}Diagnostic local · <b>${llmModelName(S.llmModel)}</b><span class="muted">— pré-mâché par des règles, le modèle ne fait que rédiger</span></div><div class="msgs"><div class="msg me">Pourquoi le patch Lux ↔ JK’s est désactivé ?</div>
+        <div class="msg ai"><div class="who">${ic('sparkle','sm')}Claude · via MCP</div>Parce que son master <span class="mono">Lux.esp</span> est chargé <b>après</b> lui depuis ton réordonnancement d’hier (r.141). Je propose de remettre le patch sous Lux.esp — l’ordre que LOOT recommande — et de le réactiver. Aucun fichier n’est écrit, seulement <span class="mono">plugins.txt</span>.
+          <div class="plan-card"><div class="ph">${ic('layers','sm')}Réactiver le patch Lux ↔ JK’s<span class="mono">plan #128</span></div><pre><span style="color:var(--win)">~</span> déplacer JKs Skyrim - Lux Patch.esp  14 → 15 (après Lux.esp)
+<span style="color:var(--green)">+</span> activer  JKs Skyrim - Lux Patch.esp
+  révision r.${LO()?LO().rev+1:'?'} créée · réversible · 0 fichier touché</pre><div class="pf"><button class="btn sm">Voir le diff</button><button class="btn sm claude">${ic('check','sm')}Approuver</button><button class="btn sm ghost">Refuser</button></div></div></div></div>
+        <div class="in"><input placeholder="Demander à Claude… (@mod, @plugin, @branche pour cibler)"><div class="row2"><span>Contexte : ${LO()?LO().n:'—'} · r.${LO()?LO().rev:'—'}${m?' · '+m.name:''}</span><span class="spacer"></span><span class="kbd">↵</span>${ic('send','sm')}</div></div></div>`;
+    }
+    el.innerHTML = head + `<div class="rbody">${body}</div>`;
+    el.querySelectorAll('.rhead .tab').forEach(t=>t.addEventListener('click',()=>{S.rtab=t.dataset.rtab; renderRight();}));
+    el.querySelectorAll('.sec-h').forEach(h=>h.addEventListener('click',()=>{const s=h.parentElement; S.secs[s.dataset.sec]=s.classList.contains('closed'); s.classList.toggle('closed');}));
+    $('#r-close').addEventListener('click',()=>setRight(false));
+    const ro=$('#r-open'); if(ro) ro.addEventListener('click',()=>openTab('mod:'+m.id,m.name,'box'));
+    el.querySelectorAll('[data-cfg]').forEach(b=>b.addEventListener('click',()=>{ const mm=modById(+b.dataset.cfg); openTab('cfg:'+mm.id,mm.name+' · réglages','sliders'); }));
+    el.querySelectorAll('.btn:not(#r-open):not([data-cfg])').forEach(b=>b.addEventListener('click',()=>toast('Maquette : « '+b.textContent.trim()+' »')));
+  }
+
+  /* ---------- Panneau du bas ---------- */
+  function openTP(tab){ if(S.tp && S.ptab===tab){ S.tp=false; } else { S.ptab=tab; S.tp=true; } renderTP(); renderSheet(); }
+  function renderTP(){
+    const tp=$('#tpanel'); tp.classList.toggle('open',S.tp); $('#composer-panel').setAttribute('aria-pressed',String(S.tp));
+    const tabs=[['console','Console',null,''],['tx','Transactions',1,''],['problems','Problèmes',3,'bad'],['jobs','Téléchargement',2,'']];
+    $('#tp-bar').innerHTML = tabs.map(([id,l,c,k])=>`<button class="tab" data-ptab="${id}" aria-selected="${S.ptab===id}">${l}${c!=null?`<span class="cnt ${k}">${c}</span>`:''}</button>`).join('') + `<span class="spacer"></span><button class="tb" id="tp-close" title="Fermer (Ctrl+J)">${ic('x','sm')}</button>`;
+    const b=$('#tp-body');
+    if(S.ptab==='tx'){
+      b.innerHTML = `<div class="tx"><div class="t">${ic('box','sm')}Installer JK’s Skyrim 1.7 <span class="mono muted">plan #127</span></div><div class="acts"><button class="btn sm">Voir le plan</button><button class="btn sm primary">${ic('check','sm')}Appliquer</button></div><div class="d">1 842 fichiers · 3 conflits (Lux) · 1 plugin remplacé · révision créée avant · <b style="color:var(--green)">réversible</b></div><pre><span class="add">+ 1 839</span> fichiers nouveaux dans le store (dédup : 412 déjà présents)
+<span class="cf">±     3</span> fichiers en conflit avec Lux → Lux garde la main (priorité)
+<span class="wn">~     1</span> plugin remplacé : JKs Skyrim.esp 1.6b → 1.7 (masters inchangés)
+  choix FOMOD réappliqués depuis r.98 · vérification des hashes après copie</pre></div>
+        <div class="tx claude"><div class="t"><span style="color:var(--claude)">${ic('sparkle','sm')}</span><span class="who">Claude propose</span>Réactiver le patch Lux ↔ JK’s Skyrim <span class="mono muted">plan #128</span></div><div class="acts"><button class="btn sm">Voir le plan</button><button class="btn sm claude">Approuver</button></div><div class="d">Déplace le patch sous Lux.esp (ordre LOOT) et le réactive. Aucune écriture de fichier, uniquement plugins.txt.</div></div>`;
+    } else if(S.ptab==='problems'){
+      b.innerHTML = `<div class="prob">${diags.map(d=>`<div><span style="color:var(--${d.sev})">${ic(d.ico,'sm')}</span><span>${d.t} <span class="mono">${d.where}</span></span><span class="muted" style="font-size:11px">${d.sev==='danger'?'bloquant':d.sev==='warn'?'avertissement':d.sev==='info'?'info':'ok'}</span></div>`).join('')}</div>`;
+    } else if(S.ptab==='jobs'){
+      b.innerHTML = `<div class="job"><div><b>Téléchargement</b> · JK’s Skyrim 1.7 <span class="muted mono">jks_skyrim-6289-1-7.7z</span></div><div class="num muted">318 / 412 Mo · 41 Mo/s</div><div class="bar"><i style="--p:77%"></i></div></div><div class="job"><div><b>Indexation</b> · hashes du store (incrémental)</div><div class="num muted">12 480 / 12 480 · terminé</div><div class="bar"><i style="--p:100%;background:var(--green)"></i></div></div>`;
+    } else {
+      b.innerHTML = `<div class="console"><span class="ts">22:31:02</span> <span class="lv">INFO</span> tx#127 plan construit en 412 ms · 1 842 fichiers · 3 conflits
+<span class="ts">22:31:02</span> <span class="lv">INFO</span> store: 412 blobs déjà présents (dédup 22 %)
+<span class="ts">22:31:04</span> <span class="lv w">WARN</span> branche r.142: JKs Skyrim - Lux Patch.esp désactivé (master manquant) — D-014
+<span class="ts">22:31:05</span> <span class="lv">INFO</span> caps: SKSE 2.2.6 · ENB Rudy · DLSS FG (PDPerfPlugin.dll) — RTX 4070 ok
+<span class="ts">22:31:05</span> <span class="lv">INFO</span> mcp: claude → modlab_plan(reorder plugins) → plan#128 en attente d’approbation</div>`;
+    }
+    $('#tp-bar').querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{S.ptab=t.dataset.ptab; renderTP(); renderSheet();}));
+    $('#tp-close').addEventListener('click',()=>{S.tp=false; renderTP(); renderSheet();});
+    b.querySelectorAll('.btn').forEach(x=>x.addEventListener('click',()=>toast('Maquette : « '+x.textContent.trim()+' »')));
+  }
+
+  /* ---------- Dock : bandeau d'activité, palette ancrée, suggestions ---------- */
+  function renderBand(){
+    /* Un seul chip de statut à la fois : session en cours > téléchargement actif > plan en attente */
+    let chip;
+    if(S.running) chip = `<span class="achip run"><span class="pulse"></span><span class="txt">Skyrim en cours · 00:12 · 71 fps</span><button class="btn sm" id="band-stop">Arrêter</button></span>`;
+    else if(S.dlActive) chip = `<button class="achip" data-open="jobs" title="Téléchargement en cours">${ic('dl')}<span class="txt">JK’s 1.7 · 77 %</span><span class="bar" style="--p:77%"></span></button>`;
+    else chip = `<button class="achip" data-open="tx" title="Plan en attente d’approbation"><span class="pulse"></span><span class="txt">Installer JK’s Skyrim 1.7<span class="muted">· 3 conflits</span></span><span class="btn sm" data-a="voir">Voir</span><span class="btn sm primary" data-a="appliquer">Appliquer</span></button>`;
+    const claudeBtn = S.diagQueued
+      ? `<button class="cb-claude queued" id="cb-claude" title="Le jeu est en cours — le diagnostic local se lancera automatiquement à la fin de la partie">${ic('history','sm')}En attente de fin de partie</button>`
+      : `<button class="cb-claude" id="cb-claude">${ic('sparkle','sm')}Diagnostique le dernier crash</button>`;
+    const tb=$('#composer-toolbar');
+    tb.innerHTML = `<button class="cb-add" id="cb-add" title="Créer une recette">+</button><button class="cb-select" id="cb-select" data-pop title="Recettes">${ic('wand','sm')}<span>Recettes</span>${ic('chev','sm')}</button><span class="spacer"></span>${chip}${claudeBtn}`;
+    tb.querySelectorAll('.achip[data-open]').forEach(b=>b.addEventListener('click',e=>{ const a=e.target.closest('[data-a]'); if(a){ toast('Maquette : « '+a.textContent+' » (plan #127)'); return; } openTP(b.dataset.open); }));
+    const st=$('#band-stop'); if(st) st.addEventListener('click',play);
+    $('#cb-add').addEventListener('click',()=>toast('Maquette : créer une nouvelle recette'));
+    $('#cb-select').addEventListener('click',e=>{ e.stopPropagation(); openPop('recpop', e.currentTarget, recipes.map(([t,i])=>({l:t,i,fn:()=>toast('Maquette : recette « '+t+' »')})), {above:true}); });
+    $('#cb-claude').addEventListener('click',()=>{
+      if(S.running){
+        if(S.diagQueued){ toast('Déjà en attente — sera lancé automatiquement à la fin de la partie'); return; }
+        S.diagQueued = true; renderBand();
+        toast('Diagnostic local mis en attente — le jeu tourne, il se lancera automatiquement à la fin de la partie');
+        return;
+      }
+      S.rtab='claude'; setRight(true); renderRight();
+    });
+  }
+  let cpCur=0;
+  function renderCP(){
+    const q=$('#cp-in').value.trim().toLowerCase();
+    const list=commands.filter(c=>!q||c.l.toLowerCase().includes(q)||c.g.toLowerCase().includes(q));
+    const hits=q?MODS().filter(m=>!m.sep&&m.name.toLowerCase().includes(q)).map(m=>({g:'Mod',l:m.name,i:'box',mod:m.id})):[];
+    const all=[...hits,...list]; cpCur=Math.min(cpCur,Math.max(0,all.length-1));
+    $('#cp-list').innerHTML = all.map((c,i)=>`<button class="it ${i===cpCur?'cur':''}" data-i="${i}"><span class="${c.c?'claude':''}">${ic(c.i)}</span><span>${c.l}<span class="grp">${c.g}</span></span>${c.k?`<span class="kbd">${c.k}</span>`:''}</button>`).join('') || `<div class="muted" style="padding:10px">Aucun résultat</div>`;
+    $('#cp-list').querySelectorAll('.it').forEach(b=>{ b.addEventListener('mousedown',e=>e.preventDefault()); b.addEventListener('click',()=>runCP(all[+b.dataset.i])); });
+    $('#cp-list')._all=all;
+  }
+  function runCP(c){ closeCP(); if(!c) return; if(c.mod){ S.sel=c.mod; openTab('mod:'+c.mod,c.l,'box'); setRight(true); renderRight(); return; } if(c.l.startsWith('Jouer')){ play(); return; } if(c.l==='Panneau gauche'){ toggleSide(); return; } if(c.l==='Panneau du bas'){ S.tp=!S.tp; renderTP(); renderSheet(); return; } if(c.l==='Panneau droit'){ setRight(app.classList.contains('no-right')); return; } if(c.l.startsWith('Accueil')){ openTab('home','Accueil','home'); return; } if(c.l.startsWith('Enregistrer')){ const sb=$('#save-btn'); if(sb&&!sb.disabled) sb.click(); else toast('Rien à enregistrer'); return; } if(c.c){ S.rtab='claude'; setRight(true); renderRight(); toast('Claude : « '+c.l.replace('› ','')+' » — plan en préparation (maquette)'); return; } toast('Maquette : « '+c.l+' »'); }
+  function openCP(){ $('#cp').classList.add('open'); $('#composer-wrap').classList.add('cp-open'); $('#composer-box').classList.add('focus'); cpCur=0; renderCP(); }
+  function closeCP(){ $('#cp').classList.remove('open'); $('#composer-wrap').classList.remove('cp-open'); $('#composer-box').classList.remove('focus'); $('#cp-in').blur(); }
+  $('#cp-in').addEventListener('focus',openCP);
+  $('#cp-in').addEventListener('input',()=>{cpCur=0;renderCP();});
+  $('#cp-in').addEventListener('keydown',e=>{ const all=$('#cp-list')._all||[]; if(e.key==='ArrowDown'){e.preventDefault();cpCur=Math.min(all.length-1,cpCur+1);renderCP();} if(e.key==='ArrowUp'){e.preventDefault();cpCur=Math.max(0,cpCur-1);renderCP();} if(e.key==='Enter'){runCP(all[cpCur]);} if(e.key==='Escape'){closeCP();} });
+  document.addEventListener('mousedown',e=>{ if($('#cp').classList.contains('open') && !e.target.closest('#composer-wrap')) closeCP(); });
+  $('#composer').addEventListener('click',e=>{ if(!e.target.closest('#composer-panel')) $('#cp-in').focus(); });
+  $('#composer-panel').addEventListener('click',e=>{ e.stopPropagation(); openTP('console'); });
+  const scrollMemo=new WeakMap();
+  document.addEventListener('scroll',e=>{ const el=e.target; if(!(el instanceof Element)||!el.classList.contains('content')) return; const wrap=$('#composer-wrap'); const top=el.scrollTop, prev=scrollMemo.get(el)??0; if(top>prev+4&&top>24) wrap.classList.add('hidden'); else if(top<prev-4||top<=4) wrap.classList.remove('hidden'); scrollMemo.set(el,top); },true);
+
+  /* ---------- Tokens, jeu, raccourcis ---------- */
+  function renderTokens(){
+    const cs=getComputedStyle(document.documentElement); const v=n=>cs.getPropertyValue(n).trim();
+    const sem=[['accent','--accent','sélection, focus'],['green / green-btn','--green','OK · Jouer'],['warn','--warn','à enregistrer, MAJ'],['danger','--danger','bloquant'],['conflict.win','--win','écrase'],['conflict.lose','--lose','écrasé'],['generated','--gen','généré par outil · canal alpha'],['claude','--claude','tout ce qui vient de Claude'],['run','--run','jeu en cours']];
+    $('#tokens').innerHTML = `<h3>Fonds — ${document.documentElement.dataset.theme==='light'?'thème clair':'thème sombre'}</h3><div class="lad"><i style="background:var(--c1)">c1 gauche</i><i style="background:var(--c2)">c2 centre</i><i style="background:var(--c3)">c3 flottant</i><i style="background:var(--c4)">c4 survol</i><i style="background:var(--c5)">c5 pressé</i></div><div class="muted" style="font-size:11.5px;margin:-4px 0 10px">Deux colonnes : gauche (c1, bordure 1 px) et centre (c2, la couleur générale). Les flottants (c3) ont un rayon 10 px, une bordure 1 px et une ombre légère.</div>
+      <h3>Texte</h3>${[['t1','--t1'],['t2','--t2'],['t3','--t3']].map(([n,c])=>`<div class="sw"><i style="background:var(${c})"></i><span>${n}</span><span class="v">${v(c)}</span></div>`).join('')}
+      <h3 style="margin-top:10px">Sémantique</h3>${sem.map(([n,c,u])=>`<div class="sw"><i style="background:var(${c})"></i><span>${n} <span class="muted">· ${u}</span></span><span class="v">${v(c)}</span></div>`).join('')}
+      <h3 style="margin-top:10px">Rythme</h3><div class="muted" style="font-size:11.5px">UI : police système 13 px / 12 px listes · données : Cascadia Code / JetBrains Mono 12 px · lignes ${v('--row')} · rayon 10 px (flottants), 6 px (contrôles) · barres 36 / 34 / 28 px · mouvement 120–200 ms</div><div style="margin-top:8px"><button class="btn sm" id="tokens-close">Fermer</button></div>`;
+    $('#tokens-close').addEventListener('click',()=>$('#tokens').classList.remove('open'));
+  }
+  function play(){
+    S.running=!S.running; app.classList.toggle('running',S.running); renderSide();
+    if(!S.running && S.diagQueued){
+      S.diagQueued=false; renderBand();
+      toast('Session terminée · diagnostic local lancé automatiquement ('+llmModelName(S.llmModel)+')');
+      S.rtab='claude'; setRight(true); renderRight();
+    } else {
+      renderBand();
+      toast(S.running?'Maquette : skse64_loader.exe lancé avec « '+LO().n+' » (r.'+LO().rev+') — session enregistrée':'Maquette : session terminée · crash logs et FPS analysés → Santé');
+    }
+  }
+  function toggleSide(){ app.classList.toggle('no-side'); }
+  function render(){ renderSideTools(); renderSide(); renderSheet(); renderRight(); renderTP(); renderBand(); }
+  document.addEventListener('keydown',e=>{
+    const k=e.key.toLowerCase();
+    if((e.ctrlKey||e.metaKey)&&k==='k'){ e.preventDefault(); $('#cp-in').focus(); }
+    if((e.ctrlKey||e.metaKey)&&k==='b'){ e.preventDefault(); toggleSide(); }
+    if((e.ctrlKey||e.metaKey)&&k==='j'){ e.preventDefault(); S.tp=!S.tp; renderTP(); renderSheet(); }
+    if((e.ctrlKey||e.metaKey)&&k==='l'){ e.preventDefault(); setRight(app.classList.contains('no-right')); }
+    if((e.ctrlKey||e.metaKey)&&k==='s'){ e.preventDefault(); const sb=$('#save-btn'); if(sb&&!sb.disabled) sb.click(); }
+    if(e.key==='Escape'){ closePops(); if(S.tp){ S.tp=false; renderTP(); renderSheet(); } }
+    if(e.key==='F5'){ e.preventDefault(); play(); }
+  });
+  S.tabs=baseTabs(G());
+  render();
+})();
+</script>
