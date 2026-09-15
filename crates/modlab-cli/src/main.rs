@@ -91,6 +91,17 @@ enum Commands {
         /// Loadout whose enabled mods should be virtually deployed.
         loadout_id: i64,
     },
+    /// Virtually deploy a loadout's enabled mods and launch the real game
+    /// through `skse64_loader.exe`, hooked, so it sees the merged view.
+    /// This is the real thing, not a check: it opens a real, visible game
+    /// window. Blocks until the whole session (loader + game + anything
+    /// they spawn) has exited, then disconnects the VFS.
+    SkseLaunch {
+        /// Path to `usvfs_x64.dll` (e.g. from an existing MO2 install).
+        usvfs_dll: PathBuf,
+        /// Loadout whose enabled mods should be virtually deployed.
+        loadout_id: i64,
+    },
 }
 
 fn main() -> ExitCode {
@@ -211,6 +222,41 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             for line in listing.lines().take(20) {
                 println!("  {line}");
             }
+        }
+        Commands::SkseLaunch {
+            usvfs_dll,
+            loadout_id,
+        } => {
+            let install = SkyrimAdapter
+                .detect()
+                .ok_or("Skyrim SE introuvable sur cette machine")?;
+            let data_dir = install.root.join("Data");
+            let loader = install.root.join("skse64_loader.exe");
+            if !loader.is_file() {
+                return Err(format!(
+                    "skse64_loader.exe introuvable dans {}",
+                    install.root.display()
+                )
+                .into());
+            }
+            let rows = loadout::entries(&core, loadout_id)?;
+
+            let vfs = usvfs::Vfs::create(&usvfs_dll, "modlab")?;
+            let linked = usvfs::deploy_enabled_mods(&vfs, &rows, &data_dir)?;
+            println!(
+                "{linked} mod(s) déployé(s) virtuellement sur {}.",
+                data_dir.display()
+            );
+
+            let cmd = format!("\"{}\"", loader.display());
+            println!("Lancement de {cmd}...");
+            vfs.launch_hooked_visible(&cmd, &install.root)?;
+
+            println!(
+                "Jeu lancé. En attente de la fin de la session (ferme Skyrim pour terminer)..."
+            );
+            vfs.wait_for_session_end(Duration::from_secs(2), Duration::from_secs(60))?;
+            println!("Session terminée, VFS déconnectée.");
         }
         Commands::LoadoutConflicts { loadout_id } => {
             let rows = loadout::entries(&core, loadout_id)?;

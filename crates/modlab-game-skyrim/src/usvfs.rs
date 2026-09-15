@@ -72,6 +72,10 @@ pub enum UsvfsError {
     CreateProcessHookedFailed(String),
     #[error("hooked process did not exit within the timeout: {0}")]
     ProcessTimedOut(String),
+    #[error("GetVFSProcessList reported failure")]
+    GetProcessListFailed,
+    #[error("no process ever registered with the VFS — the launch likely failed silently")]
+    NeverRegistered,
 }
 
 /// Opaque handle — `usvfs.h` forward-declares `struct usvfsParameters;` and
@@ -101,6 +105,10 @@ type FnCreateProcessHooked = unsafe extern "system" fn(
     *mut STARTUPINFOW,        // lpStartupInfo
     *mut PROCESS_INFORMATION, // lpProcessInformation
 ) -> i32;
+/// `BOOL GetVFSProcessList(size_t* count, LPDWORD processIDs)` — `count` is
+/// both the caller's buffer capacity going in and the actual number of
+/// entries written coming out.
+type FnGetVfsProcessList = unsafe extern "system" fn(*mut usize, *mut u32) -> i32;
 
 /// A live connection to a `usvfs` virtual filesystem instance, created in
 /// *this* process (the "controller") but not hooking this process itself —
@@ -194,7 +202,9 @@ impl Vfs {
     }
 
     /// Spawn `command_line` as a child process that sees this VFS's merged
-    /// view. Waits up to `timeout` and returns the exit code.
+    /// view, hidden (`CREATE_NO_WINDOW`) since this is meant for short,
+    /// read-only verification commands, not something a human watches.
+    /// Waits up to `timeout` and returns the exit code.
     ///
     /// Deliberately doesn't wire up stdout/stderr pipes — callers that want
     /// output should have the command redirect to a file *outside* any
@@ -202,33 +212,7 @@ impl Vfs {
     /// isn't virtualized, it's a normal disk write, so it's readable back
     /// from this process once `run_hooked` returns.
     pub fn run_hooked(&self, command_line: &str, timeout: Duration) -> Result<u32, UsvfsError> {
-        let mut cmdline_w = to_wide_mut(command_line);
-        let mut startup_info: STARTUPINFOW = unsafe { std::mem::zeroed() };
-        startup_info.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
-        let mut process_info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
-
-        let ok = unsafe {
-            let create_process_hooked: Symbol<FnCreateProcessHooked> =
-                self.lib.get(b"CreateProcessHooked\0")?;
-            create_process_hooked(
-                std::ptr::null(),
-                cmdline_w.as_mut_ptr(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                0,
-                CREATE_NO_WINDOW,
-                std::ptr::null(),
-                std::ptr::null(),
-                &mut startup_info,
-                &mut process_info,
-            )
-        };
-
-        if ok == 0 {
-            return Err(UsvfsError::CreateProcessHookedFailed(
-                command_line.to_string(),
-            ));
-        }
+        let process_info = self.spawn_hooked(command_line, None, CREATE_NO_WINDOW)?;
 
         let wait_ms = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX);
         let wait_result = unsafe { WaitForSingleObject(process_info.hProcess, wait_ms) };
@@ -244,6 +228,128 @@ impl Vfs {
             WAIT_OBJECT_0 => Ok(exit_code),
             WAIT_TIMEOUT => Err(UsvfsError::ProcessTimedOut(command_line.to_string())),
             _ => Err(UsvfsError::ProcessTimedOut(command_line.to_string())),
+        }
+    }
+
+    /// Launch `command_line` as a real, *visible* child process (no
+    /// `CREATE_NO_WINDOW`) that sees this VFS's merged view — meant for an
+    /// interactive program a human is about to watch (the game), not a
+    /// verification command. `working_dir` matters here in a way it doesn't
+    /// for `run_hooked`'s `cmd.exe` calls: `skse64_loader.exe` resolves some
+    /// of its own paths relative to its current directory, so callers
+    /// should pass the game's install root.
+    ///
+    /// Doesn't wait for exit — returns the new process's id immediately.
+    /// Use `wait_for_session_end` afterwards, not `run_hooked`'s
+    /// single-handle wait: `skse64_loader.exe` itself exits in seconds
+    /// after handing off to the real game process, which is what actually
+    /// needs the VFS to stay connected for the whole play session.
+    pub fn launch_hooked_visible(
+        &self,
+        command_line: &str,
+        working_dir: &Path,
+    ) -> Result<u32, UsvfsError> {
+        let process_info = self.spawn_hooked(command_line, Some(working_dir), 0)?;
+        let pid = process_info.dwProcessId;
+        unsafe {
+            CloseHandle(process_info.hProcess);
+            CloseHandle(process_info.hThread);
+        }
+        Ok(pid)
+    }
+
+    fn spawn_hooked(
+        &self,
+        command_line: &str,
+        working_dir: Option<&Path>,
+        creation_flags: u32,
+    ) -> Result<PROCESS_INFORMATION, UsvfsError> {
+        let mut cmdline_w = to_wide_mut(command_line);
+        let working_dir_w = working_dir.map(to_wide);
+        let mut startup_info: STARTUPINFOW = unsafe { std::mem::zeroed() };
+        startup_info.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+        let mut process_info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+
+        let ok = unsafe {
+            let create_process_hooked: Symbol<FnCreateProcessHooked> =
+                self.lib.get(b"CreateProcessHooked\0")?;
+            create_process_hooked(
+                std::ptr::null(),
+                cmdline_w.as_mut_ptr(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                0,
+                creation_flags,
+                std::ptr::null(),
+                working_dir_w
+                    .as_ref()
+                    .map_or(std::ptr::null(), |w| w.as_ptr()),
+                &mut startup_info,
+                &mut process_info,
+            )
+        };
+
+        if ok == 0 {
+            return Err(UsvfsError::CreateProcessHookedFailed(
+                command_line.to_string(),
+            ));
+        }
+        Ok(process_info)
+    }
+
+    /// How many processes are currently registered against this VFS
+    /// instance — the hooked launcher, the real game it hands off to, and
+    /// anything either of those spawns in turn. `GetVFSProcessList` fills a
+    /// caller-provided buffer; 256 slots is far more than any real modded
+    /// Skyrim session needs (loader + game + maybe a launcher helper).
+    fn registered_process_count(&self) -> Result<usize, UsvfsError> {
+        let mut pids = [0u32; 256];
+        let mut count = pids.len();
+
+        let ok = unsafe {
+            let get_list: Symbol<FnGetVfsProcessList> = self.lib.get(b"GetVFSProcessList\0")?;
+            get_list(&mut count, pids.as_mut_ptr())
+        };
+
+        if ok == 0 {
+            return Err(UsvfsError::GetProcessListFailed);
+        }
+        Ok(count)
+    }
+
+    /// Block until no process is registered against this VFS instance any
+    /// more — i.e. the game (and everything it spawned) has fully exited,
+    /// not just the loader that was directly launched. Polls rather than
+    /// waiting on a single process handle because `skse64_loader.exe`
+    /// itself exits within seconds of handing off to the real game process,
+    /// long before the play session is actually over.
+    ///
+    /// First waits up to `startup_timeout` for at least one process to
+    /// register at all (distinguishes "still starting up" from "already
+    /// exited" — without this, a check taken in the brief window right
+    /// after `launch_hooked_visible` returns could read 0 and wrongly
+    /// conclude the session already ended).
+    pub fn wait_for_session_end(
+        &self,
+        poll_interval: Duration,
+        startup_timeout: Duration,
+    ) -> Result<(), UsvfsError> {
+        let start = std::time::Instant::now();
+        loop {
+            if self.registered_process_count()? > 0 {
+                break;
+            }
+            if start.elapsed() > startup_timeout {
+                return Err(UsvfsError::NeverRegistered);
+            }
+            std::thread::sleep(poll_interval);
+        }
+
+        loop {
+            std::thread::sleep(poll_interval);
+            if self.registered_process_count()? == 0 {
+                return Ok(());
+            }
         }
     }
 
@@ -383,6 +489,40 @@ mod tests {
             content.trim(),
             "content-from-B",
             "last-linked mod should win the overlay"
+        );
+    }
+
+    /// Sanity check for `wait_for_session_end` / `GetVFSProcessList` before
+    /// ever pointing them at a real, long-running game session: launch a
+    /// short, harmless process (~2s), confirm the wait returns once it's
+    /// actually done — not instantly (would mean the startup-registration
+    /// check is broken) and not stuck (would mean de-registration is never
+    /// observed).
+    #[test]
+    fn wait_for_session_end_tracks_a_short_lived_hooked_process() {
+        let dll = real_dll_path();
+        if !dll.is_file() {
+            return;
+        }
+
+        let _guard = VFS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let vfs = Vfs::create(&dll, "modlab_test_session").expect("should connect to usvfs");
+        let work = tempfile::tempdir().unwrap();
+
+        let started = std::time::Instant::now();
+        vfs.launch_hooked_visible(r"cmd.exe /c ping -n 3 127.0.0.1 >NUL", work.path())
+            .expect("should launch the hooked process");
+        vfs.wait_for_session_end(Duration::from_millis(150), Duration::from_secs(5))
+            .expect("session should be detected as ended");
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed >= Duration::from_millis(500),
+            "returned too fast ({elapsed:?}) — startup-registration check may be broken"
+        );
+        assert!(
+            elapsed < Duration::from_secs(15),
+            "took too long ({elapsed:?}) — de-registration may never be observed"
         );
     }
 }
