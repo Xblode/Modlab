@@ -1,0 +1,10 @@
+[package]
+name = "spike-sevenz-rust"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[dependencies]
+sevenz-rust = "0.6"
+
+[workspace]

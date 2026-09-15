@@ -1,0 +1,10 @@
+[package]
+name = "spike-llama-binding"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[dependencies]
+llama-cpp-2 = "0.1"
+
+[workspace]
