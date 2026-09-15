@@ -13,7 +13,7 @@
 use rusqlite::Connection;
 use std::path::Path;
 
-pub mod detect;
+pub mod game_adapter;
 pub mod loadout;
 pub mod store;
 pub mod transaction;

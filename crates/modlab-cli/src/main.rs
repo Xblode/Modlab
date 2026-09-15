@@ -10,7 +10,9 @@
 //! `--data-root` to point it elsewhere once that changes.
 
 use clap::{Parser, Subcommand};
-use modlab_core::{detect, loadout, store::Store, Core};
+use modlab_core::game_adapter::GameAdapter;
+use modlab_core::{loadout, store::Store, Core};
+use modlab_game_skyrim::{mo2, SkyrimAdapter};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -29,9 +31,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Detect installed games. Currently Skyrim SE only, via a temporary
-    /// path scan — see `modlab_core::detect` for why this isn't the real
-    /// `GameAdapter` architecture yet.
+    /// Detect installed games via their Game Adapter. Skyrim SE only so
+    /// far (`modlab_game_skyrim::SkyrimAdapter`).
     Detect,
     /// Import a file into the content-addressed store.
     ModImport {
@@ -42,6 +43,12 @@ enum Commands {
     LoadoutCreate {
         /// Name of the loadout.
         name: String,
+    },
+    /// Read an MO2 profile directory and print what was found. Read-only —
+    /// does not import or touch anything.
+    Mo2Profile {
+        /// Path to the MO2 profile directory (contains modlist.txt etc.).
+        path: PathBuf,
     },
 }
 
@@ -65,10 +72,23 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     core.log_event("cli.invoked", "{}")?;
 
     match cli.command {
-        Commands::Detect => match detect::find_skyrim_special_edition() {
-            Some(path) => println!("Skyrim Special Edition détecté : {}", path.display()),
+        Commands::Detect => match SkyrimAdapter.detect() {
+            Some(install) => println!("{} détecté : {}", install.name, install.root.display()),
             None => println!("Aucun jeu détecté."),
         },
+        Commands::Mo2Profile { path } => {
+            let profile = mo2::read_profile(&path)?;
+            println!(
+                "{} mods gérés, {} entrées informatives (DLC/CC/non géré), {} plugins, {} dans l'ordre de chargement",
+                profile.managed_mod_names().len(),
+                profile.modlist.len() - profile.managed_mod_names().len(),
+                profile.plugins.len(),
+                profile.load_order.len(),
+            );
+            for name in profile.managed_mod_names() {
+                println!("  + {name}");
+            }
+        }
         Commands::ModImport { path } => {
             let store = Store::open(cli.data_root.join("store").join("blobs"))?;
             let hash = store.put_file(&path)?;

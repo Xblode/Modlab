@@ -282,6 +282,7 @@ version = "0.0.1"
 dependencies = [
  "clap",
  "modlab-core",
+ "modlab-game-skyrim",
  "serde_json",
 ]
 
@@ -295,6 +296,14 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
+]
+
+[[package]]
+name = "modlab-game-skyrim"
+version = "0.0.1"
+dependencies = [
+ "modlab-core",
+ "tempfile",
 ]
 
 [[package]]

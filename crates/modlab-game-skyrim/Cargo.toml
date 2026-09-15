@@ -1,0 +1,12 @@
+[package]
+name = "modlab-game-skyrim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The Skyrim Game Adapter — everything Bethesda-modding-specific lives here, never in modlab-core."
+
+[dependencies]
+modlab-core = { path = "../modlab-core" }
+
+[dev-dependencies]
+tempfile = "3"
