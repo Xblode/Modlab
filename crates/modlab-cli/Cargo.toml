@@ -1,0 +1,14 @@
+[package]
+name = "modlab-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "modlab: the CLI client of the ModLab engine. Same API surface the future MCP server and UI will use."
+
+[[bin]]
+name = "modlab"
+path = "src/main.rs"
+
+[dependencies]
+modlab-core = { path = "../modlab-core" }
+clap = { version = "4", features = ["derive"] }

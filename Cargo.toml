@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["crates/modlab-core", "crates/modlab-cli"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "GPL-3.0-only"
+
+[profile.dev]
+# Fast rebuilds while the walking skeleton is still forming.
+debug = 1
