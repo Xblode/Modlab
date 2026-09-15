@@ -1,0 +1,9 @@
+[package]
+name = "modlab-game-minecraft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The Minecraft Game Adapter — loaders, jars and providers live here, never in modlab-core."
+
+[dependencies]
+modlab-core = { path = "../modlab-core" }

@@ -1,0 +1,27 @@
+[package]
+name = "modlab-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "ModLab desktop shell: Tauri host for the React UI. A client of modlab-core, same as the CLI."
+
+[lib]
+name = "modlab_ui"
+path = "src/lib.rs"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "modlab-ui"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+modlab-core = { path = "../modlab-core" }
+modlab-game-skyrim = { path = "../modlab-game-skyrim" }
+modlab-game-minecraft = { path = "../modlab-game-minecraft" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+thiserror = "1"

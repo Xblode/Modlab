@@ -154,6 +154,31 @@ impl Core {
         Ok(())
     }
 
+    /// All loadouts, oldest first. Raw tuples `(id, game_id, name)`.
+    pub(crate) fn select_loadouts(&self) -> Result<Vec<(i64, String, String)>> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT id, game_id, name FROM loadout ORDER BY id ASC")?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Flip a loadout entry's enabled flag. Returns whether a row was updated.
+    pub(crate) fn set_loadout_entry_enabled(
+        &self,
+        loadout_id: i64,
+        mod_id: i64,
+        enabled: bool,
+    ) -> Result<bool> {
+        let n = self.db.execute(
+            "UPDATE loadout_entry SET enabled = ?1 WHERE loadout_id = ?2 AND mod_id = ?3",
+            (enabled, loadout_id, mod_id),
+        )?;
+        Ok(n > 0)
+    }
+
     /// Number of mods attached to a loadout — mostly useful for tests until
     /// a real query API exists.
     pub fn loadout_entry_count(&self, loadout_id: i64) -> Result<i64> {

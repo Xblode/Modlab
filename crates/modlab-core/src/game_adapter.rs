@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 
 /// What's known about one detected game installation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct GameInstall {
     /// Stable identifier for the game, e.g. `"skyrimse"`.
     pub id: String,

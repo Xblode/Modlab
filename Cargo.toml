@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/modlab-core", "crates/modlab-cli", "crates/modlab-game-skyrim"]
+members = [
+    "crates/modlab-core",
+    "crates/modlab-cli",
+    "crates/modlab-game-skyrim",
+    "crates/modlab-game-minecraft",
+    "crates/modlab-ui",
+]
 
 [workspace.package]
 version = "0.0.1"

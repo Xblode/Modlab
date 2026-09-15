@@ -12,6 +12,7 @@
 use clap::{Parser, Subcommand};
 use modlab_core::game_adapter::GameAdapter;
 use modlab_core::{archive, conflicts, loadout, store::Store, Core};
+use modlab_game_minecraft::MinecraftAdapter;
 use modlab_game_skyrim::{installer, mo2, usvfs, SkyrimAdapter};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -124,10 +125,19 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     core.log_event("cli.invoked", "{}")?;
 
     match cli.command {
-        Commands::Detect => match SkyrimAdapter.detect() {
-            Some(install) => println!("{} détecté : {}", install.name, install.root.display()),
-            None => println!("Aucun jeu détecté."),
-        },
+        Commands::Detect => {
+            let found: Vec<_> = [SkyrimAdapter.detect(), MinecraftAdapter.detect()]
+                .into_iter()
+                .flatten()
+                .collect();
+            if found.is_empty() {
+                println!("Aucun jeu détecté.");
+            } else {
+                for install in found {
+                    println!("{} détecté : {}", install.name, install.root.display());
+                }
+            }
+        }
         Commands::Mo2Profile { path } => {
             let profile = mo2::read_profile(&path)?;
             println!(

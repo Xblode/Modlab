@@ -7,11 +7,31 @@
 
 use crate::transaction::Transaction;
 use crate::{Core, Result};
+use serde::Serialize;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Serialize)]
 pub struct Loadout {
     pub id: i64,
     pub name: String,
+}
+
+/// A loadout as listed for UI/CLI clients — includes the game id so a
+/// client can group without knowing how the row was stored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LoadoutSummary {
+    pub id: i64,
+    pub game_id: String,
+    pub name: String,
+}
+
+/// List every loadout in the engine database, oldest first.
+pub fn list(core: &Core) -> Result<Vec<LoadoutSummary>> {
+    Ok(core
+        .select_loadouts()?
+        .into_iter()
+        .map(|(id, game_id, name)| LoadoutSummary { id, game_id, name })
+        .collect())
 }
 
 /// Create a new, empty loadout and journal it as a transaction.
@@ -66,7 +86,7 @@ pub fn import_mods(core: &Core, loadout_id: i64, entries: &[ImportEntry]) -> Res
 }
 
 /// One mod as attached to a loadout, read back from storage.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LoadoutEntryRow {
     pub mod_id: i64,
     pub name: String,
@@ -94,6 +114,21 @@ pub fn entries(core: &Core, loadout_id: i64) -> Result<Vec<LoadoutEntryRow>> {
             },
         )
         .collect())
+}
+
+/// Enable or disable a mod in a loadout and journal it. Does not snapshot
+/// a revision — that cycle is still a later pass (see module docs).
+pub fn set_enabled(core: &Core, loadout_id: i64, mod_id: i64, enabled: bool) -> Result<bool> {
+    let updated = core.set_loadout_entry_enabled(loadout_id, mod_id, enabled)?;
+    if updated {
+        let mut tx = Transaction::new(core, "loadout.set_enabled");
+        tx.step(format!(
+            "mod {mod_id} in loadout {loadout_id} → {}",
+            if enabled { "enabled" } else { "disabled" }
+        ));
+        tx.commit()?;
+    }
+    Ok(updated)
 }
 
 #[cfg(test)]
@@ -188,5 +223,34 @@ mod tests {
         assert_eq!(rows[1].name, "Second");
         assert_eq!(rows[1].position, 1);
         assert!(!rows[1].enabled);
+    }
+
+    #[test]
+    fn lists_loadouts_and_toggles_enabled() {
+        let core = Core::open_in_memory().unwrap();
+        let a = create(&core, "skyrimse", "Main 2026").unwrap();
+        create(&core, "minecraft", "Survie").unwrap();
+        import_mods(
+            &core,
+            a.id,
+            &[ImportEntry {
+                name: "SkyUI".into(),
+                source_path: "F:/mods/SkyUI".into(),
+                enabled: true,
+            }],
+        )
+        .unwrap();
+
+        let listed = list(&core).unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].name, "Main 2026");
+        assert_eq!(listed[1].game_id, "minecraft");
+
+        assert!(set_enabled(&core, a.id, listed_mod_id(&core, a.id), false).unwrap());
+        assert!(!entries(&core, a.id).unwrap()[0].enabled);
+    }
+
+    fn listed_mod_id(core: &Core, loadout_id: i64) -> i64 {
+        entries(core, loadout_id).unwrap()[0].mod_id
     }
 }

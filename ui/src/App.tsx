@@ -1,0 +1,767 @@
+import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  getShellSnapshot,
+  launchSkse,
+  setModEnabled,
+  type DetectedGame,
+  type LoadoutDto,
+  type ModRow,
+  type ShellSnapshot,
+} from "./api";
+import { Dashboard } from "./Dashboard";
+import { useFavorites } from "./favorites";
+import { chromeFor, type TabId } from "./gameChrome";
+import { Ico } from "./Ico";
+import { ModTable } from "./ModTable";
+import { StubTab } from "./StubTab";
+
+const LLM_MODELS = [
+  ["qwen-1.5b", "Qwen2.5 1.5B", "défaut · CPU ok"],
+  ["llama-3b", "Llama 3.2 3B", "meilleur raisonnement"],
+  ["phi-mini", "Phi-3.5 mini", "compact"],
+  ["qwen-8b", "Qwen3 8B", "si GPU ≥ 8 Go"],
+] as const;
+
+type SideAct = "explorer" | "search" | "history" | "tools";
+type RightTab = "info" | "claude";
+
+type ChatMsg = { who: "me" | "ai"; text: string };
+
+export default function App() {
+  const [snap, setSnap] = useState<ShellSnapshot | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [act, setAct] = useState<SideAct>("explorer");
+  const [tab, setTab] = useState<TabId>("dashboard");
+  const [gameId, setGameId] = useState<string | null>(null);
+  const [loadoutId, setLoadoutId] = useState<number | null>(null);
+  const [selectedMod, setSelectedMod] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState<string[]>([]);
+  const [rightOpen, setRightOpen] = useState(false);
+  const [rightTab, setRightTab] = useState<RightTab>("info");
+  const [running, setRunning] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [llm, setLlm] = useState("qwen-1.5b");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const { isFavorite, toggleFavorite, favoriteIds } = useFavorites();
+  const [chat, setChat] = useState<ChatMsg[]>([
+    {
+      who: "ai",
+      text: "Le moteur de règles diagnostique ; le LLM ne rédige qu’à partir des faits du Core. L’inférence llama-cpp n’est pas encore branchée dans ce shell — le panneau est là, le modèle se charge à la demande plus tard.",
+    },
+  ]);
+  const [draft, setDraft] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    getShellSnapshot()
+      .then((s) => {
+        if (cancelled) return;
+        setSnap(s);
+        setLoadoutId(s.selectedLoadoutId);
+        const first = s.games[0]?.id ?? s.loadouts[0]?.gameId ?? null;
+        setGameId(first);
+        if (first) setExpanded([first]);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (toast == null) return;
+    const t = window.setTimeout(() => setToast(null), 2800);
+    return () => window.clearTimeout(t);
+  }, [toast]);
+
+  const games = snap?.games ?? [];
+  const loadouts = snap?.loadouts ?? [];
+  const activeGame: DetectedGame | undefined =
+    games.find((g) => g.id === gameId) ?? games[0];
+  const chrome = chromeFor(activeGame?.id);
+  const gameLoadouts = loadouts.filter(
+    (l) => !activeGame || l.gameId === activeGame.id,
+  );
+  const activeLoadout: LoadoutDto | undefined =
+    gameLoadouts.find((l) => l.id === loadoutId) ?? gameLoadouts[0];
+  const entries = snap?.entries ?? [];
+  const enabledCount = entries.filter((e) => e.enabled).length;
+  const selectedRow = entries.find((e) => e.modId === selectedMod) ?? null;
+  const tabs = chrome.tabs;
+  // A game switch can land on a tab the new game does not have.
+  const currentTab: TabId = tabs.some((t) => t.id === tab) ? tab : "dashboard";
+  const tabLabel = tabs.find((t) => t.id === currentTab)?.label ?? "—";
+
+  // Ordered by the Core's own loadout order, not by when the star was clicked.
+  const favorites = useMemo(
+    () =>
+      loadouts
+        .filter((l) => favoriteIds.includes(l.id))
+        .map((l) => ({
+          loadout: l,
+          short: games.find((x) => x.id === l.gameId)?.short ?? l.gameId,
+        })),
+    [favoriteIds, loadouts, games],
+  );
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return entries;
+    return entries.filter((e) => e.name.toLowerCase().includes(q));
+  }, [entries, query]);
+
+  async function refresh(id: number | null) {
+    const s = await getShellSnapshot(id);
+    setSnap(s);
+    setLoadoutId(s.selectedLoadoutId);
+  }
+
+  async function pickLoadout(id: number, nextTab?: TabId) {
+    setLoadoutId(id);
+    setSelectedMod(null);
+    const owner = loadouts.find((l) => l.id === id);
+    if (owner) {
+      setGameId(owner.gameId);
+      setExpanded((e) => (e.includes(owner.gameId) ? e : [...e, owner.gameId]));
+    }
+    if (nextTab) setTab(nextTab);
+    try {
+      await refresh(id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  function pickGame(id: string) {
+    setGameId(id);
+    setTab("dashboard");
+    setSelectedMod(null);
+    setExpanded((e) => (e.includes(id) ? e : [...e, id]));
+    const first = loadouts.find((l) => l.gameId === id);
+    if (first) void pickLoadout(first.id, "dashboard");
+  }
+
+  function onFavorite(id: number) {
+    const name = loadouts.find((l) => l.id === id)?.name ?? "";
+    const now = toggleFavorite(id);
+    setToast(
+      now ? `« ${name} » ajoutée aux favoris` : `« ${name} » retirée des favoris`,
+    );
+  }
+
+  function unwired(label: string) {
+    setToast(`« ${label} » : pas encore branché au Core.`);
+  }
+
+  async function toggle(row: ModRow) {
+    if (!activeLoadout) return;
+    try {
+      const next = await setModEnabled(activeLoadout.id, row.modId, !row.enabled);
+      setSnap((prev) => (prev ? { ...prev, entries: next } : prev));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function play() {
+    if (!activeLoadout) return;
+    if (activeGame?.id !== "skyrimse") {
+      setToast("Le lancement n’est câblé que pour Skyrim SE / SKSE pour l’instant.");
+      return;
+    }
+    setRunning(true);
+    setToast("Lancement SKSE via USVFS…");
+    try {
+      await launchSkse(activeLoadout.id);
+      setToast("Session terminée.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  function sendChat(e?: FormEvent) {
+    e?.preventDefault();
+    const text = draft.trim();
+    if (!text) return;
+    setDraft("");
+    setChat((c) => [
+      ...c,
+      { who: "me", text },
+      {
+        who: "ai",
+        text: `Reçu (modèle ${llm}, file d’attente). Aucune inférence locale n’est lancée tant qu’un jeu tourne — et le binding n’est pas encore branché sur ce shell.`,
+      },
+    ]);
+    setRightOpen(true);
+    setRightTab("claude");
+  }
+
+  function openMod(id: number) {
+    setSelectedMod(id);
+    setRightOpen(true);
+    setRightTab("info");
+  }
+
+  if (error && !snap) {
+    return (
+      <div className="empty">
+        <h3>Impossible de joindre le Core</h3>
+        <p>{error}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`app ${rightOpen ? "" : "no-right"} ${running ? "running" : ""}`}>
+      <aside className="side">
+        <div className="side-tools">
+          <button className="tb" title="Menu" type="button">
+            <Ico name="menu" />
+          </button>
+          <div className="hact">
+            {(
+              [
+                ["explorer", "Explorateur", "layers"],
+                ["search", "Recherche", "search"],
+                ["history", "Historique", "branch"],
+                ["tools", "Outils", "tool"],
+              ] as const
+            ).map(([id, title, icon]) => (
+              <button
+                key={id}
+                className="tb"
+                title={title}
+                type="button"
+                aria-pressed={act === id}
+                onClick={() => setAct(id)}
+              >
+                <Ico name={icon} />
+              </button>
+            ))}
+          </div>
+          <span className="spacer" />
+          <button className="tb" title="Nexus Mods" type="button">
+            <Ico name="globe" />
+          </button>
+          <button
+            className="tb"
+            title="Réglages / modèle local"
+            type="button"
+            aria-pressed={settingsOpen}
+            onClick={() => setSettingsOpen((v) => !v)}
+          >
+            <Ico name="gear" />
+          </button>
+        </div>
+
+        {settingsOpen ? (
+          <div className="side-instance">
+            <div className="lo">
+              <div className="muted" style={{ fontSize: 11.5 }}>
+                Diagnostic local (IA)
+              </div>
+              {LLM_MODELS.map(([id, name, sub]) => (
+                <button
+                  key={id}
+                  className={`tr ${llm === id ? "sel" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setLlm(id);
+                    setToast(`Modèle local sélectionné : ${name}`);
+                  }}
+                >
+                  <Ico name={llm === id ? "check" : "box"} />
+                  <span className="lbl">
+                    {name}
+                    <div className="muted" style={{ fontSize: 11 }}>
+                      {sub}
+                    </div>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {act === "explorer" && activeLoadout ? (
+          <div className="side-instance">
+            <div className="lo">
+              <div className="lo-top">
+                <button className="lo-name" type="button">
+                  <span className="fade">{activeLoadout.name}</span>
+                </button>
+                <span className="chan stable">stable</span>
+              </div>
+              <div className="lo-row">
+                <button className="vsel" type="button">
+                  r.—<span className="d ok">✓</span>
+                  <span className="hd ok" />
+                  <span className="spacer" />
+                  <Ico name="chev" />
+                </button>
+                <button className="btn save-btn" type="button" disabled>
+                  <Ico name="db" className="sm" />À jour
+                </button>
+              </div>
+              <button
+                className={`play-btn ${running ? "stop" : ""}`}
+                type="button"
+                onClick={() => void play()}
+              >
+                <Ico name={running ? "x" : "play"} />
+                {running ? "Arrêter" : "Jouer"}
+              </button>
+              <button
+                className="share-btn"
+                type="button"
+                onClick={() => setToast("Partage d’instance : pas encore branché.")}
+              >
+                <Ico name="share" />
+                Partager
+              </button>
+              <div className="st">
+                <span>
+                  <b>{enabledCount}</b> mods
+                </span>
+                <span>
+                  <b>{entries.length}</b> dans le loadout
+                </span>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="side-body">
+          {act === "explorer" ? (
+            <>
+              <Sec title="Favoris" count={favorites.length}>
+                {favorites.length === 0 ? (
+                  <div className="tr muted" style={{ fontStyle: "italic" }}>
+                    Aucun favori — clique l’étoile d’une instance
+                  </div>
+                ) : (
+                  favorites.map(({ loadout: l, short }) => (
+                    <div
+                      key={l.id}
+                      className={`tr-row inst-row ${l.id === activeLoadout?.id ? "cur" : ""}`}
+                    >
+                      <button
+                        className="tr-label"
+                        type="button"
+                        onClick={() => void pickLoadout(l.id, "mods")}
+                      >
+                        <Ico name="branch" />
+                        <span className="lbl">{l.name}</span>
+                        <span className="tail">
+                          <span className="muted" style={{ fontSize: 10 }}>
+                            {short}
+                          </span>
+                        </span>
+                      </button>
+                      <FavStar on onToggle={() => onFavorite(l.id)} />
+                    </div>
+                  ))
+                )}
+              </Sec>
+              <Sec title="Jeux" count={games.length}>
+                {games.length === 0 ? (
+                  <div className="tr muted" style={{ fontStyle: "italic" }}>
+                    Aucun jeu détecté
+                  </div>
+                ) : (
+                  games.map((g) => {
+                    const open = expanded.includes(g.id);
+                    return (
+                      <div key={g.id}>
+                        <div className={`tr-row ${g.id === activeGame?.id ? "sel" : ""}`}>
+                          <button
+                            className="tr-chev"
+                            type="button"
+                            title={open ? "Réduire" : "Déplier"}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpanded((v) =>
+                                v.includes(g.id)
+                                  ? v.filter((x) => x !== g.id)
+                                  : [...v, g.id],
+                              );
+                            }}
+                          >
+                            <Ico name={open ? "chev" : "chevr"} className="sm" />
+                          </button>
+                          <button
+                            className="tr-label"
+                            type="button"
+                            onClick={() => pickGame(g.id)}
+                          >
+                            <span className="lbl">{g.name}</span>
+                          </button>
+                        </div>
+                        {open
+                          ? loadouts
+                              .filter((l) => l.gameId === g.id)
+                              .map((l) => (
+                                <div
+                                  key={l.id}
+                                  className={`tr-row inst-row ${l.id === activeLoadout?.id ? "cur" : ""}`}
+                                >
+                                  <button
+                                    className="tr-label"
+                                    type="button"
+                                    onClick={() => void pickLoadout(l.id, "mods")}
+                                  >
+                                    <Ico name="branch" />
+                                    <span className="lbl">{l.name}</span>
+                                    <span className="tail">
+                                      <span className="mono">r.—</span>
+                                    </span>
+                                  </button>
+                                  <FavStar
+                                    on={isFavorite(l.id)}
+                                    onToggle={() => onFavorite(l.id)}
+                                  />
+                                </div>
+                              ))
+                          : null}
+                      </div>
+                    );
+                  })
+                )}
+              </Sec>
+              <Sec title="Catégories" count={1}>
+                <button className="tr" type="button">
+                  <Ico name="folder" />
+                  <span className="lbl">Mods</span>
+                  <span className="tail">{entries.length}</span>
+                </button>
+              </Sec>
+            </>
+          ) : act === "search" ? (
+            <div style={{ padding: "8px 8px 6px" }}>
+              <div
+                className="composer"
+                style={{
+                  height: 28,
+                  padding: "0 10px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  boxShadow: "none",
+                  background: "var(--c2)",
+                }}
+              >
+                <Ico name="search" className="sm" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Filtrer les mods…"
+                  style={{ background: "none", border: 0, color: "var(--t1)", outline: "none", flex: 1 }}
+                />
+              </div>
+            </div>
+          ) : act === "history" ? (
+            <Sec title="Révisions" count={0}>
+              <div className="tr muted" style={{ fontStyle: "italic" }}>
+                Pas encore de révisions immuables (cycle snapshot reporté).
+              </div>
+            </Sec>
+          ) : (
+            <Sec title="Outils" count={0}>
+              <div className="tr muted" style={{ fontStyle: "italic" }}>
+                Pas de registre d’outils dans le Core pour l’instant.
+              </div>
+            </Sec>
+          )}
+        </div>
+        <div className="side-foot">
+          {running ? (
+            <span className="fi">
+              <Ico name="play" />
+              Skyrim en cours
+            </span>
+          ) : (
+            <>
+              <span className="fi fade" title="Contexte">
+                <Ico name="box" />
+                {activeGame?.short ?? "—"}
+                {activeLoadout ? ` · ${activeLoadout.name}` : ""}
+              </span>
+              <span className="spacer" />
+              <span className="fi" title="Backend de déploiement">
+                <Ico name="layers" />
+                {chrome.backend}
+              </span>
+            </>
+          )}
+        </div>
+      </aside>
+
+      <div className="main">
+        <div className="sheet">
+          <div className="tabs" role="tablist">
+            <div className="tabs-l">
+              {tabs.map((t) => (
+                <button
+                  key={t.id}
+                  className="tab"
+                  type="button"
+                  role="tab"
+                  aria-selected={currentTab === t.id}
+                  onClick={() => setTab(t.id)}
+                >
+                  <Ico name={t.icon} className="sm" />
+                  <span>{t.label}</span>
+                  {t.id === "mods" ? <span className="cnt">{entries.length}</span> : null}
+                </button>
+              ))}
+            </div>
+            <div className="tabs-r">
+              <button
+                className="ti claude"
+                type="button"
+                aria-pressed={rightOpen && rightTab === "claude"}
+                onClick={() => {
+                  setRightOpen(true);
+                  setRightTab("claude");
+                }}
+              >
+                <Ico name="sparkle" />
+                <span className="n">IA</span>
+              </button>
+            </div>
+          </div>
+
+          {currentTab === "dashboard" && activeGame ? (
+            <Dashboard
+              game={activeGame}
+              loadouts={gameLoadouts}
+              activeLoadoutId={activeLoadout?.id ?? null}
+              modCount={activeLoadout?.modCount ?? entries.length}
+              isFavorite={isFavorite}
+              onToggleFavorite={onFavorite}
+              onPickLoadout={(id) => void pickLoadout(id, "dashboard")}
+              onGoToTab={(t) => setTab(t)}
+              onUnwired={unwired}
+            />
+          ) : (
+            <>
+              <div className="tbar">
+                <div className="crumbs">
+                  <Ico name="box" />
+                  <b>{activeGame?.short ?? "—"}</b>
+                  <Ico name="chevr" />
+                  <b>{activeLoadout?.name ?? "—"}</b>
+                  <Ico name="chevr" />
+                  {tabLabel}
+                </div>
+                <span className="spacer" />
+                <span className="muted" style={{ fontSize: 11.5 }}>
+                  {snap?.dataRoot}
+                </span>
+              </div>
+              {currentTab === "mods" ? (
+                entries.length === 0 ? (
+                  <div className="content">
+                    <div className="empty">
+                      <div>
+                        <Ico name="box" />
+                        <h3>Aucun mod dans ce loadout</h3>
+                        <p>
+                          Importe une instance MO2 via la CLI (`modlab mo2-import`) — l’UI
+                          lit le même Core.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <ModTable
+                    rows={filtered}
+                    selectedId={selectedMod}
+                    onSelect={openMod}
+                    onToggle={(row) => void toggle(row)}
+                  />
+                )
+              ) : (
+                <StubTab tab={currentTab} />
+              )}
+            </>
+          )}
+        </div>
+
+        {rightOpen ? (
+          <aside className="right">
+            <div className="rhead">
+              <button
+                className="tab"
+                type="button"
+                aria-selected={rightTab === "info"}
+                onClick={() => setRightTab("info")}
+              >
+                Info
+              </button>
+              <button
+                className="tab"
+                type="button"
+                aria-selected={rightTab === "claude"}
+                onClick={() => setRightTab("claude")}
+              >
+                Claude
+              </button>
+              <span className="spacer" />
+              <button className="tb" type="button" onClick={() => setRightOpen(false)}>
+                <Ico name="x" />
+              </button>
+            </div>
+            <div className="rbody">
+              {rightTab === "info" ? (
+                selectedRow ? (
+                  <div className="rtitle">
+                    <div className="eyebrow">Mod</div>
+                    <h2>{selectedRow.name}</h2>
+                    <div className="line">
+                      <span className="mono">#{selectedRow.modId}</span>
+                      <span>{selectedRow.enabled ? "activé" : "désactivé"}</span>
+                    </div>
+                    <dl className="kv" style={{ marginTop: 12 }}>
+                      <dt>Chemin</dt>
+                      <dd>{selectedRow.sourcePath}</dd>
+                      <dt>Priorité</dt>
+                      <dd>{selectedRow.position}</dd>
+                    </dl>
+                  </div>
+                ) : (
+                  <div className="rtitle">
+                    <div className="eyebrow">Panneau</div>
+                    <h2>Aucun mod sélectionné</h2>
+                    <p className="muted">Clique une ligne de la table.</p>
+                  </div>
+                )
+              ) : (
+                <div className="chat" style={{ height: "100%" }}>
+                  <div className="msgs">
+                    {chat.map((m, i) => (
+                      <div key={i} className={`msg ${m.who}`}>
+                        {m.who === "ai" ? (
+                          <div className="who">
+                            <Ico name="sparkle" className="sm" />
+                            Local · {llm}
+                          </div>
+                        ) : null}
+                        {m.text}
+                      </div>
+                    ))}
+                  </div>
+                  <form className="in" onSubmit={sendChat}>
+                    <input
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      placeholder="Demander à Claude… (@mod pour cibler)"
+                    />
+                    <div className="row2">
+                      <span>
+                        Contexte : {activeLoadout?.name ?? "—"}
+                        {selectedRow ? ` · ${selectedRow.name}` : ""}
+                      </span>
+                      <span className="spacer" />
+                      <span className="kbd">↵</span>
+                      <Ico name="send" className="sm" />
+                    </div>
+                  </form>
+                </div>
+              )}
+            </div>
+          </aside>
+        ) : null}
+
+        <div className="dock">
+          <div className="composer-wrap">
+            <form className="composer-box" onSubmit={sendChat}>
+              <div className="composer">
+                <Ico name="search" />
+                <button className="tb" title="Console" type="button">
+                  <Ico name="term" />
+                </button>
+                <input
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder="Rechercher, commander, demander à Claude…"
+                  autoComplete="off"
+                />
+                <span className="kbd">Ctrl K</span>
+              </div>
+              <div className="composer-toolbar">
+                <button className="cb-add" type="button" title="Ajouter">
+                  +
+                </button>
+                <button className="cb-select" type="button">
+                  {LLM_MODELS.find((m) => m[0] === llm)?.[1]}
+                  <Ico name="chev" />
+                </button>
+                <span className="spacer" />
+                <button className="cb-claude" type="button" onClick={() => sendChat()}>
+                  <Ico name="sparkle" />
+                  Claude
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      {toast ? (
+        <div className="toast show">
+          <Ico name="check" className="sm" />
+          <span>{toast}</span>
+        </div>
+      ) : null}
+      {error && snap ? (
+        <div className="toast show" style={{ bottom: 80 }}>
+          <Ico name="alert" className="sm" />
+          <span>{error}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function FavStar({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  return (
+    <button
+      className={`fav-star ${on ? "on" : ""}`}
+      type="button"
+      title={on ? "Retirer des favoris" : "Ajouter aux favoris"}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+    >
+      <Ico name="star" className={on ? "fill" : ""} />
+    </button>
+  );
+}
+
+function Sec({
+  title,
+  count,
+  children,
+}: {
+  title: string;
+  count: number;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className={`sec ${open ? "" : "closed"}`}>
+      <button className="sec-h" type="button" onClick={() => setOpen((v) => !v)}>
+        <Ico name="chev" />
+        <span className="u">{title}</span>
+        <span className="cnt">{count}</span>
+      </button>
+      <div className="sec-b">{children}</div>
+    </div>
+  );
+}

@@ -53,6 +53,42 @@ fn looks_like_skyrim_install(path: &Path) -> bool {
     path.join("SkyrimSE.exe").is_file() && path.join("Data").is_dir()
 }
 
+/// Locate `usvfs_x64.dll` — env override first, then common MO2 install
+/// paths on this machine (including Benjamin's known folder, whose
+/// "Organazer" spelling is not a typo in the search).
+pub fn find_usvfs_dll() -> Option<PathBuf> {
+    if let Some(from_env) = std::env::var_os("MODLAB_USVFS_DLL") {
+        let path = PathBuf::from(from_env);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+
+    let mut candidates = Vec::new();
+    candidates.push(PathBuf::from(
+        r"F:\_Modding\Skyrim Modding\Mod Organazer\usvfs_x64.dll",
+    ));
+    candidates.push(PathBuf::from(
+        r"F:\_Modding\Skyrim Modding\Mod Organizer\usvfs_x64.dll",
+    ));
+
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        candidates.push(PathBuf::from(local).join(r"ModOrganizer\usvfs_x64.dll"));
+    }
+
+    for drive in b'C'..=b'Z' {
+        let drive = drive as char;
+        candidates.push(PathBuf::from(format!(
+            r"{drive}:\Modding\MO2\usvfs_x64.dll"
+        )));
+        candidates.push(PathBuf::from(format!(
+            r"{drive}:\Program Files\Mod Organizer 2\usvfs_x64.dll"
+        )));
+    }
+
+    candidates.into_iter().find(|p| p.is_file())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
