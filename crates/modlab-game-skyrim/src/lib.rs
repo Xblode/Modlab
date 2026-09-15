@@ -2,6 +2,7 @@
 //! `.esp` is, what SKSE is, what MO2's on-disk format looks like — none of
 //! that belongs in `modlab-core`. See docs/01-architecture-decidee.md §3.1.
 
+pub mod installer;
 pub mod mo2;
 
 use modlab_core::game_adapter::{GameAdapter, GameInstall};

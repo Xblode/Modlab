@@ -11,8 +11,8 @@
 
 use clap::{Parser, Subcommand};
 use modlab_core::game_adapter::GameAdapter;
-use modlab_core::{loadout, store::Store, Core};
-use modlab_game_skyrim::{mo2, SkyrimAdapter};
+use modlab_core::{archive, loadout, store::Store, Core};
+use modlab_game_skyrim::{installer, mo2, SkyrimAdapter};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -61,6 +61,13 @@ enum Commands {
         mods_dir: PathBuf,
         /// Name for the new ModLab loadout.
         loadout_name: String,
+    },
+    /// Extract an archive to a staging area and report what shape it is
+    /// (bare Data content, wrapped Data/ folder, FOMOD, unrecognized).
+    /// Doesn't install anything — inspection only.
+    ArchiveInspect {
+        /// Path to the .7z or .zip archive.
+        path: PathBuf,
     },
 }
 
@@ -129,6 +136,20 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 "Loadout '{}' créé avec {imported} mod(s) importé(s) depuis {}",
                 created.name,
                 mods_dir.display()
+            );
+        }
+        Commands::ArchiveInspect { path } => {
+            let staging = cli
+                .data_root
+                .join("staging")
+                .join(path.file_stem().unwrap_or_default());
+            archive::extract(&path, &staging)?;
+            let detected = installer::detect_shape(&staging)?;
+            println!(
+                "{}: {:?} (contenu réel dans {})",
+                path.display(),
+                detected.shape,
+                detected.content_root.display()
             );
         }
     }

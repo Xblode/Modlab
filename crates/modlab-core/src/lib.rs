@@ -13,6 +13,7 @@
 use rusqlite::Connection;
 use std::path::Path;
 
+pub mod archive;
 pub mod game_adapter;
 pub mod loadout;
 pub mod store;
@@ -26,6 +27,8 @@ pub enum CoreError {
     Io(#[from] std::io::Error),
     #[error("failed to serialize event payload: {0}")]
     Serialization(#[from] serde_json::Error),
+    #[error("{0}")]
+    Archive(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
