@@ -12,6 +12,7 @@
 use clap::{Parser, Subcommand};
 use modlab_core::{detect, loadout, store::Store, Core};
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 #[derive(Parser)]
 #[command(name = "modlab", version, about = "ModLab engine CLI")]
@@ -29,8 +30,8 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Detect installed games. Currently Skyrim SE only, via a temporary
-    /// path scan — see modlab_core::detect for why this isn't the real
-    /// GameAdapter architecture yet.
+    /// path scan — see `modlab_core::detect` for why this isn't the real
+    /// `GameAdapter` architecture yet.
     Detect,
     /// Import a file into the content-addressed store.
     ModImport {
@@ -44,14 +45,24 @@ enum Commands {
     },
 }
 
-fn main() {
-    let cli = Cli::parse();
+fn main() -> ExitCode {
+    match run(Cli::parse()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            // A clean one-line message, not a Rust panic backtrace — this
+            // is the boundary between the engine's Result-based errors and
+            // a human (or Claude, via a future --json mode) reading stderr.
+            eprintln!("modlab: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
 
-    std::fs::create_dir_all(&cli.data_root).expect("failed to create data root");
+fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(&cli.data_root)?;
     let db_path = cli.data_root.join("modlab.db");
-    let core = Core::open(&db_path).expect("failed to start the ModLab engine");
-    core.log_event("cli.invoked", "{}")
-        .expect("failed to log invocation");
+    let core = Core::open(&db_path)?;
+    core.log_event("cli.invoked", "{}")?;
 
     match cli.command {
         Commands::Detect => match detect::find_skyrim_special_edition() {
@@ -59,21 +70,20 @@ fn main() {
             None => println!("Aucun jeu détecté."),
         },
         Commands::ModImport { path } => {
-            let store = Store::open(cli.data_root.join("store").join("blobs"))
-                .expect("failed to open the store");
-            let hash = store
-                .put_file(&path)
-                .unwrap_or_else(|e| panic!("failed to import {}: {e}", path.display()));
-            core.log_event(
-                "mod.imported",
-                &format!("{{\"source\":{:?},\"hash\":{:?}}}", path.display().to_string(), hash),
-            )
-            .expect("failed to log import");
+            let store = Store::open(cli.data_root.join("store").join("blobs"))?;
+            let hash = store.put_file(&path)?;
+            let payload = serde_json::json!({
+                "source": path.display().to_string(),
+                "hash": hash,
+            })
+            .to_string();
+            core.log_event("mod.imported", &payload)?;
             println!("Importé dans le store : {hash}");
         }
         Commands::LoadoutCreate { name } => {
-            let created = loadout::create(&core, &name).expect("failed to create loadout");
+            let created = loadout::create(&core, &name)?;
             println!("Loadout créé : {}", created.name);
         }
     }
+    Ok(())
 }

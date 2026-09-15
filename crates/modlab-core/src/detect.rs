@@ -14,9 +14,8 @@ use std::path::{Path, PathBuf};
 /// of guessing common paths.
 pub fn find_skyrim_special_edition() -> Option<PathBuf> {
     let candidates = ["SteamLibrary\\steamapps\\common\\Skyrim Special Edition"];
-    let program_files_candidates = [
-        "Program Files (x86)\\Steam\\steamapps\\common\\Skyrim Special Edition",
-    ];
+    let program_files_candidates =
+        ["Program Files (x86)\\Steam\\steamapps\\common\\Skyrim Special Edition"];
 
     for drive in b'C'..=b'Z' {
         let drive = drive as char;

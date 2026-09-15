@@ -24,6 +24,8 @@ pub enum CoreError {
     Database(#[from] rusqlite::Error),
     #[error("filesystem error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("failed to serialize event payload: {0}")]
+    Serialization(#[from] serde_json::Error),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
@@ -101,7 +103,8 @@ mod tests {
     fn logs_and_counts_events() {
         let core = Core::open_in_memory().unwrap();
         core.log_event("engine.started", "{}").unwrap();
-        core.log_event("game.detected", "{\"id\":\"skyrimse\"}").unwrap();
+        core.log_event("game.detected", "{\"id\":\"skyrimse\"}")
+            .unwrap();
         assert_eq!(core.event_count().unwrap(), 2);
     }
 

@@ -11,6 +11,13 @@
 //! everything else will plug into, not the finished mechanism.
 
 use crate::{Core, Result};
+use serde::Serialize;
+
+#[derive(Serialize)]
+struct TransactionPayload<'a> {
+    kind: &'a str,
+    steps: &'a [String],
+}
 
 /// A transaction under construction. Add steps describing what will
 /// happen, then `commit()` to journal it. Nothing is applied by this type
@@ -39,10 +46,10 @@ impl<'a> Transaction<'a> {
 
     /// Journal the transaction as committed. Returns the event id.
     pub fn commit(self) -> Result<i64> {
-        let payload = format!(
-            "{{\"kind\":{:?},\"steps\":{:?}}}",
-            self.kind, self.steps
-        );
+        let payload = serde_json::to_string(&TransactionPayload {
+            kind: &self.kind,
+            steps: &self.steps,
+        })?;
         self.core.log_event("transaction.committed", &payload)
     }
 }
