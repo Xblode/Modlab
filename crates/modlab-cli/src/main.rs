@@ -12,9 +12,10 @@
 use clap::{Parser, Subcommand};
 use modlab_core::game_adapter::GameAdapter;
 use modlab_core::{archive, conflicts, loadout, store::Store, Core};
-use modlab_game_skyrim::{installer, mo2, SkyrimAdapter};
+use modlab_game_skyrim::{installer, mo2, usvfs, SkyrimAdapter};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Duration;
 
 #[derive(Parser)]
 #[command(name = "modlab", version, about = "ModLab engine CLI")]
@@ -75,6 +76,19 @@ enum Commands {
     /// that until MO2's real priority direction is confirmed.
     LoadoutConflicts {
         /// Id of the loadout to check (printed by `mo2-import`/`loadout-create`).
+        loadout_id: i64,
+    },
+    /// Virtually deploy a loadout's enabled mods onto the detected Skyrim
+    /// install's real `Data/` folder via USVFS, then run a read-only
+    /// directory listing through the hooked view to prove it worked.
+    /// Nothing on real disk is read, written, or moved — USVFS only
+    /// intercepts file APIs inside the one hooked `cmd.exe` this spawns,
+    /// and that command never writes inside `Data/`. Does not launch
+    /// Skyrim or SKSE — that's a separate, still-unapproved step.
+    UsvfsCheck {
+        /// Path to `usvfs_x64.dll` (e.g. from an existing MO2 install).
+        usvfs_dll: PathBuf,
+        /// Loadout whose enabled mods should be virtually deployed.
         loadout_id: i64,
     },
 }
@@ -160,6 +174,43 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 detected.shape,
                 detected.content_root.display()
             );
+        }
+        Commands::UsvfsCheck {
+            usvfs_dll,
+            loadout_id,
+        } => {
+            let install = SkyrimAdapter
+                .detect()
+                .ok_or("Skyrim SE introuvable sur cette machine")?;
+            let data_dir = install.root.join("Data");
+            let rows = loadout::entries(&core, loadout_id)?;
+
+            let vfs = usvfs::Vfs::create(&usvfs_dll, "modlab")?;
+            let linked = usvfs::deploy_enabled_mods(&vfs, &rows, &data_dir)?;
+
+            let staging = cli.data_root.join("staging");
+            std::fs::create_dir_all(&staging)?;
+            let out_file = staging.join("usvfs-check.txt");
+            let cmd = format!(
+                "cmd.exe /c dir /b \"{}\" > \"{}\" 2>&1",
+                data_dir.display(),
+                out_file.display()
+            );
+            let exit_code = vfs.run_hooked(&cmd, Duration::from_secs(15))?;
+            let listing = std::fs::read_to_string(&out_file)?;
+
+            println!(
+                "{linked} mod(s) lié(s) virtuellement sur {} (lecture seule — rien écrit sur le vrai disque, jeu non lancé).",
+                data_dir.display()
+            );
+            println!("Commande de vérification terminée avec le code {exit_code}.");
+            println!(
+                "Aperçu du contenu vu à travers la VFS ({} entrée(s) au total) :",
+                listing.lines().count()
+            );
+            for line in listing.lines().take(20) {
+                println!("  {line}");
+            }
         }
         Commands::LoadoutConflicts { loadout_id } => {
             let rows = loadout::entries(&core, loadout_id)?;

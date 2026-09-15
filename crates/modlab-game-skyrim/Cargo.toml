@@ -7,6 +7,15 @@ description = "The Skyrim Game Adapter — everything Bethesda-modding-specific 
 
 [dependencies]
 modlab-core = { path = "../modlab-core" }
+thiserror = "1"
+
+[target.'cfg(windows)'.dependencies]
+libloading = "0.8"
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 tempfile = "3"

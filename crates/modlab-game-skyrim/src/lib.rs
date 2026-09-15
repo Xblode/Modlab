@@ -4,6 +4,8 @@
 
 pub mod installer;
 pub mod mo2;
+#[cfg(windows)]
+pub mod usvfs;
 
 use modlab_core::game_adapter::{GameAdapter, GameInstall};
 use std::path::{Path, PathBuf};
