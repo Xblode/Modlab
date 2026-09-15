@@ -11,7 +11,7 @@
 
 use clap::{Parser, Subcommand};
 use modlab_core::game_adapter::GameAdapter;
-use modlab_core::{archive, loadout, store::Store, Core};
+use modlab_core::{archive, conflicts, loadout, store::Store, Core};
 use modlab_game_skyrim::{installer, mo2, SkyrimAdapter};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -69,6 +69,14 @@ enum Commands {
         /// Path to the .7z or .zip archive.
         path: PathBuf,
     },
+    /// Find files provided by more than one enabled mod in a loadout.
+    /// Priority order used is the loadout's stored import/add order — see
+    /// `modlab_core::conflicts` for why "who wins" isn't asserted beyond
+    /// that until MO2's real priority direction is confirmed.
+    LoadoutConflicts {
+        /// Id of the loadout to check (printed by `mo2-import`/`loadout-create`).
+        loadout_id: i64,
+    },
 }
 
 fn main() -> ExitCode {
@@ -121,7 +129,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::LoadoutCreate { name } => {
             let created = loadout::create(&core, SkyrimAdapter.id(), &name)?;
-            println!("Loadout créé : {}", created.name);
+            println!("Loadout créé : {} (id {})", created.name, created.id);
         }
         Commands::Mo2Import {
             profile,
@@ -133,8 +141,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let created = loadout::create(&core, SkyrimAdapter.id(), &loadout_name)?;
             let imported = loadout::import_mods(&core, created.id, &entries)?;
             println!(
-                "Loadout '{}' créé avec {imported} mod(s) importé(s) depuis {}",
+                "Loadout '{}' (id {}) créé avec {imported} mod(s) importé(s) depuis {}",
                 created.name,
+                created.id,
                 mods_dir.display()
             );
         }
@@ -151,6 +160,44 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 detected.shape,
                 detected.content_root.display()
             );
+        }
+        Commands::LoadoutConflicts { loadout_id } => {
+            let rows = loadout::entries(&core, loadout_id)?;
+            let mods_files = rows
+                .iter()
+                .filter(|r| r.enabled)
+                .map(|r| {
+                    Ok(conflicts::ModFiles {
+                        mod_id: r.mod_id,
+                        name: r.name.clone(),
+                        files: conflicts::list_files_relative(&r.source_path)?,
+                    })
+                })
+                .collect::<std::io::Result<Vec<_>>>()?;
+
+            let found = conflicts::find_conflicts(&mods_files);
+            if found.is_empty() {
+                println!("Aucun conflit de fichier entre les mods activés.");
+            } else {
+                println!(
+                    "{} fichier(s) en conflit (ordre de priorité = ordre d'import, \
+                     pas encore confirmé contre l'UI MO2) :",
+                    found.len()
+                );
+                for conflict in &found {
+                    let contributors: Vec<_> = conflict
+                        .contributors
+                        .iter()
+                        .map(|(_, name)| name.as_str())
+                        .collect();
+                    println!(
+                        "  {} — {} (gagnant : {})",
+                        conflict.relative_path.display(),
+                        contributors.join(" < "),
+                        conflict.winner().1
+                    );
+                }
+            }
         }
     }
     Ok(())

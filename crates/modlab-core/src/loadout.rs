@@ -65,6 +65,37 @@ pub fn import_mods(core: &Core, loadout_id: i64, entries: &[ImportEntry]) -> Res
     Ok(entries.len())
 }
 
+/// One mod as attached to a loadout, read back from storage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadoutEntryRow {
+    pub mod_id: i64,
+    pub name: String,
+    pub source_path: PathBuf,
+    pub enabled: bool,
+    /// Import/add order. Not yet confirmed to correspond to MO2's real
+    /// on-screen priority direction — see `modlab_game_skyrim::mo2`'s
+    /// module doc. Don't treat a larger `position` as "wins conflicts"
+    /// without that confirmation.
+    pub position: i64,
+}
+
+/// Read a loadout's entries back, in `position` order.
+pub fn entries(core: &Core, loadout_id: i64) -> Result<Vec<LoadoutEntryRow>> {
+    Ok(core
+        .select_loadout_entries(loadout_id)?
+        .into_iter()
+        .map(
+            |(mod_id, name, source_path, enabled, position)| LoadoutEntryRow {
+                mod_id,
+                name,
+                source_path: PathBuf::from(source_path),
+                enabled,
+                position,
+            },
+        )
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,5 +155,38 @@ mod tests {
 
         assert_eq!(core.loadout_entry_count(loadout_a.id).unwrap(), 1);
         assert_eq!(core.loadout_entry_count(loadout_b.id).unwrap(), 0);
+    }
+
+    #[test]
+    fn reads_entries_back_in_position_order() {
+        let core = Core::open_in_memory().unwrap();
+        let loadout = create(&core, "skyrimse", "Main 2026").unwrap();
+        import_mods(
+            &core,
+            loadout.id,
+            &[
+                ImportEntry {
+                    name: "First".into(),
+                    source_path: "F:/mods/First".into(),
+                    enabled: true,
+                },
+                ImportEntry {
+                    name: "Second".into(),
+                    source_path: "F:/mods/Second".into(),
+                    enabled: false,
+                },
+            ],
+        )
+        .unwrap();
+
+        let rows = entries(&core, loadout.id).unwrap();
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].name, "First");
+        assert_eq!(rows[0].position, 0);
+        assert!(rows[0].enabled);
+        assert_eq!(rows[1].name, "Second");
+        assert_eq!(rows[1].position, 1);
+        assert!(!rows[1].enabled);
     }
 }

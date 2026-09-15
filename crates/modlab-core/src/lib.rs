@@ -14,6 +14,7 @@ use rusqlite::Connection;
 use std::path::Path;
 
 pub mod archive;
+pub mod conflicts;
 pub mod game_adapter;
 pub mod loadout;
 pub mod store;
@@ -32,6 +33,10 @@ pub enum CoreError {
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
+
+/// `(mod_id, name, source_path, enabled, position)` — see
+/// `Core::select_loadout_entries`.
+type LoadoutEntryTuple = (i64, String, String, bool, i64);
 
 /// The engine's single entry point. One `Core` owns one SQLite connection;
 /// nothing else in the process should open the database file directly.
@@ -159,6 +164,32 @@ impl Core {
                 |row| row.get(0),
             )
             .map_err(CoreError::from)
+    }
+
+    /// Read a loadout's entries back, ordered by `position` ascending
+    /// (i.e. the order they were imported/added in). Raw tuples
+    /// (`mod_id, name, source_path, enabled, position`) — `loadout::entries`
+    /// wraps this in a named type for callers outside the Core.
+    pub(crate) fn select_loadout_entries(&self, loadout_id: i64) -> Result<Vec<LoadoutEntryTuple>> {
+        let mut stmt = self.db.prepare(
+            "SELECT mod_.id, mod_.name, mod_.source_path, loadout_entry.enabled, loadout_entry.position \
+             FROM loadout_entry \
+             JOIN mod_ ON mod_.id = loadout_entry.mod_id \
+             WHERE loadout_entry.loadout_id = ?1 \
+             ORDER BY loadout_entry.position ASC",
+        )?;
+        let rows = stmt
+            .query_map([loadout_id], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
     }
 }
 
