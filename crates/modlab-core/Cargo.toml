@@ -8,6 +8,7 @@ description = "ModLab engine: the single source of truth. UI, CLI and MCP are al
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
 thiserror = "1"
+blake3 = "1"
 
 [dev-dependencies]
 tempfile = "3"

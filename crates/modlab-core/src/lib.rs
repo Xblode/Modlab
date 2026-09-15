@@ -13,10 +13,17 @@
 use rusqlite::Connection;
 use std::path::Path;
 
+pub mod detect;
+pub mod loadout;
+pub mod store;
+pub mod transaction;
+
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
     #[error("database error: {0}")]
     Database(#[from] rusqlite::Error),
+    #[error("filesystem error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
