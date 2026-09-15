@@ -39,3 +39,6 @@ Thumbs.db
 
 # Claude Code local scratch
 .claude/settings.local.json
+
+# Unexplained external sync artifact, not ModLab source — see project memory
+/shared/
