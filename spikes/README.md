@@ -26,11 +26,15 @@ Time-boxed, throwaway explorations for the risks flagged in `docs/01-architectur
 
 **Decision:** use `rmcp`.
 
-## llama.cpp Rust binding — ⏳ in progress, 2026-09-15
+## llama.cpp Rust binding — ✅ resolved, 2026-09-15
 
 **Question:** `llama-cpp-2` (thin binding, closer to LLamaSharp's role) vs `candle` (pure-Rust reimplementation)?
 
-Compile spike (`spikes/llama-binding/`, `llama-cpp-2` dependency) kicked off — compiles llama.cpp's C++ sources, can take a while on first run. Result not in yet as of this note; check `spikes/llama-binding/` build output before picking a side. Leaning `llama-cpp-2` if it compiles cleanly (closest analog to the already-proven LLamaSharp approach: GGUF, CPU/CUDA/Vulkan backends, thin wrapper); `candle` as fallback if the C++ build proves fragile on this machine.
+**Result:** `llama-cpp-2` compiles and links cleanly, full C++ llama.cpp build included (~2 min from scratch). Needed two extra machine-level dependencies neither of which were present: **LLVM** (for `libclang.dll`, which `bindgen` needs to generate the FFI layer from llama.cpp's C headers) and **CMake** (to actually build llama.cpp). Both installed via winget. `spikes/llama-binding/` runs.
+
+**Decision:** use `llama-cpp-2`. Closest analog to the already-proven LLamaSharp approach (GGUF, CPU/CUDA/Vulkan backends, thin wrapper over the real llama.cpp) — no need to fall back to `candle`.
+
+⚠️ **Consequence for packaging later:** whatever machine actually builds ModLab's release binaries needs LLVM + CMake installed too (dev-time only — these aren't runtime dependencies of the shipped app, `llama-cpp-sys-2` statically links what it builds). Worth a line in the eventual CI/build docs.
 
 ## xEdit orchestration — 🚧 blocked, no binary on this machine, 2026-09-15
 
