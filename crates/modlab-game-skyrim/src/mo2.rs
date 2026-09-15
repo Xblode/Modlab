@@ -2,9 +2,11 @@
 //! (`modlist.txt` / `plugins.txt` / `loadorder.txt`).
 //!
 //! This only *reads* — nothing here installs, deploys, or touches MO2's
-//! `mods/` folder. That's the next step (see the "[SKYRIM] Import d'instance
-//! MO2" ClickUp task), deliberately kept separate so parsing can be trusted
-//! on its own before anything acts on what it finds.
+//! `mods/` folder. `to_import_entries` bridges parsed data to ModLab's
+//! generic import model (`modlab_core::loadout::ImportEntry`), but still
+//! doesn't write anything — `loadout::import_mods` is what actually
+//! persists, kept separate so parsing/mapping can be trusted independently
+//! of the write path.
 //!
 //! Format notes, confirmed against a real profile rather than assumed:
 //! - `modlist.txt`: one entry per line, `#`-comments and blank lines
@@ -64,6 +66,30 @@ impl Mo2Profile {
             .iter()
             .filter_map(|e| match e {
                 ModlistEntry::Managed { name, .. } => Some(name.as_str()),
+                ModlistEntry::Informational { .. } => None,
+            })
+            .collect()
+    }
+
+    /// Convert the managed mods into ModLab's generic import shape, so
+    /// `modlab_core::loadout::import_mods` can persist them without
+    /// knowing anything about MO2. `mods_dir` is the instance's `mods/`
+    /// folder (e.g. `<MO2 instance>/mods`) — each managed mod is expected
+    /// to have a same-named subfolder there; informational entries
+    /// (DLC/Creation Club/Unmanaged) are skipped since they were never a
+    /// `mods/` folder to begin with.
+    #[must_use]
+    pub fn to_import_entries(&self, mods_dir: &Path) -> Vec<modlab_core::loadout::ImportEntry> {
+        self.modlist
+            .iter()
+            .filter_map(|e| match e {
+                ModlistEntry::Managed { name, enabled } => {
+                    Some(modlab_core::loadout::ImportEntry {
+                        name: name.clone(),
+                        source_path: mods_dir.join(name),
+                        enabled: *enabled,
+                    })
+                }
                 ModlistEntry::Informational { .. } => None,
             })
             .collect()
@@ -292,5 +318,31 @@ mod tests {
             "expected at least the known managed mods (SkyUI, Address Library)"
         );
         assert!(profile.managed_mod_names().contains(&"SkyUI"));
+    }
+
+    #[test]
+    fn converts_managed_mods_to_import_entries_and_skips_informational() {
+        let dir = profile_with("+SkyUI\n-Disabled Mod\n*DLC: Dawnguard\n", "", "");
+        let profile = read_profile(dir.path()).unwrap();
+        let mods_dir = Path::new("F:/instance/mods");
+
+        let entries = profile.to_import_entries(mods_dir);
+
+        assert_eq!(
+            entries,
+            vec![
+                modlab_core::loadout::ImportEntry {
+                    name: "SkyUI".into(),
+                    source_path: mods_dir.join("SkyUI"),
+                    enabled: true,
+                },
+                modlab_core::loadout::ImportEntry {
+                    name: "Disabled Mod".into(),
+                    source_path: mods_dir.join("Disabled Mod"),
+                    enabled: false,
+                },
+            ],
+            "DLC entry must not appear — it was never a mods/ folder"
+        );
     }
 }

@@ -50,6 +50,18 @@ enum Commands {
         /// Path to the MO2 profile directory (contains modlist.txt etc.).
         path: PathBuf,
     },
+    /// Import an MO2 instance's managed mods into a new ModLab loadout.
+    /// Only records what ModLab knows about each mod (name, source path,
+    /// enabled state) — does not copy files into the store or touch MO2's
+    /// own folders in any way.
+    Mo2Import {
+        /// Path to the MO2 profile directory (contains modlist.txt etc.).
+        profile: PathBuf,
+        /// Path to the MO2 instance's `mods/` folder.
+        mods_dir: PathBuf,
+        /// Name for the new ModLab loadout.
+        loadout_name: String,
+    },
 }
 
 fn main() -> ExitCode {
@@ -101,8 +113,23 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             println!("Importé dans le store : {hash}");
         }
         Commands::LoadoutCreate { name } => {
-            let created = loadout::create(&core, &name)?;
+            let created = loadout::create(&core, SkyrimAdapter.id(), &name)?;
             println!("Loadout créé : {}", created.name);
+        }
+        Commands::Mo2Import {
+            profile,
+            mods_dir,
+            loadout_name,
+        } => {
+            let profile = mo2::read_profile(&profile)?;
+            let entries = profile.to_import_entries(&mods_dir);
+            let created = loadout::create(&core, SkyrimAdapter.id(), &loadout_name)?;
+            let imported = loadout::import_mods(&core, created.id, &entries)?;
+            println!(
+                "Loadout '{}' créé avec {imported} mod(s) importé(s) depuis {}",
+                created.name,
+                mods_dir.display()
+            );
         }
     }
     Ok(())

@@ -55,15 +55,36 @@ impl Core {
     }
 
     fn migrate(&self) -> Result<()> {
-        // First slice of the event log described in
-        // docs/01-architecture-decidee.md §5. Transactions, revisions and
-        // the CAS store land on top of this in later work.
+        // Event log described in docs/01-architecture-decidee.md §5, plus a
+        // first slice of the Loadout/Mod/LoadoutEntry domain (§5's data
+        // model, simplified: no Archive/Blob/ModFile/LoadoutRevision yet —
+        // those need the CAS-backed install pipeline this doesn't have).
+        // `mod` isn't a valid bare table name (reserved in some SQL
+        // dialects, and shadows Rust's own keyword when read back) — kept
+        // as `mod_` throughout.
         self.db.execute_batch(
             "CREATE TABLE IF NOT EXISTS event (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 occurred_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
                 kind        TEXT NOT NULL,
                 payload     TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS loadout (
+                id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id TEXT NOT NULL,
+                name    TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS mod_ (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT NOT NULL,
+                source_path TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS loadout_entry (
+                loadout_id INTEGER NOT NULL REFERENCES loadout(id),
+                mod_id     INTEGER NOT NULL REFERENCES mod_(id),
+                enabled    INTEGER NOT NULL,
+                position   INTEGER NOT NULL,
+                PRIMARY KEY (loadout_id, mod_id)
             );",
         )?;
         Ok(())
@@ -85,6 +106,55 @@ impl Core {
     pub fn event_count(&self) -> Result<i64> {
         self.db
             .query_row("SELECT COUNT(*) FROM event", [], |row| row.get(0))
+            .map_err(CoreError::from)
+    }
+
+    /// Insert a new, empty loadout row. Returns its id.
+    pub(crate) fn insert_loadout(&self, game_id: &str, name: &str) -> Result<i64> {
+        self.db.execute(
+            "INSERT INTO loadout (game_id, name) VALUES (?1, ?2)",
+            (game_id, name),
+        )?;
+        Ok(self.db.last_insert_rowid())
+    }
+
+    /// Insert a new mod row. Doesn't dedup against existing mods with the
+    /// same name/source — each import creates fresh rows for now; matching
+    /// re-imported mods to existing ones is real work for later, not
+    /// guessed at here.
+    pub(crate) fn insert_mod(&self, name: &str, source_path: &str) -> Result<i64> {
+        self.db.execute(
+            "INSERT INTO mod_ (name, source_path) VALUES (?1, ?2)",
+            (name, source_path),
+        )?;
+        Ok(self.db.last_insert_rowid())
+    }
+
+    /// Attach a mod to a loadout at a given position, enabled or not.
+    pub(crate) fn insert_loadout_entry(
+        &self,
+        loadout_id: i64,
+        mod_id: i64,
+        enabled: bool,
+        position: i64,
+    ) -> Result<()> {
+        self.db.execute(
+            "INSERT INTO loadout_entry (loadout_id, mod_id, enabled, position) \
+             VALUES (?1, ?2, ?3, ?4)",
+            (loadout_id, mod_id, enabled, position),
+        )?;
+        Ok(())
+    }
+
+    /// Number of mods attached to a loadout — mostly useful for tests until
+    /// a real query API exists.
+    pub fn loadout_entry_count(&self, loadout_id: i64) -> Result<i64> {
+        self.db
+            .query_row(
+                "SELECT COUNT(*) FROM loadout_entry WHERE loadout_id = ?1",
+                [loadout_id],
+                |row| row.get(0),
+            )
             .map_err(CoreError::from)
     }
 }
