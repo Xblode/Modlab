@@ -4,10 +4,10 @@
   "version": "0.0.1",
   "identifier": "dev.modlab.app",
   "build": {
-    "beforeDevCommand": "npm --prefix ../../ui run dev",
+    "beforeDevCommand": "npm --prefix ../ui run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm --prefix ../../ui run build",
-    "frontendDist": "../../ui/dist"
+    "beforeBuildCommand": "npm --prefix ../ui run build",
+    "frontendDist": "../ui/dist"
   },
   "app": {
     "windows": [

@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev --config ../crates/modlab-ui/tauri.conf.json"
+    "tauri:dev": "cd C:/Users/planc/Documents/_Projets/Perso/ModLab/crates/modlab-ui && C:/Users/planc/Documents/_Projets/Perso/ModLab/ui/node_modules/.bin/tauri.cmd dev"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.12",
