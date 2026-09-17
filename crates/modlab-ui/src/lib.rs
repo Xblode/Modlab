@@ -2,7 +2,7 @@
 //! `modlab-core` — same rule as the CLI: no private state, no game rules.
 
 use modlab_core::game_adapter::GameAdapter;
-use modlab_core::{loadout, Core};
+use modlab_core::{conflicts, loadout, Core};
 use modlab_game_minecraft::MinecraftAdapter;
 use modlab_game_skyrim::SkyrimAdapter;
 use serde::Serialize;
@@ -49,6 +49,29 @@ pub struct ModRowDto {
     pub position: i64,
 }
 
+/// One mod's share of a loadout's file conflicts. `wins`/`loses` count the
+/// distinct paths this mod is involved in — the shape the Mods table needs to
+/// badge a row, without shipping every conflicting path across IPC.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModConflictsDto {
+    pub mod_id: i64,
+    pub name: String,
+    pub wins: i64,
+    pub loses: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadoutConflictsDto {
+    pub mods: Vec<ModConflictsDto>,
+    /// Enabled mods whose folder could not be read, as `id: reason`.
+    ///
+    /// An empty `mods` list plus a non-empty `unreadable` list means "not
+    /// scanned", never "no conflict" — the UI must not conflate the two.
+    pub unreadable: Vec<String>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShellSnapshot {
@@ -62,17 +85,20 @@ pub struct ShellSnapshot {
 
 fn detect_games() -> Vec<DetectedGameDto> {
     let adapters: [&dyn GameAdapter; 2] = [&SkyrimAdapter, &MinecraftAdapter];
-    adapters.into_iter().filter_map(|adapter| {
-        let install = adapter.detect()?;
-        let capabilities = adapter.capabilities();
-        Some(DetectedGameDto {
-            id: install.id,
-            name: install.name,
-            root: install.root.display().to_string(),
-            short: capabilities.short_name.to_string(),
-            capabilities,
+    adapters
+        .into_iter()
+        .filter_map(|adapter| {
+            let install = adapter.detect()?;
+            let capabilities = adapter.capabilities();
+            Some(DetectedGameDto {
+                id: install.id,
+                name: install.name,
+                root: install.root.display().to_string(),
+                short: capabilities.short_name.to_string(),
+                capabilities,
+            })
         })
-    }).collect()
+        .collect()
 }
 
 fn resolve_data_root() -> PathBuf {
@@ -172,6 +198,43 @@ fn set_mod_enabled(
     entries_dto(&core, loadout_id)
 }
 
+/// File conflicts for a loadout — the same scan `modlab loadout-conflicts`
+/// prints (`modlab_core::conflicts::report_for_entries`), so what the UI
+/// badges and what the CLI reports can never drift apart.
+///
+/// Read-only, so it sits in the "Lecture" permission tier (§7.2): nothing is
+/// written, no confirmation is involved. Deliberately recomputed on every
+/// call instead of cached in `AppState`: a cache would have to be
+/// invalidated on every enable/disable, and a stale conflict badge is a wrong
+/// statement about the user's install. The UI debounces its calls instead.
+#[tauri::command]
+fn get_loadout_conflicts(
+    state: State<AppState>,
+    loadout_id: i64,
+) -> Result<LoadoutConflictsDto, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    let rows = loadout::entries(&core, loadout_id).map_err(|e| e.to_string())?;
+    let report = conflicts::report_for_entries(&rows);
+    let count = |n: usize| i64::try_from(n).unwrap_or(i64::MAX);
+    Ok(LoadoutConflictsDto {
+        mods: report
+            .mods
+            .into_iter()
+            .map(|m| ModConflictsDto {
+                mod_id: m.mod_id,
+                name: m.name,
+                wins: count(m.wins),
+                loses: count(m.loses),
+            })
+            .collect(),
+        unreadable: report
+            .unreadable
+            .into_iter()
+            .map(|(mod_id, why)| format!("{mod_id}: {why}"))
+            .collect(),
+    })
+}
+
 /// Create an empty loadout through the Core. The UI never writes SQLite
 /// directly; it remains a client of the engine just like the CLI.
 #[tauri::command]
@@ -250,6 +313,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_shell_snapshot,
             set_mod_enabled,
+            get_loadout_conflicts,
             create_loadout,
             launch_skse
         ])

@@ -270,28 +270,32 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::LoadoutConflicts { loadout_id } => {
             let rows = loadout::entries(&core, loadout_id)?;
-            let mods_files = rows
-                .iter()
-                .filter(|r| r.enabled)
-                .map(|r| {
-                    Ok(conflicts::ModFiles {
-                        mod_id: r.mod_id,
-                        name: r.name.clone(),
-                        files: conflicts::list_files_relative(&r.source_path)?,
-                    })
-                })
-                .collect::<std::io::Result<Vec<_>>>()?;
+            // Same scan the UI badges its rows from — one implementation, two
+            // clients (see `conflicts::report_for_entries`).
+            let report = conflicts::report_for_entries(&rows);
+            for (mod_id, error) in &report.unreadable {
+                println!("  ! mod {mod_id} non analysé — {error}");
+            }
 
-            let found = conflicts::find_conflicts(&mods_files);
-            if found.is_empty() {
-                println!("Aucun conflit de fichier entre les mods activés.");
+            if report.conflicts.is_empty() {
+                if report.unreadable.is_empty() {
+                    println!("Aucun conflit de fichier entre les mods activés.");
+                } else {
+                    // Saying "no conflict" while some mods were never read
+                    // would be a lie, not a summary.
+                    println!(
+                        "Aucun conflit entre les mods analysés — mais {} mod(s) n'ont pas pu \
+                         être lus (voir ci-dessus).",
+                        report.unreadable.len()
+                    );
+                }
             } else {
                 println!(
                     "{} fichier(s) en conflit (ordre de priorité = ordre d'import, \
                      pas encore confirmé contre l'UI MO2) :",
-                    found.len()
+                    report.conflicts.len()
                 );
-                for conflict in &found {
+                for conflict in &report.conflicts {
                     let contributors: Vec<_> = conflict
                         .contributors
                         .iter()

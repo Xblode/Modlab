@@ -96,6 +96,49 @@ export async function launchSkse(loadoutId: number): Promise<void> {
   return invoke("launch_skse", { loadoutId });
 }
 
+export type ModConflicts = {
+  modId: number;
+  name: string;
+  /** Distinct paths this mod wins: it is last in the priority order scanned. */
+  wins: number;
+  /** Distinct paths another mod wins over this one. */
+  loses: number;
+};
+
+export type LoadoutConflicts = {
+  mods: ModConflicts[];
+  /**
+   * Enabled mods whose folder could not be read, as `id: reason`.
+   *
+   * A short `mods` list next to a non-empty `unreadable` list means the scan
+   * *does not know* about those mods — never that they conflict with nothing.
+   */
+  unreadable: string[];
+};
+
+/**
+ * Which mod was scanned as winning is decided by the loadout's stored import
+ * order, and MO2's real on-screen priority direction is still unconfirmed
+ * (see `modlab_core::loadout::LoadoutEntryRow`). Every win/lose mark the UI
+ * shows carries this as its tooltip rather than presenting a guess as a fact.
+ */
+export const CONFLICT_PRIORITY_CAVEAT =
+  "Ordre de priorité = ordre d’import — direction MO2 pas encore confirmée";
+
+/**
+ * File conflicts of a loadout, scanned by the Core over the real mod folders.
+ * Same computation the CLI's `loadout-conflicts` command runs.
+ */
+export async function getLoadoutConflicts(
+  loadoutId: number,
+): Promise<LoadoutConflicts> {
+  if (!isTauri()) {
+    return previewConflicts();
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<LoadoutConflicts>("get_loadout_conflicts", { loadoutId });
+}
+
 /**
  * Browser-preview fixture. Only reachable outside the Tauri shell (`npm run dev`
  * in a plain browser), so it can never be mistaken for Core data at runtime —
@@ -159,5 +202,26 @@ function mockSnapshot(): ShellSnapshot {
     })),
     selectedLoadoutId: 1,
     usvfsDll: null,
+  };
+}
+
+/**
+ * Browser-preview fixture for conflicts — same rule as `mockSnapshot`: only
+ * reachable outside the Tauri shell, with the status bar spelling out
+ * "(aperçu navigateur — pas le Core)" next to it. The real scan walks the real
+ * mod folders; a plain browser has no folder to walk, so these numbers are the
+ * maquette's own example, not a measurement. Mod 3 (SSE Engine Fixes) is the
+ * fixture's disabled mod: it is absent here on purpose, exactly as the Core
+ * leaves it out of a scan.
+ */
+function previewConflicts(): LoadoutConflicts {
+  return {
+    mods: [
+      { modId: 5, name: "SkyUI", wins: 2, loses: 0 },
+      { modId: 8, name: "Lux", wins: 1, loses: 1 },
+      { modId: 9, name: "Static Mesh Improvement Mod", wins: 0, loses: 27 },
+      { modId: 10, name: "Skyland AIO", wins: 27, loses: 0 },
+    ],
+    unreadable: [],
   };
 }
