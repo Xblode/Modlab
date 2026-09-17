@@ -19,6 +19,42 @@ pub struct GameInstall {
     pub root: PathBuf,
 }
 
+/// Game vocabulary exposed to clients, not a promise that each view is implemented.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GameSection {
+    Dashboard,
+    Mods,
+    Plugins,
+    Archives,
+    Directory,
+    Saves,
+    Health,
+    Packs,
+    Worlds,
+    Servers,
+}
+
+/// A relevant game tool. Declaration does not imply installation or execution support.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameTool {
+    pub id: &'static str,
+    pub name: &'static str,
+}
+
+/// Static adapter knowledge. Clients own visual styling, never game capability inference.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameCapabilities {
+    pub short_name: &'static str,
+    pub sections: Vec<GameSection>,
+    pub deployment_label: &'static str,
+    pub script_extender: Option<&'static str>,
+    pub load_order_tool: Option<GameTool>,
+}
+
+
 /// What a Game Adapter must be able to do.
 ///
 /// Deliberately small right now — only what's actually implemented and
@@ -30,6 +66,9 @@ pub struct GameInstall {
 pub trait GameAdapter {
     /// Stable identifier for this adapter's game, e.g. `"skyrimse"`.
     fn id(&self) -> &'static str;
+
+    /// Declare game vocabulary and relevant tools independently of detection.
+    fn capabilities(&self) -> GameCapabilities;
 
     /// Try to find a real install of this game on the current machine.
     fn detect(&self) -> Option<GameInstall>;

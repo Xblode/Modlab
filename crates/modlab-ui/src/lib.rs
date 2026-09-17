@@ -23,6 +23,7 @@ pub struct DetectedGameDto {
     pub name: String,
     pub root: String,
     pub short: String,
+    pub capabilities: modlab_core::game_adapter::GameCapabilities,
 }
 
 #[derive(Serialize)]
@@ -60,24 +61,18 @@ pub struct ShellSnapshot {
 }
 
 fn detect_games() -> Vec<DetectedGameDto> {
-    let mut games = Vec::new();
-    if let Some(install) = SkyrimAdapter.detect() {
-        games.push(DetectedGameDto {
+    let adapters: [&dyn GameAdapter; 2] = [&SkyrimAdapter, &MinecraftAdapter];
+    adapters.into_iter().filter_map(|adapter| {
+        let install = adapter.detect()?;
+        let capabilities = adapter.capabilities();
+        Some(DetectedGameDto {
             id: install.id,
             name: install.name,
             root: install.root.display().to_string(),
-            short: "Skyrim SE".to_string(),
-        });
-    }
-    if let Some(install) = MinecraftAdapter.detect() {
-        games.push(DetectedGameDto {
-            id: install.id,
-            name: install.name,
-            root: install.root.display().to_string(),
-            short: "Minecraft".to_string(),
-        });
-    }
-    games
+            short: capabilities.short_name.to_string(),
+            capabilities,
+        })
+    }).collect()
 }
 
 fn resolve_data_root() -> PathBuf {
@@ -177,6 +172,31 @@ fn set_mod_enabled(
     entries_dto(&core, loadout_id)
 }
 
+/// Create an empty loadout through the Core. The UI never writes SQLite
+/// directly; it remains a client of the engine just like the CLI.
+#[tauri::command]
+fn create_loadout(
+    state: State<AppState>,
+    game_id: String,
+    name: String,
+) -> Result<LoadoutDto, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Donne un nom à l’instance.".into());
+    }
+    if name.chars().count() > 100 {
+        return Err("Le nom de l’instance ne peut pas dépasser 100 caractères.".into());
+    }
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    let loadout = loadout::create(&core, &game_id, name).map_err(|e| e.to_string())?;
+    Ok(LoadoutDto {
+        id: loadout.id,
+        game_id,
+        name: loadout.name,
+        mod_count: 0,
+    })
+}
+
 #[tauri::command]
 fn launch_skse(state: State<AppState>, loadout_id: i64) -> Result<(), String> {
     #[cfg(not(windows))]
@@ -230,6 +250,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_shell_snapshot,
             set_mod_enabled,
+            create_loadout,
             launch_skse
         ])
         .run(tauri::generate_context!())

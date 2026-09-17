@@ -17,6 +17,17 @@ impl GameAdapter for MinecraftAdapter {
         "minecraft"
     }
 
+    fn capabilities(&self) -> modlab_core::game_adapter::GameCapabilities {
+        use modlab_core::game_adapter::{GameCapabilities, GameSection::*};
+        GameCapabilities {
+            short_name: "Minecraft",
+            sections: vec![Dashboard, Mods, Packs, Worlds, Servers, Health],
+            deployment_label: "dossier mods/",
+            script_extender: None,
+            load_order_tool: None,
+        }
+    }
+
     fn detect(&self) -> Option<GameInstall> {
         find_install().map(|root| GameInstall {
             id: "minecraft".to_string(),
@@ -74,6 +85,17 @@ mod tests {
     #[test]
     fn adapter_id_is_stable() {
         assert_eq!(MinecraftAdapter.id(), "minecraft");
+    }
+
+    #[test]
+    fn capabilities_declare_expected_vocabulary() {
+        use modlab_core::game_adapter::GameSection;
+        let caps = MinecraftAdapter.capabilities();
+        assert_eq!(caps.short_name, "Minecraft");
+        assert_eq!(caps.deployment_label, "dossier mods/");
+        assert_eq!(caps.script_extender, None);
+        assert!(caps.sections.contains(&GameSection::Worlds));
+        assert!(caps.load_order_tool.is_none());
     }
 
     #[test]

@@ -17,6 +17,17 @@ impl GameAdapter for SkyrimAdapter {
         "skyrimse"
     }
 
+    fn capabilities(&self) -> modlab_core::game_adapter::GameCapabilities {
+        use modlab_core::game_adapter::{GameCapabilities, GameSection::*, GameTool};
+        GameCapabilities {
+            short_name: "Skyrim SE",
+            sections: vec![Dashboard, Mods, Plugins, Archives, Directory, Saves, Health],
+            deployment_label: "USVFS",
+            script_extender: Some("SKSE"),
+            load_order_tool: Some(GameTool { id: "loot", name: "LOOT" }),
+        }
+    }
+
     fn detect(&self) -> Option<GameInstall> {
         find_special_edition().map(|root| GameInstall {
             id: "skyrimse".to_string(),
@@ -96,6 +107,19 @@ mod tests {
     #[test]
     fn adapter_id_is_stable() {
         assert_eq!(SkyrimAdapter.id(), "skyrimse");
+    }
+
+    #[test]
+    fn capabilities_declare_expected_vocabulary() {
+        use modlab_core::game_adapter::GameSection;
+        let caps = SkyrimAdapter.capabilities();
+        assert_eq!(caps.short_name, "Skyrim SE");
+        assert_eq!(caps.deployment_label, "USVFS");
+        assert_eq!(caps.script_extender, Some("SKSE"));
+        assert!(caps.sections.contains(&GameSection::Plugins));
+        assert!(caps.sections.contains(&GameSection::Saves));
+        let loot = caps.load_order_tool.expect("skyrim declares a load order tool");
+        assert_eq!(loot.id, "loot");
     }
 
     #[test]
