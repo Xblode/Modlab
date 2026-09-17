@@ -207,13 +207,11 @@ fn set_mod_enabled(
 /// call instead of cached in `AppState`: a cache would have to be
 /// invalidated on every enable/disable, and a stale conflict badge is a wrong
 /// statement about the user's install. The UI debounces its calls instead.
-#[tauri::command]
-fn get_loadout_conflicts(
-    state: State<AppState>,
-    loadout_id: i64,
-) -> Result<LoadoutConflictsDto, String> {
-    let core = state.core.lock().map_err(|e| e.to_string())?;
-    let rows = loadout::entries(&core, loadout_id).map_err(|e| e.to_string())?;
+/// The scan itself, split out from the command so it can be tested against a
+/// real (in-memory) Core plus real folders — the browser preview only ever
+/// exercises the UI's handling of the payload, never this path.
+fn loadout_conflicts(core: &Core, loadout_id: i64) -> Result<LoadoutConflictsDto, String> {
+    let rows = loadout::entries(core, loadout_id).map_err(|e| e.to_string())?;
     let report = conflicts::report_for_entries(&rows);
     let count = |n: usize| i64::try_from(n).unwrap_or(i64::MAX);
     Ok(LoadoutConflictsDto {
@@ -233,6 +231,15 @@ fn get_loadout_conflicts(
             .map(|(mod_id, why)| format!("{mod_id}: {why}"))
             .collect(),
     })
+}
+
+#[tauri::command]
+fn get_loadout_conflicts(
+    state: State<AppState>,
+    loadout_id: i64,
+) -> Result<LoadoutConflictsDto, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    loadout_conflicts(&core, loadout_id)
 }
 
 /// Create an empty loadout through the Core. The UI never writes SQLite
@@ -319,4 +326,121 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running ModLab");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use modlab_core::loadout::ImportEntry;
+    use std::fs;
+
+    /// This crate has no `tempfile` dependency, and adding one just for a test
+    /// would be a `Cargo.toml` change nobody asked for — so the scratch folder
+    /// is made by hand and removed by the test that made it.
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("modlab-ui-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Two mods sharing `interface/config.txt`, plus a third that is disabled
+    /// and also provides it. The scan must badge the enabled pair and never
+    /// look at the disabled one.
+    #[test]
+    fn conflicts_dto_tallies_enabled_mods_and_leaves_out_disabled_ones() {
+        let core = Core::open_in_memory().unwrap();
+        let loadout = loadout::create(&core, "skyrimse", "Test").unwrap();
+
+        let mut folders = Vec::new();
+        for (tag, body) in [("losing", "a"), ("winning", "b"), ("disabled", "c")] {
+            let dir = scratch(tag);
+            fs::create_dir_all(dir.join("interface")).unwrap();
+            fs::write(dir.join("interface/config.txt"), body).unwrap();
+            folders.push(dir);
+        }
+        let [losing, winning, disabled] = folders.as_slice() else {
+            unreachable!("the loop above always pushes three folders")
+        };
+
+        let imported = loadout::import_mods(
+            &core,
+            loadout.id,
+            &[
+                ImportEntry {
+                    name: "Lux".into(),
+                    source_path: losing.clone(),
+                    enabled: true,
+                },
+                ImportEntry {
+                    name: "Disabled Overhaul".into(),
+                    source_path: disabled.clone(),
+                    enabled: false,
+                },
+                ImportEntry {
+                    name: "SkyUI".into(),
+                    source_path: winning.clone(),
+                    enabled: true,
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(imported, 3);
+
+        let dto = loadout_conflicts(&core, loadout.id).unwrap();
+
+        assert_eq!(dto.mods.len(), 2, "only enabled mods take part in a scan");
+        let lux = dto.mods.iter().find(|m| m.name == "Lux").unwrap();
+        let skyui = dto.mods.iter().find(|m| m.name == "SkyUI").unwrap();
+        assert_eq!((lux.wins, lux.loses), (0, 1));
+        assert_eq!((skyui.wins, skyui.loses), (1, 0));
+        assert!(dto.unreadable.is_empty());
+
+        for dir in folders {
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
+
+    /// A mod folder that no longer exists must not swallow the whole answer:
+    /// the readable mods are still reported, and the failure is named.
+    #[test]
+    fn conflicts_dto_reports_a_missing_folder_as_unreadable() {
+        let core = Core::open_in_memory().unwrap();
+        let loadout = loadout::create(&core, "skyrimse", "Test").unwrap();
+
+        let present = scratch("present");
+        fs::write(present.join("readme.txt"), b"x").unwrap();
+        let gone = present.join("this-folder-was-renamed");
+
+        loadout::import_mods(
+            &core,
+            loadout.id,
+            &[
+                ImportEntry {
+                    name: "Present".into(),
+                    source_path: present.clone(),
+                    enabled: true,
+                },
+                ImportEntry {
+                    name: "Renamed Away".into(),
+                    source_path: gone,
+                    enabled: true,
+                },
+            ],
+        )
+        .unwrap();
+
+        let dto = loadout_conflicts(&core, loadout.id).unwrap();
+
+        assert_eq!(dto.mods.len(), 1, "the readable mod is still reported");
+        assert_eq!(dto.mods[0].name, "Present");
+        assert_eq!(dto.unreadable.len(), 1);
+        assert!(
+            dto.unreadable[0].contains("this-folder-was-renamed"),
+            "the payload names the folder that failed: {}",
+            dto.unreadable[0]
+        );
+
+        let _ = fs::remove_dir_all(present);
+    }
 }
