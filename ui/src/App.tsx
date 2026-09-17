@@ -377,7 +377,18 @@ export default function App() {
                   ))
                 )}
               </Sec>
-              <Sec title="Jeux" count={games.length}>
+              <Sec
+                title="Jeux"
+                count={games.length}
+                action={
+                  <IconButton
+                    name="plus"
+                    className="sec-act"
+                    title="Ajouter un jeu"
+                    onClick={() => unwired("Ajouter un jeu")}
+                  />
+                }
+              >
                 {games.length === 0 ? (
                   <div className="tr muted" style={{ fontStyle: "italic" }}>
                     Aucun jeu détecté
@@ -790,20 +801,31 @@ function CreateLoadoutDialog({
 function Sec({
   title,
   count,
+  action,
   children,
 }: {
   title: string;
   count: number;
+  /** Optional affordance for the section, pinned to the right of the title row. */
+  action?: ReactNode;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(true);
   return (
     <div className={`sec ${open ? "" : "closed"}`}>
-      <button className="sec-h" type="button" onClick={() => setOpen((v) => !v)}>
-        <Ico name="chev" />
-        <span className="u">{title}</span>
-        <span className="cnt">{count}</span>
-      </button>
+      <div className="sec-h">
+        <button
+          className="sec-t"
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <Ico name="chev" />
+          <span className="u">{title}</span>
+          <span className="cnt">({count})</span>
+        </button>
+        {action}
+      </div>
       <div className="sec-b">{children}</div>
     </div>
   );

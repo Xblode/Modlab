@@ -86,11 +86,11 @@
   .side-foot .fi .ico{ width:12px; height:12px; }
   .side-foot .fi.fade{ padding-right:14px; min-width:0; }
   .app.running .side-foot{ background:var(--run); color:#fff; }
-  .sec-h{ display:flex; align-items:center; gap:4px; height:26px; padding:0 8px 0 6px; width:100%; text-align:left; margin-top:6px; }
-  .sec-h .ico{ width:12px; height:12px; color:var(--t3); transition:transform .12s; }
-  .sec.closed .sec-h .ico{ transform:rotate(-90deg); }
+  .sec-h{ display:flex; align-items:center; gap:4px; height:26px; padding:0 3px 0 6px; width:100%; text-align:left; margin-top:6px; }
+  .sec-h .ico{ width:12px; height:12px; color:var(--t3); transition:transform .12s; } .sec-h .sec-t{ display:flex; align-items:center; gap:4px; flex:1; min-width:0; height:100%; text-align:left; }
+  .sec.closed .sec-h .sec-t .ico{ transform:rotate(-90deg); }
   .sec.closed .sec-b{ display:none; }
-  .sec-h .cnt{ margin-left:auto; color:var(--t3); font-size:11px; font-variant-numeric:tabular-nums; }
+  .sec-h .cnt{ color:var(--t3); font-size:11px; font-variant-numeric:tabular-nums; } .sec-h .sec-act{ width:20px; height:20px; flex:none; color:var(--t3); } .sec-h .sec-act:hover{ background:var(--c3); color:var(--t1); } .sec-h .sec-act .ico{ width:13px; height:13px; }
   .tr{ display:flex; align-items:center; gap:6px; height:24px; padding:0 8px; margin:0 2px; border-radius:5px; color:var(--t2); width:calc(100% - 4px); text-align:left; white-space:nowrap; overflow:hidden; }
   .tr:hover{ background:var(--c3); color:var(--t1); }
   .tr.sel{ background:var(--c3); color:var(--t1); }
@@ -593,7 +593,7 @@
     chev:'<path d="m6 9 6 6 6-6"/>', chevr:'<path d="m9 18 6-6-6-6"/>', menu:'<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/>',
     flag:'<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/>',
     zap:'<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>',
-    check:'<path d="M20 6 9 17l-5-5"/>', up:'<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>', x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+    check:'<path d="M20 6 9 17l-5-5"/>', plus:'<path d="M5 12h14"/><path d="M12 5v14"/>', up:'<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>', x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
     note:'<path d="M15 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M15 3v5h5"/><path d="M8 13h8"/><path d="M8 17h8"/>',
     grip:'<circle cx="9" cy="6" r="1" fill="currentColor"/><circle cx="15" cy="6" r="1" fill="currentColor"/><circle cx="9" cy="12" r="1" fill="currentColor"/><circle cx="15" cy="12" r="1" fill="currentColor"/><circle cx="9" cy="18" r="1" fill="currentColor"/><circle cx="15" cy="18" r="1" fill="currentColor"/>',
     lock:'<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
@@ -939,7 +939,7 @@
   }
   function renderSide(){
     const g=G(); const lo=LO(g); let html='';
-    const sec=(id,t,b,c)=>`<div class="sec ${S.secs[id]===false?'closed':''}" data-sec="${id}"><button class="sec-h">${ic('chev')}<span class="u">${t}</span>${c!=null?`<span class="cnt">${c}</span>`:''}</button><div class="sec-b">${b}</div></div>`;
+    const sec=(id,t,b,c,a)=>`<div class="sec ${S.secs[id]===false?'closed':''}" data-sec="${id}"><div class="sec-h"><button class="sec-t">${ic('chev')}<span class="u">${t}</span>${c!=null?`<span class="cnt">(${c})</span>`:''}</button>${a||''}</div><div class="sec-b">${b}</div></div>`;
     const instEl = $('#side-instance');
     instEl.innerHTML = S.act==='explorer' ? renderLoadout() : '';
     if(S.act==='explorer'){
@@ -957,7 +957,7 @@
       const favs = favList.length ? favList.map(({x,l,i})=>{ const cur=x.id===S.game&&i===x.lo;
           return `<div class="tr-row inst-row ${cur?'cur':''}"><button class="tr-label" data-game2="${x.id}" data-lo="${i}">${ic('branch')}<span class="lbl">${l.n}</span><span class="tail"><span class="muted" style="font-size:10px">${x.short}</span><span class="chan xs ${l.ch}">${l.ch}</span></span></button>${favStar(x.id,i,l)}</div>`;
         }).join('') : `<div class="tr muted" style="font-style:italic">Aucun favori — cliquez l’étoile d’une instance</div>`;
-      html = sec('favs','Favoris',favs,favList.length) + sec('games','Jeux',tree,games.length) + sec('tools','Outils',tools,g.tools.length) + sec('cats','Catégories',cats,catList.length);
+      html = sec('favs','Favoris',favs,favList.length) + sec('games','Jeux',tree,games.length,`<button class="tb sec-act" data-add-game title="Ajouter un jeu">${ic('plus')}</button>`) + sec('tools','Outils',tools,g.tools.length) + sec('cats','Catégories',cats,catList.length);
     } else if(S.act==='search'){
       html = `<div style="padding:8px 8px 6px"><div class="composer" style="height:28px;padding:0 10px;border-radius:6px;font-size:12px;box-shadow:none;background:var(--c2)">${ic('search','sm')}<span>lux</span></div><div class="muted" style="font-size:11.5px;margin:8px 2px 0">3 mods · 3 plugins · 2 160 fichiers · 1 note</div></div>` + sec('sr-mods','Mods',['Lux','Lux – JK’s Skyrim patch'].map(m=>`<button class="tr">${ic('box')}<span class="lbl">${m}</span></button>`).join(''),2) + sec('sr-plg','Plugins',['Lux.esp','Lux - Resources.esp','JKs Skyrim - Lux Patch.esp'].map(m=>`<button class="tr">${ic('file')}<span class="lbl mono">${m}</span></button>`).join(''),3);
     } else if(S.act==='history'){
@@ -968,6 +968,7 @@
     }
     const body=$('#side-body'); body.innerHTML=html;
     body.querySelectorAll('.sec-h').forEach(h=>h.addEventListener('click',()=>{const s=h.parentElement; S.secs[s.dataset.sec]=s.classList.contains('closed'); s.classList.toggle('closed');}));
+    body.querySelectorAll('[data-add-game]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); toast('Maquette : ajouter un jeu à la liste — choisir le dossier à enregistrer'); }));
     body.querySelectorAll('[data-expand]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); const id=b.dataset.expand; if(S.expanded.has(id)) S.expanded.delete(id); else S.expanded.add(id); renderSide(); }));
     body.querySelectorAll('.tr-label[data-game]').forEach(b=>b.addEventListener('click',()=>setGame(b.dataset.game)));
     body.querySelectorAll('.tr-label[data-lo]').forEach(b=>b.addEventListener('click',()=>selectInstance(b.dataset.game2, +b.dataset.lo)));
@@ -1195,7 +1196,7 @@
   function setRight(open){ app.classList.toggle('no-right',!open); }
   function renderRight(){
     const el=$('#right'); const m=modById(S.sel);
-    const rsec=(id,t,b,c)=>`<div class="sec rsec ${S.secs['r-'+id]===false?'closed':''}" data-sec="r-${id}"><button class="sec-h">${ic('chev')}<span class="u">${t}</span>${c!=null?`<span class="cnt">${c}</span>`:''}</button><div class="sec-b">${b}</div></div>`;
+    const rsec=(id,t,b,c)=>`<div class="sec rsec ${S.secs['r-'+id]===false?'closed':''}" data-sec="r-${id}"><div class="sec-h"><button class="sec-t">${ic('chev')}<span class="u">${t}</span>${c!=null?`<span class="cnt">(${c})</span>`:''}</button></div><div class="sec-b">${b}</div></div>`;
     const head = `<div class="rhead" role="tablist"><button class="tab" data-rtab="insp" aria-selected="${S.rtab==='insp'}">${ic('info','sm')}Inspecteur</button><button class="tab" data-rtab="claude" aria-selected="${S.rtab==='claude'}"><span style="color:var(--claude)">${ic('sparkle','sm')}</span>Claude <span class="cnt">1</span></button><span class="spacer"></span><button class="tb" id="r-close" title="Fermer (Ctrl+L)">${ic('x','sm')}</button></div>`;
     let body='';
     if(S.rtab==='insp'){
