@@ -1,8 +1,21 @@
+export type GameSection = "dashboard" | "mods" | "plugins" | "archives" | "directory" | "saves" | "health" | "packs" | "worlds" | "servers";
+
+/** Mirrors the serialized GameAdapter contract; declarations are not execution permissions. */
+export type GameCapabilities = {
+  shortName: string;
+  sections: GameSection[];
+  deploymentLabel: string;
+  scriptExtender: string | null;
+  loadOrderTool: { id: string; name: string } | null;
+};
+
+
 export type DetectedGame = {
   id: string;
   name: string;
   root: string;
   short: string;
+  capabilities: GameCapabilities;
 };
 
 export type LoadoutDto = {
@@ -61,6 +74,20 @@ export async function setModEnabled(
   return invoke<ModRow[]>("set_mod_enabled", { loadoutId, modId, enabled });
 }
 
+/** Create an empty instance through the Core (or a preview-only fixture). */
+export async function createLoadout(
+  gameId: string,
+  name: string,
+): Promise<LoadoutDto> {
+  const cleanName = name.trim();
+  if (!cleanName) throw new Error("Donne un nom à l’instance.");
+  if (!isTauri()) {
+    return { id: Math.floor(Date.now() / 1000), gameId, name: cleanName, modCount: 0 };
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<LoadoutDto>("create_loadout", { gameId, name: cleanName });
+}
+
 export async function launchSkse(loadoutId: number): Promise<void> {
   if (!isTauri()) {
     throw new Error("Le lancement SKSE n’est disponible que dans le shell Tauri.");
@@ -95,12 +122,26 @@ function mockSnapshot(): ShellSnapshot {
         name: "Skyrim Special Edition",
         root: "C:\\Steam\\Skyrim Special Edition",
         short: "Skyrim SE",
+        capabilities: {
+          shortName: "Skyrim SE",
+          sections: ["dashboard", "mods", "plugins", "archives", "directory", "saves", "health"],
+          deploymentLabel: "USVFS",
+          scriptExtender: "SKSE",
+          loadOrderTool: { id: "loot", name: "LOOT" },
+        },
       },
       {
         id: "minecraft",
         name: "Minecraft",
         root: "C:\\Users\\dev\\AppData\\Roaming\\.minecraft",
         short: "Minecraft",
+        capabilities: {
+          shortName: "Minecraft",
+          sections: ["dashboard", "mods", "packs", "worlds", "servers", "health"],
+          deploymentLabel: "dossier mods/",
+          scriptExtender: null,
+          loadOrderTool: null,
+        },
       },
     ],
     loadouts: [

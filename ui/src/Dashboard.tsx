@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { GameDashboardHeader, type HeaderAction } from "./components/modlab/games/GameDashboardHeader";
 import type { CSSProperties } from "react";
 import type { DetectedGame, LoadoutDto } from "./api";
 import { chromeFor, initials, type TabId } from "./gameChrome";
+import { FavoriteButton } from "./components/ui/FavoriteButton";
 import { Ico } from "./Ico";
 import { Pop } from "./Pop";
 
@@ -24,6 +26,7 @@ type Props = {
   isFavorite: (loadoutId: number) => boolean;
   onToggleFavorite: (loadoutId: number) => void;
   onPickLoadout: (loadoutId: number) => void;
+  onCreateLoadout: () => void;
   onGoToTab: (tab: TabId) => void;
   onUnwired: (label: string) => void;
 };
@@ -36,6 +39,7 @@ export function Dashboard({
   isFavorite,
   onToggleFavorite,
   onPickLoadout,
+  onCreateLoadout,
   onGoToTab,
   onUnwired,
 }: Props) {
@@ -43,35 +47,24 @@ export function Dashboard({
   const [sort, setSort] = useState<InstSort>("core");
   const [sortOpen, setSortOpen] = useState(false);
   const sortRef = useRef<HTMLButtonElement>(null);
-  const artRef = useRef<HTMLDivElement>(null);
-  const infoRef = useRef<HTMLDivElement>(null);
-  const hasSante = chrome.tabs.some((t) => t.id === "sante");
-  const hasPlugins = chrome.tabs.some((t) => t.id === "plugins");
-
-  // Same rule as the maquette's syncHeroArt(): the hero art matches the
-  // height of the text column beside it, keeping the 460/215 Steam ratio.
-  const syncHeroArt = useCallback(() => {
-    const art = artRef.current;
-    const info = infoRef.current;
-    if (!art || !info) return;
-    // Only the wide Steam-header variant is resized; the glyph tile stays 92px.
-    // React reuses this node across games, so clear any size left by a previous one.
-    if (!art.classList.contains("has-img")) {
-      art.style.removeProperty("height");
-      art.style.removeProperty("width");
-      return;
-    }
-    const h = info.getBoundingClientRect().height;
-    if (!h) return;
-    art.style.height = `${h}px`;
-    art.style.width = `${Math.max(140, Math.min(340, (h * 460) / 215))}px`;
-  }, []);
-
-  useLayoutEffect(syncHeroArt);
-  useEffect(() => {
-    window.addEventListener("resize", syncHeroArt);
-    return () => window.removeEventListener("resize", syncHeroArt);
-  }, [syncHeroArt]);
+  const hasSante = game.capabilities.sections.includes("health");
+  const openHealth = () => hasSante
+    ? onGoToTab("sante")
+    : onUnwired("Aucune vérification pour ce jeu");
+  const headerActions: HeaderAction[] = [
+    { id: "folder", label: "Ouvrir le dossier du jeu", icon: "folder", onClick: () => onUnwired("Ouvrir le dossier du jeu") },
+    { id: "updates", label: "Vérifier les mises à jour", icon: "up", onClick: () => onUnwired("Vérifier les mises à jour") },
+    { id: "cleanup", label: "Nettoyer les téléchargements", icon: "history", onClick: () => onUnwired("Nettoyer les téléchargements") },
+  ];
+  if (game.capabilities.loadOrderTool) {
+    const tool = game.capabilities.loadOrderTool;
+    headerActions.push({
+      id: tool.id,
+      label: `Trier avec ${tool.name}`,
+      icon: "wand",
+      onClick: () => onUnwired(`Trier avec ${tool.name}`),
+    });
+  }
 
   const sorted = useMemo(() => {
     const rows = [...loadouts];
@@ -102,127 +95,24 @@ export function Dashboard({
       </div>
       <div className="content">
         <div className="dash">
-          <header className={`ghero ${chrome.art ? "has-art" : ""}`} style={heroStyle}>
-            {chrome.art ? (
-              <div
-                className="ghero-bg"
-                style={{ backgroundImage: `url('${chrome.art}')` }}
-              />
-            ) : null}
-            <div className="ghero-top">
-              <div
-                className={`art ${chrome.art ? "has-img" : ""}`}
-                ref={artRef}
-                style={
-                  chrome.art ? { backgroundImage: `url('${chrome.art}')` } : undefined
-                }
-              >
-                {chrome.art ? null : chrome.glyph}
-              </div>
-              <div className="ginfo" ref={infoRef}>
-                <h1>
-                  <span className="fade">{game.name}</span>
-                </h1>
-                <div className="meta">
-                  <span title={NOT_TRACKED_TITLE}>Version {NOT_TRACKED}</span>
-                  <span>{chrome.backend}</span>
-                  <span title={NOT_TRACKED_TITLE}>
-                    <b>{NOT_TRACKED}</b> sur le disque
-                  </span>
-                  <span>
-                    <b>{modCount || NOT_TRACKED}</b> mods
-                  </span>
-                  <span>
-                    <b>{loadouts.length}</b> instance{loadouts.length > 1 ? "s" : ""}
-                  </span>
-                </div>
-                <div className="stats">
-                  <div className="stat" title={NOT_TRACKED_TITLE}>
-                    <span className="k">Temps de jeu</span>
-                    <span className="v">
-                      <Ico name="history" />
-                      {NOT_TRACKED}
-                    </span>
-                  </div>
-                  <div className="stat" title={NOT_TRACKED_TITLE}>
-                    <span className="k">Dernière session</span>
-                    <span className="v">
-                      <Ico name="play" />
-                      {NOT_TRACKED}
-                    </span>
-                  </div>
-                  <button
-                    className="stat"
-                    type="button"
-                    title={`${NOT_TRACKED_TITLE} — aucun journal de crash`}
-                    onClick={() =>
-                      hasSante
-                        ? onGoToTab("sante")
-                        : onUnwired("Aucune vérification pour ce jeu")
-                    }
-                  >
-                    <span className="k">Crashs · 30 j</span>
-                    <span className="v">
-                      <Ico name="info" />
-                      {NOT_TRACKED}
-                    </span>
-                  </button>
-                  <button
-                    className="stat"
-                    type="button"
-                    title="Aucune vérification de santé n’a encore tourné"
-                    onClick={() =>
-                      hasSante
-                        ? onGoToTab("sante")
-                        : onUnwired("Aucune vérification pour ce jeu")
-                    }
-                  >
-                    <span className="k">Santé</span>
-                    <span className="v">
-                      <Ico name="info" />
-                      Non vérifié
-                    </span>
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div className="qa">
-              <button
-                className="btn sm ghost"
-                type="button"
-                onClick={() => onUnwired("Ouvrir le dossier du jeu")}
-              >
-                <Ico name="folder" className="sm" />
-                Ouvrir le dossier du jeu
-              </button>
-              <button
-                className="btn sm ghost"
-                type="button"
-                onClick={() => onUnwired("Vérifier les mises à jour")}
-              >
-                <Ico name="up" className="sm" />
-                Vérifier les mises à jour
-              </button>
-              <button
-                className="btn sm ghost"
-                type="button"
-                onClick={() => onUnwired("Nettoyer les téléchargements")}
-              >
-                <Ico name="history" className="sm" />
-                Nettoyer les téléchargements
-              </button>
-              {hasPlugins ? (
-                <button
-                  className="btn sm ghost"
-                  type="button"
-                  onClick={() => onUnwired("Trier avec LOOT")}
-                >
-                  <Ico name="wand" className="sm" />
-                  Trier avec LOOT
-                </button>
-              ) : null}
-            </div>
-          </header>
+          <GameDashboardHeader
+            name={game.name}
+            artwork={chrome}
+            metadata={[
+              { id: "version", title: NOT_TRACKED_TITLE, content: <>Version {NOT_TRACKED}</> },
+              { id: "backend", content: game.capabilities.deploymentLabel },
+              { id: "disk", title: NOT_TRACKED_TITLE, content: <><b>{NOT_TRACKED}</b> sur le disque</> },
+              { id: "mods", content: <><b>{modCount || NOT_TRACKED}</b> mods</> },
+              { id: "instances", content: <><b>{loadouts.length}</b> instance{loadouts.length > 1 ? "s" : ""}</> },
+            ]}
+            stats={[
+              { id: "playtime", label: "Temps de jeu", value: NOT_TRACKED, icon: "history", title: NOT_TRACKED_TITLE },
+              { id: "session", label: "Dernière session", value: NOT_TRACKED, icon: "play", title: NOT_TRACKED_TITLE },
+              { id: "crashes", label: "Crashs · 30 j", value: NOT_TRACKED, icon: "info", title: `${NOT_TRACKED_TITLE} — aucun journal de crash`, onClick: openHealth },
+              { id: "health", label: "Santé", value: "Non vérifié", icon: "info", title: "Aucune vérification de santé n’a encore tourné", onClick: openHealth },
+            ]}
+            actions={headerActions}
+          />
 
           <div className="dpad">
             <div className="dh row2">
@@ -294,17 +184,7 @@ export function Dashboard({
                         {cur ? <span className="on">● active</span> : null}
                       </span>
                     </span>
-                    <button
-                      className={`fav-star ${fav ? "on" : ""}`}
-                      type="button"
-                      title={fav ? "Retirer des favoris" : "Ajouter aux favoris"}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onToggleFavorite(l.id);
-                      }}
-                    >
-                      <Ico name="star" className={fav ? "fill" : ""} />
-                    </button>
+                    <FavoriteButton on={fav} onToggle={() => onToggleFavorite(l.id)} />
                   </div>
                 );
               })}
@@ -312,11 +192,11 @@ export function Dashboard({
                 className="inst-card add"
                 role="button"
                 tabIndex={0}
-                onClick={() => onUnwired("Nouvelle instance")}
+                onClick={onCreateLoadout}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    onUnwired("Nouvelle instance");
+                    onCreateLoadout();
                   }
                 }}
               >
@@ -334,9 +214,11 @@ export function Dashboard({
                   <Ico name="chev" className="sm" />
                 </button>
               </div>
-              {chrome.engine ? (
+              {game.capabilities.scriptExtender ? (
                 <div className="dsel">
-                  <span className="dsel-lbl">Version de {chrome.engine}</span>
+                  <span className="dsel-lbl">
+                    Version de {game.capabilities.scriptExtender}
+                  </span>
                   <button
                     className="dsel-btn"
                     type="button"

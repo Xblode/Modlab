@@ -1,17 +1,15 @@
 /**
  * Per-game *presentation chrome* — the purely visual constants the maquette
- * carries in its `games` array: hero art, gradient colours, glyph, the tab set
- * a game exposes, and the human label of its deployment backend.
+ * carries in its `games` array: hero art, gradient colours and glyph.
  *
  * This is design data, not state: nothing here is a fact about the machine or
  * about a loadout. Every *fact* on screen still comes from the Core through
- * `api.ts`.
- *
- * It lives in the frontend only because the Core's `GameAdapter` contract does
- * not expose any of it yet. When it does, this table shrinks to the art/colour
- * tokens and the tab set moves to the adapter — the game shape (does it have
- * plugins? archives? worlds?) is adapter knowledge, not UI knowledge.
+ * `api.ts`, and every *capability* (sections, deployment backend, tools)
+ * comes from the GameAdapter through `api.ts` as well. This file never
+ * infers what a game can do — it only describes how it looks.
  */
+
+import type { GameCapabilities } from "./api";
 
 export type TabId =
   | "dashboard"
@@ -27,24 +25,19 @@ export type TabId =
 
 export type TabDef = { id: TabId; label: string; icon: string };
 
-const SKYRIM_TABS: TabDef[] = [
-  { id: "dashboard", label: "Tableau de bord", icon: "sliders" },
-  { id: "mods", label: "Mods", icon: "layers" },
-  { id: "plugins", label: "Plugins", icon: "file" },
-  { id: "archives", label: "Archives", icon: "db" },
-  { id: "repertoire", label: "Répertoire", icon: "folder" },
-  { id: "saves", label: "Sauvegardes", icon: "disc" },
-  { id: "sante", label: "Santé", icon: "alert" },
-];
-
-const MINECRAFT_TABS: TabDef[] = [
-  { id: "dashboard", label: "Tableau de bord", icon: "sliders" },
-  { id: "mods", label: "Mods", icon: "layers" },
-  { id: "packs", label: "Packs & shaders", icon: "image" },
-  { id: "worlds", label: "Mondes", icon: "map" },
-  { id: "servers", label: "Serveurs", icon: "globe" },
-  { id: "sante", label: "Santé", icon: "alert" },
-];
+/** Tab vocabulary per adapter section, French labels straight from the maquette. */
+const TAB_META: Record<string, TabDef> = {
+  dashboard: { id: "dashboard", label: "Tableau de bord", icon: "sliders" },
+  mods: { id: "mods", label: "Mods", icon: "layers" },
+  plugins: { id: "plugins", label: "Plugins", icon: "file" },
+  archives: { id: "archives", label: "Archives", icon: "db" },
+  directory: { id: "repertoire", label: "Répertoire", icon: "folder" },
+  saves: { id: "saves", label: "Sauvegardes", icon: "disc" },
+  health: { id: "sante", label: "Santé", icon: "alert" },
+  packs: { id: "packs", label: "Packs & shaders", icon: "image" },
+  worlds: { id: "worlds", label: "Mondes", icon: "map" },
+  servers: { id: "servers", label: "Serveurs", icon: "globe" },
+};
 
 const FALLBACK_TABS: TabDef[] = [
   { id: "dashboard", label: "Tableau de bord", icon: "sliders" },
@@ -52,22 +45,21 @@ const FALLBACK_TABS: TabDef[] = [
   { id: "sante", label: "Santé", icon: "alert" },
 ];
 
+/** Tabs for a game come from its adapter capabilities, in adapter order. */
+export function tabsFor(capabilities: GameCapabilities | undefined | null): TabDef[] {
+  if (!capabilities) return FALLBACK_TABS;
+  return capabilities.sections
+    .map((section) => TAB_META[section])
+    .filter((tab): tab is TabDef => tab !== undefined);
+}
+
 export type GameChrome = {
   glyph: string;
   /** Hero gradient, matching the maquette's `--c1g` / `--c2g`. */
   c1: string;
   c2: string;
-  /** Full-bleed hero art, served from `ui/public`. Undefined → glyph tile. */
+  /** Wide hero art, served from `ui/public`. Undefined → same wide frame with glyph. */
   art?: string;
-  /** Deployment backend label. Belongs to the adapter; hardcoded here for now. */
-  backend: string;
-  /**
-   * Script-extender / loader name, when the Core actually drives one. Only set
-   * where it is a certainty (ModLab launches `skse64_loader.exe` itself) — the
-   * *version* is still unknown and rendered as a placeholder.
-   */
-  engine?: string;
-  tabs: TabDef[];
 };
 
 const CHROME: Record<string, GameChrome> = {
@@ -76,16 +68,11 @@ const CHROME: Record<string, GameChrome> = {
     c1: "#3b6ea5",
     c2: "#1a2f4d",
     art: "img/header_skyrim.jpg",
-    backend: "USVFS",
-    engine: "SKSE",
-    tabs: SKYRIM_TABS,
   },
   minecraft: {
     glyph: "MC",
     c1: "#5c8f3a",
     c2: "#2b3f1a",
-    backend: "dossier mods/",
-    tabs: MINECRAFT_TABS,
   },
 };
 
@@ -93,8 +80,6 @@ const UNKNOWN: GameChrome = {
   glyph: "??",
   c1: "#4a4844",
   c2: "#2a2928",
-  backend: "—",
-  tabs: FALLBACK_TABS,
 };
 
 export function chromeFor(gameId: string | null | undefined): GameChrome {

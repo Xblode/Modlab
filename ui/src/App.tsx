@@ -1,6 +1,7 @@
 import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   getShellSnapshot,
+  createLoadout,
   launchSkse,
   setModEnabled,
   type DetectedGame,
@@ -10,10 +11,15 @@ import {
 } from "./api";
 import { Dashboard } from "./Dashboard";
 import { useFavorites } from "./favorites";
-import { chromeFor, type TabId } from "./gameChrome";
+import { tabsFor, type TabId } from "./gameChrome";
 import { Ico } from "./Ico";
 import { ModTable } from "./ModTable";
 import { StubTab } from "./StubTab";
+
+
+import { IconButton } from "./components/ui/IconButton";
+import { Button } from "./components/ui/Button";
+import { FavoriteButton } from "./components/ui/FavoriteButton";
 
 const LLM_MODELS = [
   ["qwen-1.5b", "Qwen2.5 1.5B", "défaut · CPU ok"],
@@ -42,6 +48,7 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [llm, setLlm] = useState("qwen-1.5b");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [query, setQuery] = useState("");
   const { isFavorite, toggleFavorite, favoriteIds } = useFavorites();
   const [chat, setChat] = useState<ChatMsg[]>([
@@ -81,7 +88,6 @@ export default function App() {
   const loadouts = snap?.loadouts ?? [];
   const activeGame: DetectedGame | undefined =
     games.find((g) => g.id === gameId) ?? games[0];
-  const chrome = chromeFor(activeGame?.id);
   const gameLoadouts = loadouts.filter(
     (l) => !activeGame || l.gameId === activeGame.id,
   );
@@ -90,7 +96,7 @@ export default function App() {
   const entries = snap?.entries ?? [];
   const enabledCount = entries.filter((e) => e.enabled).length;
   const selectedRow = entries.find((e) => e.modId === selectedMod) ?? null;
-  const tabs = chrome.tabs;
+  const tabs = tabsFor(activeGame?.capabilities);
   // A game switch can land on a tab the new game does not have.
   const currentTab: TabId = tabs.some((t) => t.id === tab) ? tab : "dashboard";
   const tabLabel = tabs.find((t) => t.id === currentTab)?.label ?? "—";
@@ -166,6 +172,25 @@ export default function App() {
     }
   }
 
+  async function createInstance(name: string) {
+    if (!activeGame) return;
+    const created = await createLoadout(activeGame.id, name);
+    const next = await getShellSnapshot(created.id);
+    // The browser preview deliberately has a static fixture. Keep a newly
+    // created preview instance visible there while the real Tauri shell gets
+    // its authoritative list straight back from the Core.
+    setSnap(
+      next.loadouts.some((loadout) => loadout.id === created.id)
+        ? next
+        : { ...next, loadouts: [...next.loadouts, created], selectedLoadoutId: created.id },
+    );
+    setLoadoutId(created.id);
+    setGameId(created.gameId);
+    setTab("dashboard");
+    setToast(`Instance « ${created.name} » créée.`);
+    setCreateOpen(false);
+  }
+
   async function play() {
     if (!activeLoadout) return;
     if (activeGame?.id !== "skyrimse") {
@@ -220,9 +245,7 @@ export default function App() {
     <div className={`app ${rightOpen ? "" : "no-right"} ${running ? "running" : ""}`}>
       <aside className="side">
         <div className="side-tools">
-          <button className="tb" title="Menu" type="button">
-            <Ico name="menu" />
-          </button>
+          <IconButton name="menu" title="Menu" />
           <div className="hact">
             {(
               [
@@ -232,31 +255,17 @@ export default function App() {
                 ["tools", "Outils", "tool"],
               ] as const
             ).map(([id, title, icon]) => (
-              <button
-                key={id}
-                className="tb"
-                title={title}
-                type="button"
-                aria-pressed={act === id}
-                onClick={() => setAct(id)}
-              >
-                <Ico name={icon} />
-              </button>
+              <IconButton key={id} name={icon} title={title} aria-pressed={act === id} onClick={() => setAct(id)} />
             ))}
           </div>
           <span className="spacer" />
-          <button className="tb" title="Nexus Mods" type="button">
-            <Ico name="globe" />
-          </button>
-          <button
-            className="tb"
+          <IconButton name="globe" title="Nexus Mods" />
+          <IconButton
+            name="gear"
             title="Réglages / modèle local"
-            type="button"
             aria-pressed={settingsOpen}
             onClick={() => setSettingsOpen((v) => !v)}
-          >
-            <Ico name="gear" />
-          </button>
+          />
         </div>
 
         {settingsOpen ? (
@@ -363,7 +372,7 @@ export default function App() {
                           </span>
                         </span>
                       </button>
-                      <FavStar on onToggle={() => onFavorite(l.id)} />
+                      <FavoriteButton on onToggle={() => onFavorite(l.id)} />
                     </div>
                   ))
                 )}
@@ -421,7 +430,7 @@ export default function App() {
                                       <span className="mono">r.—</span>
                                     </span>
                                   </button>
-                                  <FavStar
+                                  <FavoriteButton
                                     on={isFavorite(l.id)}
                                     onToggle={() => onFavorite(l.id)}
                                   />
@@ -493,7 +502,7 @@ export default function App() {
               <span className="spacer" />
               <span className="fi" title="Backend de déploiement">
                 <Ico name="layers" />
-                {chrome.backend}
+                {activeGame?.capabilities.deploymentLabel ?? "—"}
               </span>
             </>
           )}
@@ -544,6 +553,7 @@ export default function App() {
               isFavorite={isFavorite}
               onToggleFavorite={onFavorite}
               onPickLoadout={(id) => void pickLoadout(id, "dashboard")}
+              onCreateLoadout={() => setCreateOpen(true)}
               onGoToTab={(t) => setTab(t)}
               onUnwired={unwired}
             />
@@ -612,9 +622,7 @@ export default function App() {
                 Claude
               </button>
               <span className="spacer" />
-              <button className="tb" type="button" onClick={() => setRightOpen(false)}>
-                <Ico name="x" />
-              </button>
+              <IconButton name="x" title="Fermer" onClick={() => setRightOpen(false)} />
             </div>
             <div className="rbody">
               {rightTab === "info" ? (
@@ -682,9 +690,7 @@ export default function App() {
             <form className="composer-box" onSubmit={sendChat}>
               <div className="composer">
                 <Ico name="search" />
-                <button className="tb" title="Console" type="button">
-                  <Ico name="term" />
-                </button>
+                <IconButton name="term" title="Console" />
                 <input
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
@@ -724,23 +730,60 @@ export default function App() {
           <span>{error}</span>
         </div>
       ) : null}
+      {createOpen && activeGame ? (
+        <CreateLoadoutDialog
+          gameName={activeGame.name}
+          onClose={() => setCreateOpen(false)}
+          onCreate={createInstance}
+        />
+      ) : null}
     </div>
   );
 }
 
-function FavStar({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+function CreateLoadoutDialog({
+  gameName,
+  onClose,
+  onCreate,
+}: {
+  gameName: string;
+  onClose: () => void;
+  onCreate: (name: string) => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setMessage(null);
+    try {
+      await onCreate(name);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <button
-      className={`fav-star ${on ? "on" : ""}`}
-      type="button"
-      title={on ? "Retirer des favoris" : "Ajouter aux favoris"}
-      onClick={(e) => {
-        e.stopPropagation();
-        onToggle();
-      }}
-    >
-      <Ico name="star" className={on ? "fill" : ""} />
-    </button>
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <form className="modal" aria-labelledby="create-loadout-title" onSubmit={(e) => void submit(e)} onMouseDown={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div><div className="eyebrow">Nouvelle instance</div><h2 id="create-loadout-title">{gameName}</h2></div>
+          <IconButton name="x" title="Fermer" onClick={onClose} />
+        </div>
+        <label className="modal-label" htmlFor="loadout-name">Nom de l’instance</label>
+        <input id="loadout-name" className="modal-input" autoFocus maxLength={100} placeholder="Ex. Labo météo" value={name} onChange={(e) => setName(e.target.value)} />
+        <p className="modal-copy">Une instance commence vide. L’import de mods MO2 reste la prochaine étape de l’interface.</p>
+        {message ? <p className="modal-error">{message}</p> : null}
+        <div className="modal-actions">
+          <Button variant="sm-ghost" onClick={onClose}>Annuler</Button>
+          <Button variant="sm" type="submit" disabled={saving || !name.trim()}>{saving ? "Création…" : "Créer l’instance"}</Button>
+        </div>
+      </form>
+    </div>
   );
 }
 

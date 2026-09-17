@@ -1,6 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useRef } from "react";
 import { Ico } from "./Ico";
+import { IconButton } from "./components/ui/IconButton";
 import type { ModRow } from "./api";
 
 type Props = {
@@ -93,20 +94,13 @@ export function ModTable({ rows, selectedId, onSelect, onToggle }: Props) {
               <div className="nm">
                 <span className="t">{m.name}</span>
                 <span className="tools">
-                  <button className="tb" title="Ouvrir le dossier" type="button">
-                    <Ico name="folder" />
-                  </button>
-                  <button
-                    className="tb"
+                  <IconButton name="folder" title="Ouvrir le dossier" />
+                  <IconButton
+                    name="sparkle"
                     title="Demander à Claude"
-                    type="button"
                     style={{ color: "var(--claude)" }}
-                  >
-                    <Ico name="sparkle" />
-                  </button>
-                  <button className="tb" title="Plus…" type="button">
-                    <Ico name="more" />
-                  </button>
+                  />
+                  <IconButton name="more" title="Plus…" />
                 </span>
               </div>
               <div className="flags" />
