@@ -24,7 +24,10 @@ impl GameAdapter for SkyrimAdapter {
             sections: vec![Dashboard, Mods, Plugins, Archives, Directory, Saves, Health],
             deployment_label: "USVFS",
             script_extender: Some("SKSE"),
-            load_order_tool: Some(GameTool { id: "loot", name: "LOOT" }),
+            load_order_tool: Some(GameTool {
+                id: "loot",
+                name: "LOOT",
+            }),
         }
     }
 
@@ -118,7 +121,9 @@ mod tests {
         assert_eq!(caps.script_extender, Some("SKSE"));
         assert!(caps.sections.contains(&GameSection::Plugins));
         assert!(caps.sections.contains(&GameSection::Saves));
-        let loot = caps.load_order_tool.expect("skyrim declares a load order tool");
+        let loot = caps
+            .load_order_tool
+            .expect("skyrim declares a load order tool");
         assert_eq!(loot.id, "loot");
     }
 

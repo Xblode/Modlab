@@ -54,7 +54,6 @@ pub struct GameCapabilities {
     pub load_order_tool: Option<GameTool>,
 }
 
-
 /// What a Game Adapter must be able to do.
 ///
 /// Deliberately small right now — only what's actually implemented and
