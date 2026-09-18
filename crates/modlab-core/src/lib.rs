@@ -29,6 +29,8 @@ pub enum CoreError {
     #[error("failed to serialize event payload: {0}")]
     Serialization(#[from] serde_json::Error),
     #[error("{0}")]
+    Message(String),
+    #[error("{0}")]
     Archive(String),
 }
 
@@ -212,6 +214,82 @@ impl Core {
                     row.get(3)?,
                     row.get(4)?,
                 ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// A loadout's bare state — `(mod_id, enabled, position)` — the minimal
+    /// shape a snapshot captures and a rollback restores.
+    pub(crate) fn select_loadout_state(&self, loadout_id: i64) -> Result<Vec<(i64, bool, i64)>> {
+        let mut stmt = self.db.prepare(
+            "SELECT mod_id, enabled, position FROM loadout_entry \
+             WHERE loadout_id = ?1 ORDER BY position ASC",
+        )?;
+        let rows = stmt
+            .query_map([loadout_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Replace a loadout's whole entry set — rollback's write path. One
+    /// statement batch: the delete and the re-inserts land together or not
+    /// at all.
+    pub(crate) fn replace_loadout_entries(
+        &self,
+        loadout_id: i64,
+        entries: &[(i64, bool, i64)],
+    ) -> Result<()> {
+        self.db.execute("BEGIN", [])?;
+        let result = (|| -> Result<()> {
+            self.db.execute(
+                "DELETE FROM loadout_entry WHERE loadout_id = ?1",
+                [loadout_id],
+            )?;
+            for (mod_id, enabled, position) in entries {
+                self.db.execute(
+                    "INSERT INTO loadout_entry (loadout_id, mod_id, enabled, position) \
+                     VALUES (?1, ?2, ?3, ?4)",
+                    (loadout_id, mod_id, *enabled, *position),
+                )?;
+            }
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                self.db.execute("COMMIT", [])?;
+                Ok(())
+            }
+            Err(_) => {
+                let _ = self.db.execute("ROLLBACK", []);
+                result?;
+                Ok(())
+            }
+        }
+    }
+
+    /// Recent events of the given kinds, newest first —
+    /// `(id, occurred_at, kind, payload)`.
+    pub(crate) fn select_events(
+        &self,
+        kinds: &[&str],
+        limit: usize,
+    ) -> Result<Vec<(i64, String, String, String)>> {
+        let placeholders = kinds.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT id, occurred_at, kind, payload FROM event \
+             WHERE kind IN ({placeholders}) ORDER BY id DESC LIMIT ?"
+        );
+        let mut stmt = self.db.prepare(&sql)?;
+        let limit_i64 = limit as i64;
+        let mut params: Vec<&dyn rusqlite::ToSql> =
+            kinds.iter().map(|k| k as &dyn rusqlite::ToSql).collect();
+        params.push(&limit_i64);
+        let rows = stmt
+            .query_map(params.as_slice(), |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
