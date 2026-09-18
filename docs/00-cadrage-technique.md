@@ -502,6 +502,25 @@ Ce qui est spécifique à **Cursor / VS Code** : barre d'activité à icônes, e
 
 💬 → **Q14–Q18**.
 
+### 6.6 État d'implémentation (18 septembre 2026)
+
+Où en est ce design system dans le **shell réel** (`ui/`, React + Tauri) — la maquette reste la référence visuelle, le shell suit :
+
+| Élément du §6 | État dans le shell React |
+|---|---|
+| **Tokens** | Miroir des valeurs de cette section dans `ui/src/shell.css` (variables CSS `--c1…--c5`, `--t1…--t3`, sémantique identique). `ui/design/tokens.json` n'est **pas encore extrait** : en attendant, `shell.css` est la source de vérité pratique, la maquette reste la référence visuelle. |
+| **Structure « cadre, feuille, flottants »** | ✅ v2.0 : deux colonnes (panneau gauche `c1` + feuille centrale `c2`), flottants `c3` (panneau droit, menus, toasts). |
+| **Atomes** | ✅ `Button`, `IconButton`, `FavoriteButton` (`ui/src/components/ui/`), `Ico`, toast, `EmptyState` — + `MenuPicker` (popover multi-variantes Fichier/Loadout/Outils/Affichage). |
+| **Header unifié + onglets** | ✅ `GameDashboardHeader` + `tabsFor()` : les onglets viennent des `GameCapabilities` de l'adaptateur (ADR 0005), jamais codés par jeu. |
+| **`ModTable`** | ✅ virtualisée (`@tanstack/react-virtual`), badges de conflits réels (wins/loses du scan Core). |
+| **`FloatingPanel` → Inspector / ClaudePanel** | ✅ panneau droit flottant (info mod + onglet IA) ; le chat IA attend encore son branchement Core. |
+| **`CommandPalette`** | 🚧 en cours (Phase 2) — le vocabulaire CSS `.cp` de la maquette est déjà reporté dans `shell.css`. |
+| **`TrayPanel` (panneau du bas)** | 🚧 en cours (Phase 2) — classes `.tpanel` / `.tx` prêtes dans `shell.css`, branchement Core (transactions) à venir. |
+| **Barre du bas `Tray` / compteurs** | 🚧 le shell réel a une barre de contexte simplifiée ; les compteurs cliquables arrivent avec le panneau du bas. |
+| **Storybook / thème clair / densité** | ❌ pas commencés — la maquette les garde en démonstration. |
+
+**Convention d'honnêteté** (identique partout) : ce que le Core n'expose pas est un placeholder qui se nomme (« pas encore branché au Core »), jamais une donnée inventée.
+
 ---
 
 ## 7. MCP + Claude Code

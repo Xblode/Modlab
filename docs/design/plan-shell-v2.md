@@ -1,7 +1,7 @@
 # Plan — Shell v2 (maquette)
 
 > Créé le 14 septembre 2026 à partir de ta liste de demandes. Chaque lot est indépendant et validable dans la maquette avant d'attaquer le suivant. Les lots sont ordonnés par dépendance : le **Lot 1 (squelette)** change la structure, tout le reste se pose dessus.
-> État (14 sept., v2.0) : **Lots 0 → 7 et 10 livrés dans la maquette** · reste le Lot 11 (doc §6) et les notes 8–9 sont dans `docs/idees.md`.
+> État (14 sept., v2.0) : **Lots 0 → 7 et 10 livrés dans la maquette** · Lot 11 livré le 18 sept. (§6.6 du cadrage + popover Tokens) · notes 8–9 dans `docs/idees.md`. Le shell React réel (`ui/`) suit ce plan — lots déjà portés : squelette 2 colonnes, header unifié, réglages en sidebar, table virtualisée (voir cadrage §6.6 pour l'état détaillé).
 > Décision prise : le groupe `[r.142 ▾] [Enregistrer] / [▶ Jouer]` vit dans le bloc branche du panneau gauche (Jouer pleine largeur en dessous). « Commit » est devenu **Enregistrer** ; l'état non enregistré se voit sur le sélecteur de révision (`+2 −1` ambre) et par un point sur Jouer.
 > Maquette : https://claude.ai/code/artifact/102c90d8-0fb5-438f-a8fd-d08b4e16a928 · source `docs/design/shell-maquette.html`
 
