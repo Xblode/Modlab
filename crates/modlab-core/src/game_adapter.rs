@@ -52,6 +52,13 @@ pub struct GameCapabilities {
     pub deployment_label: &'static str,
     pub script_extender: Option<&'static str>,
     pub load_order_tool: Option<GameTool>,
+    /// An external mod manager whose instance this game's mods can be
+    /// migrated from, as an opaque source id (e.g. `"mo2"`). The Core does
+    /// not know what the id means; clients map it to a label and a dialog
+    /// the same way they map section ids to tab labels. `None` — the
+    /// default for any game without such a migration path — means the UI
+    /// shows no import entry point at all.
+    pub import_source: Option<&'static str>,
 }
 
 /// What a Game Adapter must be able to do.

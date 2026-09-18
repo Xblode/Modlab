@@ -25,6 +25,7 @@ impl GameAdapter for MinecraftAdapter {
             deployment_label: "dossier mods/",
             script_extender: None,
             load_order_tool: None,
+            import_source: None,
         }
     }
 
@@ -96,6 +97,10 @@ mod tests {
         assert_eq!(caps.script_extender, None);
         assert!(caps.sections.contains(&GameSection::Worlds));
         assert!(caps.load_order_tool.is_none());
+        assert!(
+            caps.import_source.is_none(),
+            "Minecraft has no MO2-style manager to migrate from yet"
+        );
     }
 
     #[test]

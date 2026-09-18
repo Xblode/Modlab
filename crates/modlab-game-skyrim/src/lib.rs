@@ -28,6 +28,7 @@ impl GameAdapter for SkyrimAdapter {
                 id: "loot",
                 name: "LOOT",
             }),
+            import_source: Some("mo2"),
         }
     }
 
@@ -125,6 +126,11 @@ mod tests {
             .load_order_tool
             .expect("skyrim declares a load order tool");
         assert_eq!(loot.id, "loot");
+        assert_eq!(
+            caps.import_source,
+            Some("mo2"),
+            "Skyrim SE is migratable from Mod Organizer 2"
+        );
     }
 
     #[test]

@@ -171,10 +171,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             mods_dir,
             loadout_name,
         } => {
-            let profile = mo2::read_profile(&profile)?;
-            let entries = profile.to_import_entries(&mods_dir);
-            let created = loadout::create(&core, SkyrimAdapter.id(), &loadout_name)?;
-            let imported = loadout::import_mods(&core, created.id, &entries)?;
+            let (created, imported) = mo2::import_into(&core, &profile, &mods_dir, &loadout_name)?;
             println!(
                 "Loadout '{}' (id {}) créé avec {imported} mod(s) importé(s) depuis {}",
                 created.name,

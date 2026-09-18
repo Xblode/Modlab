@@ -11,6 +11,15 @@ import { Pop } from "./Pop";
 const NOT_TRACKED = "—";
 const NOT_TRACKED_TITLE = "Pas encore suivi par le Core";
 
+/**
+ * Import entry points, mapped from the adapter's `importSource` id — the same
+ * capability-id-to-label pattern as the tab vocabulary in `gameChrome.ts`.
+ * A game without a declared source gets no import button at all.
+ */
+const IMPORT_SOURCES: Record<string, { label: string; icon: string }> = {
+  mo2: { label: "Importer depuis MO2", icon: "db" },
+};
+
 type InstSort = "core" | "name";
 
 const SORT_LABELS: Record<InstSort, string> = {
@@ -27,6 +36,7 @@ type Props = {
   onToggleFavorite: (loadoutId: number) => void;
   onPickLoadout: (loadoutId: number) => void;
   onCreateLoadout: () => void;
+  onImportSource: () => void;
   onGoToTab: (tab: TabId) => void;
   onUnwired: (label: string) => void;
 };
@@ -40,6 +50,7 @@ export function Dashboard({
   onToggleFavorite,
   onPickLoadout,
   onCreateLoadout,
+  onImportSource,
   onGoToTab,
   onUnwired,
 }: Props) {
@@ -63,6 +74,17 @@ export function Dashboard({
       label: `Trier avec ${tool.name}`,
       icon: "wand",
       onClick: () => onUnwired(`Trier avec ${tool.name}`),
+    });
+  }
+  const importAction = game.capabilities.importSource
+    ? IMPORT_SOURCES[game.capabilities.importSource]
+    : undefined;
+  if (importAction) {
+    headerActions.push({
+      id: "import",
+      label: importAction.label,
+      icon: importAction.icon,
+      onClick: onImportSource,
     });
   }
 

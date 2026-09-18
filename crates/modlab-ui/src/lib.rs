@@ -6,7 +6,7 @@ use modlab_core::{conflicts, loadout, Core};
 use modlab_game_minecraft::MinecraftAdapter;
 use modlab_game_skyrim::SkyrimAdapter;
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::State;
@@ -207,6 +207,16 @@ fn set_mod_enabled(
 /// call instead of cached in `AppState`: a cache would have to be
 /// invalidated on every enable/disable, and a stale conflict badge is a wrong
 /// statement about the user's install. The UI debounces its calls instead.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Mo2ImportResultDto {
+    pub loadout: LoadoutDto,
+    /// How many mods actually landed in the loadout — the dialog's success
+    /// message. Informational profile entries (DLC, Creation Club, unmanaged)
+    /// are deliberately not part of it.
+    pub imported: usize,
+}
+
 /// The scan itself, split out from the command so it can be tested against a
 /// real (in-memory) Core plus real folders — the browser preview only ever
 /// exercises the UI's handling of the payload, never this path.
@@ -267,6 +277,43 @@ fn create_loadout(
     })
 }
 
+/// Import an MO2 profile into a new Skyrim loadout. A mutation like any
+/// other: journaled by the Core, and the UI stays a client of the engine.
+/// The heavy lifting (profile parsing, folder verification, import order)
+/// lives in `modlab_game_skyrim::mo2::import_into`, the same code the CLI
+/// runs — this host only validates what the user typed and wraps the answer.
+#[tauri::command]
+fn mo2_import(
+    state: State<AppState>,
+    profile: String,
+    mods_dir: String,
+    name: String,
+) -> Result<Mo2ImportResultDto, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Donne un nom à l'instance.".into());
+    }
+    if name.chars().count() > 100 {
+        return Err("Le nom de l'instance ne peut pas dépasser 100 caractères.".into());
+    }
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    let (created, imported) = modlab_game_skyrim::mo2::import_into(
+        &core,
+        Path::new(&profile),
+        Path::new(&mods_dir),
+        name,
+    )?;
+    Ok(Mo2ImportResultDto {
+        loadout: LoadoutDto {
+            id: created.id,
+            game_id: SkyrimAdapter.id().to_string(),
+            name: created.name,
+            mod_count: i64::try_from(imported).unwrap_or(i64::MAX),
+        },
+        imported,
+    })
+}
+
 #[tauri::command]
 fn launch_skse(state: State<AppState>, loadout_id: i64) -> Result<(), String> {
     #[cfg(not(windows))]
@@ -322,6 +369,7 @@ pub fn run() {
             set_mod_enabled,
             get_loadout_conflicts,
             create_loadout,
+            mo2_import,
             launch_skse
         ])
         .run(tauri::generate_context!())

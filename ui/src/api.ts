@@ -7,6 +7,12 @@ export type GameCapabilities = {
   deploymentLabel: string;
   scriptExtender: string | null;
   loadOrderTool: { id: string; name: string } | null;
+  /**
+   * An external mod manager this game can be migrated from, as an opaque id
+   * (e.g. "mo2") that the UI maps to a label — the same way section ids map
+   * to tab labels. `null` = no import entry point for this game.
+   */
+  importSource: string | null;
 };
 
 
@@ -86,6 +92,31 @@ export async function createLoadout(
   }
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<LoadoutDto>("create_loadout", { gameId, name: cleanName });
+}
+
+export type Mo2ImportResult = {
+  loadout: LoadoutDto;
+  /** Mods actually imported — DLC/CC entries in the profile are skipped. */
+  imported: number;
+};
+
+/**
+ * Import an MO2 profile into a new Skyrim loadout. Only reachable inside the
+ * Tauri shell: this writes to the Core's database, and a plain browser has
+ * none — faking a write here would be worse than an error.
+ */
+export async function mo2Import(
+  profile: string,
+  modsDir: string,
+  name: string,
+): Promise<Mo2ImportResult> {
+  if (!isTauri()) {
+    throw new Error(
+      "L’import MO2 n’est disponible que dans le shell Tauri (aperçu navigateur : lecture seule).",
+    );
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<Mo2ImportResult>("mo2_import", { profile, modsDir, name });
 }
 
 export async function launchSkse(loadoutId: number): Promise<void> {
@@ -171,6 +202,7 @@ function mockSnapshot(): ShellSnapshot {
           deploymentLabel: "USVFS",
           scriptExtender: "SKSE",
           loadOrderTool: { id: "loot", name: "LOOT" },
+          importSource: "mo2",
         },
       },
       {
@@ -184,6 +216,7 @@ function mockSnapshot(): ShellSnapshot {
           deploymentLabel: "dossier mods/",
           scriptExtender: null,
           loadOrderTool: null,
+          importSource: null,
         },
       },
     ],

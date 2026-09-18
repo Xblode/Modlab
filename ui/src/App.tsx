@@ -3,6 +3,7 @@ import {
   getShellSnapshot,
   getLoadoutConflicts,
   createLoadout,
+  mo2Import,
   launchSkse,
   setModEnabled,
   CONFLICT_PRIORITY_CAVEAT,
@@ -53,6 +54,7 @@ export default function App() {
   const [llm, setLlm] = useState("qwen-1.5b");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [mo2Open, setMo2Open] = useState(false);
   const [query, setQuery] = useState("");
   /**
    * Conflict scan of the active loadout. `null` means *not scanned yet* — the
@@ -234,6 +236,31 @@ export default function App() {
 
   function unwired(label: string) {
     setToast(`« ${label} » : pas encore branché au Core.`);
+  }
+
+  /**
+   * Import an MO2 profile into a new loadout, then land on it. The Core
+   * validates everything (folders exist, mods match) — the dialog only
+   * surfaces its messages. Returns the count so the dialog can also show it
+   * if a later refresh fails.
+   */
+  async function importMo2(
+    profile: string,
+    modsDir: string,
+    name: string,
+  ): Promise<number> {
+    const result = await mo2Import(profile, modsDir, name);
+    await refresh(result.loadout.id);
+    setGameId(result.loadout.gameId);
+    setExpanded((e) =>
+      e.includes(result.loadout.gameId) ? e : [...e, result.loadout.gameId],
+    );
+    setTab("dashboard");
+    setMo2Open(false);
+    setToast(
+      `${result.imported} mod(s) importé(s) dans « ${result.loadout.name} » — les mods pointent vers les dossiers MO2, en place.`,
+    );
+    return result.imported;
   }
 
   async function toggle(row: ModRow) {
@@ -639,6 +666,7 @@ export default function App() {
               onToggleFavorite={onFavorite}
               onPickLoadout={(id) => void pickLoadout(id, "dashboard")}
               onCreateLoadout={() => setCreateOpen(true)}
+              onImportSource={() => setMo2Open(true)}
               onGoToTab={(t) => setTab(t)}
               onUnwired={unwired}
             />
@@ -862,6 +890,119 @@ export default function App() {
           onCreate={createInstance}
         />
       ) : null}
+      {mo2Open && activeGame ? (
+        <Mo2ImportDialog
+          gameName={activeGame.name}
+          onClose={() => setMo2Open(false)}
+          onImport={importMo2}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Migration entry point for an existing Mod Organizer 2 instance. Path
+ * inputs, not a native folder picker: no dialog plugin is wired into the
+ * shell yet, and paths are what the Core's import actually needs.
+ */
+function Mo2ImportDialog({
+  gameName,
+  onClose,
+  onImport,
+}: {
+  gameName: string;
+  onClose: () => void;
+  onImport: (profile: string, modsDir: string, name: string) => Promise<number>;
+}) {
+  const [profile, setProfile] = useState("");
+  const [modsDir, setModsDir] = useState("");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setMessage(null);
+    try {
+      await onImport(profile.trim(), modsDir.trim(), name);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <form
+        className="modal"
+        aria-labelledby="mo2-import-title"
+        onSubmit={(e) => void submit(e)}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="modal-head">
+          <div>
+            <div className="eyebrow">Importer depuis MO2</div>
+            <h2 id="mo2-import-title">{gameName}</h2>
+          </div>
+          <IconButton name="x" title="Fermer" onClick={onClose} />
+        </div>
+        <label className="modal-label" htmlFor="mo2-profile">
+          Dossier de profil MO2
+        </label>
+        <input
+          id="mo2-profile"
+          className="modal-input"
+          autoFocus
+          value={profile}
+          onChange={(e) => setProfile(e.target.value)}
+          placeholder={`…\\Mod Organazer\\profiles\\${"Default"}`}
+        />
+        <p className="modal-copy">
+          Celui qui contient <span className="mono">modlist.txt</span>.
+        </p>
+        <label className="modal-label" htmlFor="mo2-mods">
+          Dossier <span className="mono">mods</span> de MO2
+        </label>
+        <input
+          id="mo2-mods"
+          className="modal-input"
+          value={modsDir}
+          onChange={(e) => setModsDir(e.target.value)}
+          placeholder="…\Mod Organazer\mods"
+        />
+        <label className="modal-label" htmlFor="mo2-name">
+          Nom de l’instance
+        </label>
+        <input
+          id="mo2-name"
+          className="modal-input"
+          maxLength={100}
+          placeholder="Ex. Main 2026"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <p className="modal-copy">
+          Rien n’est copié ni déplacé : les mods pointeront vers les dossiers de
+          MO2, en place. Les DLC et contenus Creation Club listés dans le profil
+          sont ignorés.
+        </p>
+        {message ? <p className="modal-error">{message}</p> : null}
+        <div className="modal-actions">
+          <Button variant="sm-ghost" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button
+            variant="sm"
+            type="submit"
+            disabled={busy || !profile.trim() || !modsDir.trim() || !name.trim()}
+          >
+            {busy ? "Import…" : "Importer"}
+          </Button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -901,7 +1042,7 @@ function CreateLoadoutDialog({
         </div>
         <label className="modal-label" htmlFor="loadout-name">Nom de l’instance</label>
         <input id="loadout-name" className="modal-input" autoFocus maxLength={100} placeholder="Ex. Labo météo" value={name} onChange={(e) => setName(e.target.value)} />
-        <p className="modal-copy">Une instance commence vide. L’import de mods MO2 reste la prochaine étape de l’interface.</p>
+        <p className="modal-copy">Une instance commence vide — pour récupérer une instance Mod Organizer 2 existante, utilise « Importer depuis MO2 ».</p>
         {message ? <p className="modal-error">{message}</p> : null}
         <div className="modal-actions">
           <Button variant="sm-ghost" onClick={onClose}>Annuler</Button>
