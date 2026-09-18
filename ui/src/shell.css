@@ -453,6 +453,15 @@
   .cb-claude{ display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 10px; border-radius:12px; background:transparent; border:1px solid var(--line2); color:var(--claude); font-size:11px; flex:none; }
   .cb-claude:hover{ background:var(--c4); }
   .cb-claude .ico{ width:11px; height:11px; }
+
+  /* Palette Ctrl+K — flottante centrée (shell réel). Réutilise le vocabulaire
+     .cp de la maquette (list/it/grp/hint) à l'intérieur d'une carte c3. */
+  .cpk-ov{ position:fixed; inset:0; z-index:60; background:color-mix(in srgb,var(--c1) 40%,transparent); display:flex; justify-content:center; align-items:flex-start; padding-top:11vh; }
+  .cpk{ width:min(580px,calc(100% - 32px)); background:var(--c3); border:1px solid var(--line2); border-radius:var(--r); box-shadow:var(--sh-float); overflow:hidden; display:flex; flex-direction:column; }
+  .cpk .in{ display:flex; align-items:center; gap:8px; padding:11px 14px; border-bottom:1px solid var(--line); color:var(--t3); }
+  .cpk .in .ico{ width:15px; height:15px; flex:none; }
+  .cpk .in input{ flex:1; min-width:0; background:none; border:0; outline:none; color:var(--t1); font-size:13.5px; }
+  .cpk .in input::placeholder{ color:var(--t3); }
   .cb-claude.queued{ color:var(--warn); border-color:color-mix(in srgb,var(--warn) 40%,transparent); }
   .cb-claude.queued:hover{ background:color-mix(in srgb,var(--warn) 12%,transparent); }
 

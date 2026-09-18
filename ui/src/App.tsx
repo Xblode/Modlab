@@ -20,6 +20,7 @@ import { tabsFor, type TabId } from "./gameChrome";
 import { Ico } from "./Ico";
 import { ModTable } from "./ModTable";
 import { StubTab } from "./StubTab";
+import { CommandPalette, type PaletteItem } from "./CommandPalette";
 
 
 import { IconButton } from "./components/ui/IconButton";
@@ -62,6 +63,21 @@ export default function App() {
   const [menuPickerOpen, setMenuPickerOpen] = useState(false);
   const [menuVariant, setMenuVariant] = useState<MenuVariant>("fichier");
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  /** Ctrl+K / Ctrl+Shift+P — the palette is the keyboard entry point (§6.2). */
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === "k" || (e.shiftKey && k === "p")) {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   /**
    * Every menu entry lands here. Only the two entries the Core can already
@@ -358,6 +374,97 @@ export default function App() {
     setRightOpen(true);
     setRightTab("info");
   }
+
+  /**
+   * Palette contents: only what the shell can actually serve today —
+   * commands wired to real actions, the current game's adapter-declared
+   * tabs, instances and mods from the snapshot. Nothing fake is listed.
+   */
+  const paletteItems: PaletteItem[] = useMemo(() => {
+    const items: PaletteItem[] = [
+      {
+        id: "cmd-new",
+        group: "Commandes",
+        label: "Nouvelle instance…",
+        icon: "plus",
+        run: () => setCreateOpen(true),
+      },
+      {
+        id: "cmd-mo2",
+        group: "Commandes",
+        label: "Importer un profil MO2…",
+        icon: "download",
+        run: () => setMo2Open(true),
+      },
+      {
+        id: "cmd-play",
+        group: "Commandes",
+        label: "Lancer le jeu (SKSE)",
+        icon: "play",
+        run: () => void play(),
+      },
+      {
+        id: "cmd-right",
+        group: "Commandes",
+        label: "Basculer le panneau droit",
+        icon: "layers",
+        run: () => setRightOpen((v) => !v),
+      },
+      {
+        id: "cmd-settings",
+        group: "Commandes",
+        label: "Ouvrir les réglages",
+        icon: "gear",
+        run: () => {
+          setAct("settings");
+          setTab("dashboard");
+        },
+      },
+      {
+        id: "cmd-ia",
+        group: "IA",
+        label: "Demander à l'IA locale…",
+        icon: "sparkle",
+        run: () => {
+          setRightOpen(true);
+          setRightTab("claude");
+        },
+      },
+    ];
+    for (const t of tabs) {
+      items.push({
+        id: `tab-${t.id}`,
+        group: "Onglets",
+        label: `Ouvrir : ${t.label}`,
+        icon: t.icon,
+        run: () => setTab(t.id),
+      });
+    }
+    for (const l of loadouts) {
+      items.push({
+        id: `lo-${l.id}`,
+        group: "Instances",
+        label: l.name,
+        sub: games.find((g) => g.id === l.gameId)?.short,
+        icon: "branch",
+        run: () => void pickLoadout(l.id, "mods"),
+      });
+    }
+    for (const e of entries) {
+      items.push({
+        id: `mod-${e.modId}`,
+        group: "Mods",
+        label: e.name,
+        sub: e.enabled ? "activé" : "désactivé",
+        icon: "box",
+        run: () => {
+          setTab("mods");
+          openMod(e.modId);
+        },
+      });
+    }
+    return items;
+  }, [tabs, loadouts, games, entries]);
 
   if (error && !snap) {
     return (
@@ -911,8 +1018,10 @@ export default function App() {
                 <input
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
-                  placeholder="Rechercher, commander, demander à Claude…"
+                  onFocus={() => setPaletteOpen(true)}
+                  placeholder="Rechercher ou commander… (Ctrl+K)"
                   autoComplete="off"
+                  readOnly
                 />
                 <span className="kbd">Ctrl K</span>
               </div>
@@ -941,6 +1050,11 @@ export default function App() {
           <span>{toast}</span>
         </div>
       ) : null}
+      <CommandPalette
+        open={paletteOpen}
+        items={paletteItems}
+        onClose={() => setPaletteOpen(false)}
+      />
       {error && snap ? (
         <div className="toast show" style={{ bottom: 80 }}>
           <Ico name="alert" className="sm" />
