@@ -1,4 +1,4 @@
-import { FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getShellSnapshot,
   getLoadoutConflicts,
@@ -6,6 +6,11 @@ import {
   mo2Import,
   launchSkse,
   setModEnabled,
+  aiAsk,
+  getTransactions,
+  snapshotLoadout,
+  rollbackLoadout,
+  KIND_LABELS,
   CONFLICT_PRIORITY_CAVEAT,
   type DetectedGame,
   type LoadoutConflicts,
@@ -15,6 +20,7 @@ import {
   type ShellSnapshot,
 } from "./api";
 import { Dashboard } from "./Dashboard";
+import type { Transaction } from "./api";
 import { useFavorites } from "./favorites";
 import { tabsFor, type TabId } from "./gameChrome";
 import { Ico } from "./Ico";
@@ -38,7 +44,7 @@ const LLM_MODELS = [
 type SideAct = "explorer" | "search" | "history" | "tools" | "settings";
 type RightTab = "info" | "claude";
 
-type ChatMsg = { who: "me" | "ai"; text: string };
+type ChatMsg = { who: "me" | "ai"; text: string; source?: string };
 
 export type SettingsMenu = "general" | "notifications" | "models" | "games";
 
@@ -64,8 +70,11 @@ export default function App() {
   const [menuVariant, setMenuVariant] = useState<MenuVariant>("fichier");
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [txOpen, setTxOpen] = useState(false);
+  const [txs, setTxs] = useState<Transaction[] | null>(null);
 
-  /** Ctrl+K / Ctrl+Shift+P — the palette is the keyboard entry point (§6.2). */
+  /** Ctrl+K / Ctrl+Shift+P — the palette is the keyboard entry point (§6.2).
+   * Ctrl+J opens the bottom panel (transactions), same vocabulary. */
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
@@ -73,6 +82,9 @@ export default function App() {
       if (k === "k" || (e.shiftKey && k === "p")) {
         e.preventDefault();
         setPaletteOpen((v) => !v);
+      } else if (k === "j") {
+        e.preventDefault();
+        setTxOpen((v) => !v);
       }
     }
     document.addEventListener("keydown", onKey);
@@ -108,7 +120,7 @@ export default function App() {
   const [chat, setChat] = useState<ChatMsg[]>([
     {
       who: "ai",
-      text: "Le moteur de règles diagnostique ; le LLM ne rédige qu’à partir des faits du Core. L’inférence llama-cpp n’est pas encore branchée dans ce shell — le panneau est là, le modèle se charge à la demande plus tard.",
+      text: "Je réponds d'abord par le moteur de règles du Core — conflits, mods actifs, dossiers illisibles. Avec un modèle GGUF déposé dans <racine données>/models, la même réponse est reformulée par le LLM local, sans y ajouter un seul fait.",
     },
   ]);
   const [draft, setDraft] = useState("");
@@ -352,21 +364,80 @@ export default function App() {
     }
   }
 
-  function sendChat(e?: FormEvent) {
+  /** The journal lives in the Core; the panel loads it on open and after
+   * every snapshot/rollback so it never shows a stale history. */
+  const refreshTxs = useCallback(() => {
+    getTransactions(50)
+      .then((next) => setTxs(next))
+      .catch(() => setTxs(null));
+  }, []);
+
+  useEffect(() => {
+    if (txOpen) refreshTxs();
+  }, [txOpen, refreshTxs]);
+
+  async function doSnapshot() {
+    if (!activeLoadout) {
+      setToast("Sélectionne une instance d'abord.");
+      return;
+    }
+    try {
+      await snapshotLoadout(activeLoadout.id);
+      setToast(`Instantané de « ${activeLoadout.name} » pris.`);
+      refreshTxs();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function doRollback() {
+    if (!activeLoadout) return;
+    try {
+      await rollbackLoadout(activeLoadout.id);
+      // The configuration changed: reload the whole snapshot from the Core
+      // rather than guessing which piece of state the restore touched.
+      const s = await getShellSnapshot(activeLoadout.id);
+      setSnap(s);
+      setToast("Configuration restaurée depuis l'instantané.");
+      refreshTxs();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /** The chat is a real client of the AI layer: rules engine, then — when
+   * available — the local LLM phrasing those facts. Source is displayed. */
+  async function sendChat(e?: FormEvent) {
     e?.preventDefault();
     const text = draft.trim();
     if (!text) return;
+    if (!activeLoadout) {
+      setToast("Sélectionne une instance pour donner du contexte à l'IA.");
+      return;
+    }
     setDraft("");
+    setRightOpen(true);
+    setRightTab("claude");
     setChat((c) => [
       ...c,
       { who: "me", text },
-      {
-        who: "ai",
-        text: `Reçu (modèle ${llm}, file d’attente). Aucune inférence locale n’est lancée tant qu’un jeu tourne — et le binding n’est pas encore branché sur ce shell.`,
-      },
+      { who: "ai", text: "…", source: "pending" },
     ]);
-    setRightOpen(true);
-    setRightTab("claude");
+    try {
+      const ans = await aiAsk(text, activeLoadout.id);
+      setChat((c) => {
+        const next = [...c];
+        next[next.length - 1] = { who: "ai", text: ans.text, source: ans.source };
+        return next;
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setChat((c) => {
+        const next = [...c];
+        next[next.length - 1] = { who: "ai", text: `⚠ ${msg}`, source: "error" };
+        return next;
+      });
+    }
   }
 
   function openMod(id: number) {
@@ -402,6 +473,13 @@ export default function App() {
         label: "Lancer le jeu (SKSE)",
         icon: "play",
         run: () => void play(),
+      },
+      {
+        id: "cmd-tx",
+        group: "Commandes",
+        label: "Afficher le panneau du bas (transactions)",
+        icon: "history",
+        run: () => setTxOpen(true),
       },
       {
         id: "cmd-right",
@@ -705,9 +783,14 @@ export default function App() {
               </div>
             </div>
           ) : act === "history" ? (
-            <Sec title="Révisions" count={0}>
+            <Sec title="Journal" count={txs?.length ?? 0}>
+              <button className="tr" type="button" onClick={() => setTxOpen(true)}>
+                <Ico name="history" />
+                <span className="lbl">Transactions</span>
+                <span className="tail">{txs?.length ?? "—"}</span>
+              </button>
               <div className="tr muted" style={{ fontStyle: "italic" }}>
-                Pas encore de révisions immuables (cycle snapshot reporté).
+                Panneau du bas : Ctrl+J.
               </div>
             </Sec>
           ) : act === "tools" ? (
@@ -980,7 +1063,11 @@ export default function App() {
                         {m.who === "ai" ? (
                           <div className="who">
                             <Ico name="sparkle" className="sm" />
-                            Local · {llm}
+                            {m.source === "local-llm"
+                              ? `Local · ${llm}`
+                              : m.source === "pending"
+                                ? "Local · réflexion…"
+                                : "Local · moteur de règles"}
                           </div>
                         ) : null}
                         {m.text}
@@ -1010,6 +1097,68 @@ export default function App() {
         ) : null}
 
         <div className="dock">
+          {txOpen ? (
+            <div className="tpanel open" role="dialog" aria-label="Panneau du bas">
+              <div className="tp-bar">
+                <button className="tab" type="button" aria-selected="true">
+                  <Ico name="history" className="sm" />
+                  <span>Transactions</span>
+                  <span className="cnt">{txs?.length ?? 0}</span>
+                </button>
+                <span className="spacer" />
+                <Button
+                  variant="sm-ghost"
+                  disabled={!activeLoadout}
+                  onClick={() => void doSnapshot()}
+                >
+                  <Ico name="shield" className="sm" />
+                  Instantané
+                </Button>
+                <IconButton name="x" title="Fermer (Ctrl+J)" onClick={() => setTxOpen(false)} />
+              </div>
+              <div className="tp-body">
+                {txs && txs.length === 0 ? (
+                  <div className="hint" style={{ border: 0 }}>
+                    Aucune mutation journalisée pour l'instant — importe une
+                    instance ou prends un instantané de l'instance active.
+                  </div>
+                ) : null}
+                {(txs ?? []).map((t) => (
+                  <div key={t.id} className="tx">
+                    <div className="t">
+                      <Ico
+                        name={
+                          t.kind === "loadout.snapshot"
+                            ? "shield"
+                            : t.kind === "loadout.rollback"
+                              ? "refresh"
+                              : "db"
+                        }
+                        className="sm"
+                      />
+                      {KIND_LABELS[t.kind] ?? t.kind}
+                      <span className="muted" style={{ fontWeight: 400 }}>
+                        {new Date(t.occurredAt).toLocaleString("fr-FR")}
+                      </span>
+                    </div>
+                    <div className="d">
+                      {t.steps.map((s, i) => (
+                        <div key={i}>{s}</div>
+                      ))}
+                    </div>
+                    {t.kind === "loadout.snapshot" ? (
+                      <div className="acts">
+                        <Button variant="sm-ghost" onClick={() => void doRollback()}>
+                          <Ico name="refresh" className="sm" />
+                          Restaurer
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <div className="composer-wrap">
             <form className="composer-box" onSubmit={sendChat}>
               <div className="composer">

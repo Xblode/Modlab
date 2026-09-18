@@ -171,6 +171,72 @@ export async function getLoadoutConflicts(
 }
 
 /**
+ * Answer from the local AI layer (§6): the Core's rules engine diagnoses,
+ * and — when a GGUF model is available and the shell was built with the
+ * `local-llm` feature — the local LLM phrases the same facts. `source` says
+ * which of the two produced this answer.
+ */
+export type AiAnswer = {
+  text: string;
+  /** "rules" (moteur de règles seul) ou "local-llm" (phrasé par le modèle). */
+  source: string;
+  model: string | null;
+};
+
+export async function aiAsk(question: string, loadoutId: number): Promise<AiAnswer> {
+  if (!isTauri()) {
+    return {
+      text: "Aperçu navigateur : le Core n'est pas joignable, donc pas de diagnostic réel ici. Lance le shell Tauri pour parler au moteur de règles.",
+      source: "rules",
+      model: null,
+    };
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<AiAnswer>("ai_ask", { question, loadoutId });
+}
+
+/** One journaled mutation, newest first as the Core returns them. */
+export type Transaction = {
+  id: number;
+  occurredAt: string;
+  /** The Core's own vocabulary (`loadout.snapshot`, `mod.import`, …). */
+  kind: string;
+  steps: string[];
+};
+
+/** French labels for the journal's kinds; unknown kinds fall back to the raw id. */
+export const KIND_LABELS: Record<string, string> = {
+  "loadout.snapshot": "Instantané",
+  "loadout.rollback": "Restauration",
+  "mod.import": "Import de mods",
+  "loadout.import": "Import de mods",
+  "loadout.create": "Création d'instance",
+  "mo2.import": "Import MO2",
+};
+
+export async function getTransactions(limit = 50): Promise<Transaction[]> {
+  if (!isTauri()) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<Transaction[]>("get_transactions", { limit });
+}
+
+/** Capture the loadout's configuration as an immutable journal event (§5). */
+export async function snapshotLoadout(loadoutId: number): Promise<number> {
+  if (!isTauri()) return 0;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<number>("snapshot_loadout", { loadoutId });
+}
+
+/** Restore the loadout to its most recent snapshot; returns the fresh entries. */
+export async function rollbackLoadout(loadoutId: number): Promise<ModRow[]> {
+  if (!isTauri()) {
+    throw new Error("La restauration n'est disponible que dans le shell Tauri (le navigateur n'a pas de Core à restaurer).");
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<ModRow[]>("rollback_loadout", { loadoutId });
+}
+
+/**
  * Browser-preview fixture. Only reachable outside the Tauri shell (`npm run dev`
  * in a plain browser), so it can never be mistaken for Core data at runtime —
  * `dataRoot` says so out loud in the status bar.
