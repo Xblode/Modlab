@@ -25,6 +25,7 @@ import { StubTab } from "./StubTab";
 import { IconButton } from "./components/ui/IconButton";
 import { Button } from "./components/ui/Button";
 import { FavoriteButton } from "./components/ui/FavoriteButton";
+import { MenuPicker, type MenuItem, type MenuVariant } from "./MenuPicker";
 
 const LLM_MODELS = [
   ["qwen-1.5b", "Qwen2.5 1.5B", "défaut · CPU ok"],
@@ -38,10 +39,13 @@ type RightTab = "info" | "claude";
 
 type ChatMsg = { who: "me" | "ai"; text: string };
 
+export type SettingsMenu = "general" | "notifications" | "models" | "games";
+
 export default function App() {
   const [snap, setSnap] = useState<ShellSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [act, setAct] = useState<SideAct>("explorer");
+  const [settingsMenu, setSettingsMenu] = useState<SettingsMenu>("general");
   const [tab, setTab] = useState<TabId>("dashboard");
   const [gameId, setGameId] = useState<string | null>(null);
   const [loadoutId, setLoadoutId] = useState<number | null>(null);
@@ -55,6 +59,29 @@ export default function App() {
   const [createOpen, setCreateOpen] = useState(false);
   const [mo2Open, setMo2Open] = useState(false);
   const [query, setQuery] = useState("");
+  const [menuPickerOpen, setMenuPickerOpen] = useState(false);
+  const [menuVariant, setMenuVariant] = useState<MenuVariant>("fichier");
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+
+  /**
+   * Every menu entry lands here. Only the two entries the Core can already
+   * serve are wired (new instance, MO2 import); the rest say so out loud
+   * instead of pretending to work.
+   */
+  function handleMenuAction(item: MenuItem) {
+    switch (item.id) {
+      case "nouveau":
+      case "nouveau-loadout":
+        setCreateOpen(true);
+        break;
+      case "importer":
+      case "importer-loadout":
+        setMo2Open(true);
+        break;
+      default:
+        setToast(`« ${item.label} » : pas encore branché au Core.`);
+    }
+  }
   /**
    * Conflict scan of the active loadout. `null` means *not scanned yet* — the
    * table must never render that as "no conflict".
@@ -345,7 +372,13 @@ export default function App() {
     <div className={`app ${rightOpen ? "" : "no-right"} ${running ? "running" : ""}`}>
       <aside className="side">
         <div className="side-tools">
-          <IconButton name="menu" title="Menu" />
+          <IconButton
+            name="menu"
+            title="Menu"
+            ref={menuButtonRef}
+            aria-pressed={menuPickerOpen}
+            onClick={() => setMenuPickerOpen((v) => !v)}
+          />
           <div className="hact">
             {(
               [
@@ -367,6 +400,16 @@ export default function App() {
             onClick={() => setAct("settings")}
           />
         </div>
+
+        {menuPickerOpen ? (
+          <MenuPicker
+            anchorRef={menuButtonRef}
+            variant={menuVariant}
+            onClose={() => setMenuPickerOpen(false)}
+            onVariantChange={setMenuVariant}
+            onItemSelect={handleMenuAction}
+          />
+        ) : null}
 
         {act !== "settings" && act === "explorer" && activeLoadout ? (
           <div className="side-instance">
@@ -568,35 +611,26 @@ export default function App() {
             </Sec>
           ) : null}
           {act === "settings" ? (
-            <>
-              <Sec title="Général" count={0}>
-                <div className="tr muted" style={{ fontStyle: "italic" }}>
-                  Préférences générales : pas encore suivi par le Core.
-                </div>
-              </Sec>
-              <Sec title="Modèles" count={LLM_MODELS.length}>
-                {LLM_MODELS.map(([id, name, sub]) => (
-                  <button
-                    key={id}
-                    className={`tr ${llm === id ? "sel" : ""}`}
-                    type="button"
-                    onClick={() => {
-                      setLlm(id);
-                      setToast(`Modèle local sélectionné : ${name}`);
-                    }}
-                    title={sub}
-                  >
-                    <Ico name={llm === id ? "check" : "box"} />
-                    <span className="lbl">
-                      {name}
-                      <div className="muted" style={{ fontSize: 11 }}>
-                        {sub}
-                      </div>
-                    </span>
-                  </button>
-                ))}
-              </Sec>
-            </>
+            <Sec title="Menu" count={4}>
+              {(
+                [
+                  ["general", "Général", "sliders"],
+                  ["notifications", "Notifications", "alert"],
+                  ["models", "Modèles", "box"],
+                  ["games", "Jeux", "layers"],
+                ] as const
+              ).map(([id, label, icon]) => (
+                <button
+                  key={id}
+                  className={`tr ${settingsMenu === id ? "sel" : ""}`}
+                  type="button"
+                  onClick={() => setSettingsMenu(id)}
+                >
+                  <Ico name={icon} />
+                  <span className="lbl">{label}</span>
+                </button>
+              ))}
+            </Sec>
           ) : null}
         </div>
         {act === "settings" ? (
@@ -673,19 +707,32 @@ export default function App() {
           </div>
 
           {currentTab === "dashboard" && activeGame ? (
-            <Dashboard
-              game={activeGame}
-              loadouts={gameLoadouts}
-              activeLoadoutId={activeLoadout?.id ?? null}
-              modCount={activeLoadout?.modCount ?? entries.length}
-              isFavorite={isFavorite}
-              onToggleFavorite={onFavorite}
-              onPickLoadout={(id) => void pickLoadout(id, "dashboard")}
-              onCreateLoadout={() => setCreateOpen(true)}
-              onImportSource={() => setMo2Open(true)}
-              onGoToTab={(t) => setTab(t)}
-              onUnwired={unwired}
-            />
+            act === "settings" ? (
+              <SettingsPane
+                menu={settingsMenu}
+                games={games}
+                llm={llm}
+                llmModels={LLM_MODELS}
+                onSelectModel={(id, name) => {
+                  setLlm(id);
+                  setToast(`Modèle local sélectionné : ${name}`);
+                }}
+              />
+            ) : (
+              <Dashboard
+                game={activeGame}
+                loadouts={gameLoadouts}
+                activeLoadoutId={activeLoadout?.id ?? null}
+                modCount={activeLoadout?.modCount ?? entries.length}
+                isFavorite={isFavorite}
+                onToggleFavorite={onFavorite}
+                onPickLoadout={(id) => void pickLoadout(id, "dashboard")}
+                onCreateLoadout={() => setCreateOpen(true)}
+                onImportSource={() => setMo2Open(true)}
+                onGoToTab={(t) => setTab(t)}
+                onUnwired={unwired}
+              />
+            )
           ) : (
             <>
               <div className="tbar">
@@ -731,6 +778,7 @@ export default function App() {
             </>
           )}
         </div>
+
 
         {rightOpen ? (
           <aside className="right">
@@ -1102,5 +1150,159 @@ function Sec({
       </div>
       <div className="sec-b">{children}</div>
     </div>
+  );
+}
+
+/**
+ * Settings detail surface, shown in the central content zone while the side
+ * toolbar is in settings mode. One pane per "Side Menu" entry; only what the
+ * app actually knows is shown interacted with, everything else is an honest,
+ * Core-labelled placeholder.
+ */
+function SettingsPane({
+  menu,
+  games,
+  llm,
+  llmModels,
+  onSelectModel,
+}: {
+  menu: SettingsMenu;
+  games: DetectedGame[];
+  llm: string;
+  llmModels: readonly (readonly [string, string, string])[];
+  onSelectModel: (id: string, name: string) => void;
+}) {
+  if (menu === "models") {
+    return (
+      <>
+        <div className="tbar">
+          <div className="crumbs">
+            <Ico name="box" />
+            <b>Réglages</b>
+            <Ico name="chevr" />
+            Modèles
+          </div>
+        </div>
+        <div className="content">
+          <div className="dash">
+            <div className="dh">Modèle local actif</div>
+            {llmModels.map(([id, name, sub]) => (
+              <button
+                key={id}
+                className={`tr ${llm === id ? "sel" : ""}`}
+                type="button"
+                onClick={() => onSelectModel(id, name)}
+                title={sub}
+              >
+                <Ico name={llm === id ? "check" : "box"} />
+                <span className="lbl">
+                  {name}
+                  <div className="muted" style={{ fontSize: 11 }}>
+                    {sub}
+                  </div>
+                </span>
+              </button>
+            ))}
+            <div className="box" style={{ marginTop: 22 }}>
+              <div className="bh">
+                <Ico name="info" className="sm" />
+                Téléchargement et chargement à la demande
+              </div>
+              <div className="why">
+                Pas encore branchés au Core : le modèle se choisira ici, le
+                téléchargement et le chargement resteront visibles dans ce
+                panneau.
+              </div>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+  if (menu === "games") {
+    return (
+      <>
+        <div className="tbar">
+          <div className="crumbs">
+            <Ico name="box" />
+            <b>Réglages</b>
+            <Ico name="chevr" />
+            Jeux
+          </div>
+        </div>
+        <div className="content">
+          <div className="dash">
+            <div className="dh">Jeux détectés ({games.length})</div>
+            {games.length === 0 ? (
+              <div className="tr muted" style={{ fontStyle: "italic" }}>
+                Aucun jeu détecté par les adaptateurs.
+              </div>
+            ) : (
+              games.map((g) => (
+                <div key={g.id} className="tr-row">
+                  <span className="tr-label">
+                    <Ico name="layers" />
+                    <span className="lbl">{g.name}</span>
+                    <span className="tail">
+                      <span className="muted" style={{ fontSize: 10 }}>
+                        {g.short}
+                      </span>
+                    </span>
+                  </span>
+                </div>
+              ))
+            )}
+            <div className="dh">Ajouter un jeu</div>
+            <div className="tr muted" style={{ fontStyle: "italic" }}>
+              Requête Core : l’ajout manuel d’un dossier de jeu n’existe pas
+              encore.
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+  if (menu === "notifications") {
+    return (
+      <>
+        <div className="tbar">
+          <div className="crumbs">
+            <Ico name="box" />
+            <b>Réglages</b>
+            <Ico name="chevr" />
+            Notifications
+          </div>
+        </div>
+        <div className="content">
+          <div className="dash">
+            <div className="dh">Notifications</div>
+            <div className="tr muted" style={{ fontStyle: "italic" }}>
+              Pas encore suivi par le Core : fins de job, mises à jour de mods
+              et santé des instances arriveront ici.
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+  return (
+    <>
+      <div className="tbar">
+        <div className="crumbs">
+          <Ico name="box" />
+          <b>Réglages</b>
+          <Ico name="chevr" />
+          Général
+        </div>
+      </div>
+      <div className="content">
+        <div className="dash">
+          <div className="dh">Général</div>
+          <div className="tr muted" style={{ fontStyle: "italic" }}>
+            Préférences générales : pas encore suivi par le Core.
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
