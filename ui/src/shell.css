@@ -76,6 +76,8 @@
   .side-tools .hact{ display:flex; gap:2px; }
   .side-instance{ flex:none; border-bottom:1px solid var(--line); }
   .side-instance:empty{ display:none; }
+  .side-profile{ flex:none; border-top:1px solid var(--line); }
+  .side-profile:empty{ display:none; }
   .side-body{ flex:1; overflow-y:auto; overflow-x:hidden; min-height:0; padding:0 6px 8px; }
   .side-foot{ flex:none; height:28px; border-top:1px solid var(--line); display:flex; align-items:center; gap:2px; padding:0 8px; font-size:11px; color:var(--t3); white-space:nowrap; overflow:hidden; }
   .side-foot .fi{ display:inline-flex; align-items:center; gap:4px; padding:0 5px; height:20px; border-radius:4px; }

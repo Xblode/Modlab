@@ -33,7 +33,7 @@ const LLM_MODELS = [
   ["qwen-8b", "Qwen3 8B", "si GPU ≥ 8 Go"],
 ] as const;
 
-type SideAct = "explorer" | "search" | "history" | "tools";
+type SideAct = "explorer" | "search" | "history" | "tools" | "settings";
 type RightTab = "info" | "claude";
 
 type ChatMsg = { who: "me" | "ai"; text: string };
@@ -52,7 +52,6 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [llm, setLlm] = useState("qwen-1.5b");
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [mo2Open, setMo2Open] = useState(false);
   const [query, setQuery] = useState("");
@@ -363,42 +362,13 @@ export default function App() {
           <IconButton name="globe" title="Nexus Mods" />
           <IconButton
             name="gear"
-            title="Réglages / modèle local"
-            aria-pressed={settingsOpen}
-            onClick={() => setSettingsOpen((v) => !v)}
+            title="Réglages"
+            aria-pressed={act === "settings"}
+            onClick={() => setAct("settings")}
           />
         </div>
 
-        {settingsOpen ? (
-          <div className="side-instance">
-            <div className="lo">
-              <div className="muted" style={{ fontSize: 11.5 }}>
-                Diagnostic local (IA)
-              </div>
-              {LLM_MODELS.map(([id, name, sub]) => (
-                <button
-                  key={id}
-                  className={`tr ${llm === id ? "sel" : ""}`}
-                  type="button"
-                  onClick={() => {
-                    setLlm(id);
-                    setToast(`Modèle local sélectionné : ${name}`);
-                  }}
-                >
-                  <Ico name={llm === id ? "check" : "box"} />
-                  <span className="lbl">
-                    {name}
-                    <div className="muted" style={{ fontSize: 11 }}>
-                      {sub}
-                    </div>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {act === "explorer" && activeLoadout ? (
+        {act !== "settings" && act === "explorer" && activeLoadout ? (
           <div className="side-instance">
             <div className="lo">
               <div className="lo-top">
@@ -590,14 +560,60 @@ export default function App() {
                 Pas encore de révisions immuables (cycle snapshot reporté).
               </div>
             </Sec>
-          ) : (
+          ) : act === "tools" ? (
             <Sec title="Outils" count={0}>
               <div className="tr muted" style={{ fontStyle: "italic" }}>
                 Pas de registre d’outils dans le Core pour l’instant.
               </div>
             </Sec>
-          )}
+          ) : null}
+          {act === "settings" ? (
+            <>
+              <Sec title="Général" count={0}>
+                <div className="tr muted" style={{ fontStyle: "italic" }}>
+                  Préférences générales : pas encore suivi par le Core.
+                </div>
+              </Sec>
+              <Sec title="Modèles" count={LLM_MODELS.length}>
+                {LLM_MODELS.map(([id, name, sub]) => (
+                  <button
+                    key={id}
+                    className={`tr ${llm === id ? "sel" : ""}`}
+                    type="button"
+                    onClick={() => {
+                      setLlm(id);
+                      setToast(`Modèle local sélectionné : ${name}`);
+                    }}
+                    title={sub}
+                  >
+                    <Ico name={llm === id ? "check" : "box"} />
+                    <span className="lbl">
+                      {name}
+                      <div className="muted" style={{ fontSize: 11 }}>
+                        {sub}
+                      </div>
+                    </span>
+                  </button>
+                ))}
+              </Sec>
+            </>
+          ) : null}
         </div>
+        {act === "settings" ? (
+          <div className="side-profile">
+            <div className="lo">
+              <div className="lo-top">
+                <span className="lo-name">
+                  <span className="fade">Profils info</span>
+                </span>
+                <span className="chan stable">local</span>
+              </div>
+              <div className="lo-row muted" style={{ fontSize: 11.5, padding: "0 2px" }}>
+                Racine : {snap?.dataRoot ?? "—"}
+              </div>
+            </div>
+          </div>
+        ) : null}
         <div className="side-foot">
           {running ? (
             <span className="fi">
