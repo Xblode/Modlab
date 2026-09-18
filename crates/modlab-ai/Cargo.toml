@@ -1,0 +1,16 @@
+[package]
+name = "modlab-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "ModLab local AI layer: the rules engine diagnoses from Core facts; an optional llama.cpp backend only phrases them (docs/01-architecture-decidee.md S6)."
+
+[dependencies]
+llama-cpp-2 = { version = "=0.1.156", optional = true }
+encoding_rs = { version = "0.8", optional = true }
+
+[features]
+# Off by default: pulling it in means a full llama.cpp C++ build (needs LLVM +
+# CMake on the build machine, see ADR 0004). `cargo build --features local-llm`
+# in this crate, or --features modlab-ai/local-llm from a dependent crate.
+local-llm = ["dep:llama-cpp-2", "dep:encoding_rs"]

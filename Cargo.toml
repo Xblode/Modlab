@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/modlab-core",
     "crates/modlab-cli",
+    "crates/modlab-ai",
     "crates/modlab-game-skyrim",
     "crates/modlab-game-minecraft",
     "crates/modlab-ui",
