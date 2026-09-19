@@ -64,6 +64,11 @@ const PATHS: Record<string, string> = {
   down: '<path d="m5 12 7 7 7-7"/><path d="M12 5v14"/>',
   refresh:
     '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+  // Window controls — deliberately plain glyphs, Windows convention.
+  minimize: '<path d="M5 12h14"/>',
+  maximize: '<rect width="14" height="14" x="5" y="5" rx="1"/>',
+  restore:
+    '<rect width="11" height="11" x="4" y="9" rx="1"/><path d="M8 6.5A1.5 1.5 0 0 1 9.5 5H18a2 2 0 0 1 2 2v8.5A1.5 1.5 0 0 1 18.5 17"/>',
 };
 
 export function Ico({

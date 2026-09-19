@@ -1,7 +1,10 @@
 import type { ReactNode } from "react";
+import { Titlebar } from "./Titlebar";
+import type { MenuItem } from "../Features/MenuPicker/MenuPicker";
 
 /**
- * The shell's frame: sidebar, main sheet, floating right panel, bottom dock.
+ * The shell's frame: our own title bar, then sidebar, main sheet, floating
+ * right panel, bottom dock.
  *
  * Pure layout — it holds no state and knows nothing about games, loadouts or
  * mods. Every slot is filled by the caller; the only thing this component
@@ -11,6 +14,7 @@ import type { ReactNode } from "react";
 export function LayoutShell({
   rightOpen,
   running,
+  onMenuAction,
   sidebar,
   right,
   dock,
@@ -19,6 +23,8 @@ export function LayoutShell({
 }: {
   rightOpen: boolean;
   running: boolean;
+  /** Every entry of the title bar's menu tree lands here. */
+  onMenuAction: (item: MenuItem) => void;
   sidebar: ReactNode;
   /** The right panel itself, or `null` when it is closed. */
   right?: ReactNode;
@@ -29,18 +35,22 @@ export function LayoutShell({
   children: ReactNode;
 }) {
   return (
-    <div className={`app ${rightOpen ? "" : "no-right"} ${running ? "running" : ""}`}>
-      {sidebar}
+    <div className="shell-root">
+      <Titlebar onMenuAction={onMenuAction} />
 
-      <div className="main">
-        <div className="sheet">{children}</div>
+      <div className={`app ${rightOpen ? "" : "no-right"} ${running ? "running" : ""}`}>
+        {sidebar}
 
-        {right}
+        <div className="main">
+          <div className="sheet">{children}</div>
 
-        <div className="dock">{dock}</div>
+          {right}
+
+          <div className="dock">{dock}</div>
+        </div>
+
+        {overlays}
       </div>
-
-      {overlays}
     </div>
   );
 }

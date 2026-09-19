@@ -1,8 +1,6 @@
-import { useRef } from "react";
 import type { DetectedGame, LoadoutDto } from "../../../api";
 import { Ico } from "../../../Ico";
 import { Accordion, ChannelBadge, SearchInput } from "../../ui";
-import { MenuPicker, type MenuItem, type MenuVariant } from "../MenuPicker/MenuPicker";
 import type { SettingsMenu } from "../Settings/SettingsPane";
 import { ActiveInstanceCard } from "./ActiveInstanceCard";
 import { ExplorerTree, type FavoriteEntry } from "./ExplorerTree";
@@ -21,13 +19,6 @@ const SETTINGS_ENTRIES = [
 type Props = {
   act: SideAct;
   onAct: (act: SideAct) => void;
-
-  menuOpen: boolean;
-  onToggleMenu: () => void;
-  onCloseMenu: () => void;
-  menuVariant: MenuVariant;
-  onMenuVariantChange: (variant: MenuVariant) => void;
-  onMenuAction: (item: MenuItem) => void;
 
   activeGame: DetectedGame | undefined;
   activeLoadout: LoadoutDto | undefined;
@@ -68,12 +59,6 @@ type Props = {
 export function Sidebar({
   act,
   onAct,
-  menuOpen,
-  onToggleMenu,
-  onCloseMenu,
-  menuVariant,
-  onMenuVariantChange,
-  onMenuAction,
   activeGame,
   activeLoadout,
   games,
@@ -99,27 +84,9 @@ export function Sidebar({
   settingsMenu,
   onSettingsMenu,
 }: Props) {
-  const menuButtonRef = useRef<HTMLButtonElement>(null);
-
   return (
     <aside className="side">
-      <SidebarRail
-        act={act}
-        onAct={onAct}
-        menuButtonRef={menuButtonRef}
-        menuOpen={menuOpen}
-        onToggleMenu={onToggleMenu}
-      />
-
-      {menuOpen ? (
-        <MenuPicker
-          anchorRef={menuButtonRef}
-          variant={menuVariant}
-          onClose={onCloseMenu}
-          onVariantChange={onMenuVariantChange}
-          onItemSelect={onMenuAction}
-        />
-      ) : null}
+      <SidebarRail act={act} onAct={onAct} />
 
       {act === "explorer" && activeLoadout ? (
         <ActiveInstanceCard

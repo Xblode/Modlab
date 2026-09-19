@@ -30,7 +30,7 @@ import { SettingsPane, type SettingsMenu } from "./components/Features/Settings/
 import { CommandPalette, type PaletteItem } from "./components/Features/CommandPalette/CommandPalette";
 import { CreateLoadoutDialog } from "./components/Features/LoadoutDialogs/CreateLoadoutDialog";
 import { Mo2ImportDialog } from "./components/Features/LoadoutDialogs/Mo2ImportDialog";
-import type { MenuItem, MenuVariant } from "./components/Features/MenuPicker/MenuPicker";
+import type { MenuItem } from "./components/Features/MenuPicker/MenuPicker";
 import { Crumbs, Toast } from "./components/ui";
 
 import DashboardPage from "./app/dashboard/page";
@@ -69,8 +69,6 @@ export default function App() {
   const [createOpen, setCreateOpen] = useState(false);
   const [mo2Open, setMo2Open] = useState(false);
   const [query, setQuery] = useState("");
-  const [menuPickerOpen, setMenuPickerOpen] = useState(false);
-  const [menuVariant, setMenuVariant] = useState<MenuVariant>("fichier");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [txOpen, setTxOpen] = useState(false);
 
@@ -530,16 +528,11 @@ export default function App() {
     <LayoutShell
       rightOpen={rightOpen}
       running={running}
+      onMenuAction={handleMenuAction}
       sidebar={
         <Sidebar
           act={act}
           onAct={setAct}
-          menuOpen={menuPickerOpen}
-          onToggleMenu={() => setMenuPickerOpen((v) => !v)}
-          onCloseMenu={() => setMenuPickerOpen(false)}
-          menuVariant={menuVariant}
-          onMenuVariantChange={setMenuVariant}
-          onMenuAction={handleMenuAction}
           activeGame={activeGame}
           activeLoadout={activeLoadout}
           games={games}

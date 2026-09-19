@@ -53,7 +53,9 @@
   ::-webkit-scrollbar-corner{ background:transparent; }
 
   /* ============ Deux colonnes ============ */
-  .app{ display:grid; height:100vh; grid-template-columns:var(--sb,280px) minmax(0,1fr); grid-template-rows:minmax(0,1fr); grid-template-areas:"side main"; background:var(--c2); }
+  /* The window is our own: title bar on top, the two-column app below it. */
+  .shell-root{ display:flex; flex-direction:column; height:100vh; min-height:0; background:var(--c2); }
+  .app{ display:grid; flex:1 1 auto; min-height:0; grid-template-columns:var(--sb,280px) minmax(0,1fr); grid-template-rows:minmax(0,1fr); grid-template-areas:"side main"; background:var(--c2); }
   .app.no-side{ --sb:0px; }
   @media (max-width:900px){ .app{ --sb:0px; } }
   .tb{ display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:6px; color:var(--t2); position:relative; }
@@ -563,14 +565,27 @@
   :root[data-wireframe="on"] .caps::before
   { position:absolute; top:1px; left:1px; z-index:9999; background:#fff176; color:#1a1a1a; font:9.5px/1.5 var(--font-mono); letter-spacing:0; padding:0 4px; border:1px solid #9a9a2e; border-radius:0 0 3px 0; pointer-events:none; white-space:nowrap; }
   :root[data-wireframe="on"] .tabs-r::before{ left:auto; right:1px; border-radius:0 0 0 3px; }
-/* ============ MenuPicker — menus de la barre d'outils latérale ============ */
+/* ============ Barre de titre — chrome de fenêtre maison ============ */
+  /* `decorations: false` côté Tauri : cette barre remplace celle de Windows. */
+  .titlebar{ flex:none; display:flex; align-items:stretch; height:34px; background:var(--c1); border-bottom:1px solid var(--line2); user-select:none; position:relative; z-index:60; }
+  .tb-left{ display:flex; align-items:center; gap:6px; flex:none; padding:0 8px 0 6px; }
+  .tb-logo{ color:var(--accent); }
+  .tb-title{ font-size:12px; color:var(--t2); letter-spacing:.02em; white-space:nowrap; }
+  /* Only this strip drags the window — the two clusters stay clickable. */
+  .tb-drag{ flex:1; min-width:0; }
+  .tb-controls{ display:flex; align-items:stretch; flex:none; }
+  .tb-win{ display:inline-flex; align-items:center; justify-content:center; width:44px; color:var(--t2); }
+  .tb-win:hover{ background:var(--c4); color:var(--t1); }
+  .tb-win.danger:hover{ background:#c42b1c; color:#fff; }
+
+/* ============ MenuPicker — menu de l'application, en cascade ============ */
+  /* The tree only holds fixed-position panels: it must not take any space. */
+  .menu-tree{ display:contents; }
   .menu-picker{ position:fixed; z-index:55; min-width:280px; max-width:330px; background:var(--c3); border:1px solid var(--line2); border-radius:10px; box-shadow:var(--sh-float); padding:0; overflow:hidden; }
-  .menu-variant-tabs{ display:flex; gap:2px; padding:4px 6px 0; border-bottom:1px solid var(--line); background:var(--c2); }
-  .menu-variant-tab{ flex:1; display:flex; align-items:center; justify-content:center; gap:4px; height:24px; padding:0 6px; border-radius:6px 6px 0 0; color:var(--t3); font-size:10.5px; white-space:nowrap; }
-  .menu-variant-tab:hover{ color:var(--t1); background:var(--c4); }
-  .menu-variant-tab.active{ color:var(--t1); background:var(--c3); box-shadow:inset 0 -2px 0 var(--accent); }
-  .menu-variant-tab .ico{ width:12px; height:12px; }
-  .menu-variant-tab .lbl{ text-transform:uppercase; letter-spacing:.04em; font-weight:600; }
+  .menu-picker.menu-sub{ z-index:56; }
+  .menu-row{ position:relative; }
+  .menu-item.open{ background:var(--c4); color:var(--t1); }
+  .menu-item .menu-item-chevron{ flex:none; width:12px; height:12px; color:var(--t3); margin-left:2px; }
   .menu-picker-items{ padding:4px; display:flex; flex-direction:column; gap:1px; max-height:340px; overflow:auto; }
   .menu-item{ display:flex; align-items:center; gap:8px; min-height:26px; padding:0 8px; border-radius:6px; color:var(--t2); font-size:12.5px; text-align:left; width:100%; }
   .menu-item:hover{ background:var(--c4); color:var(--t1); }
