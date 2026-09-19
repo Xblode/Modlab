@@ -1,15 +1,19 @@
 import { useMemo, useRef, useState } from "react";
-import { GameDashboardHeader, type HeaderAction } from "./components/modlab/games/GameDashboardHeader";
 import type { CSSProperties } from "react";
-import type { DetectedGame, LoadoutDto } from "./api";
-import { chromeFor, initials, type TabId } from "./gameChrome";
-import { FavoriteButton } from "./components/ui/FavoriteButton";
-import { Ico } from "./Ico";
-import { Pop } from "./Pop";
-
-/** Placeholder for anything the Core does not track yet. */
-const NOT_TRACKED = "—";
-const NOT_TRACKED_TITLE = "Pas encore suivi par le Core";
+import type { DetectedGame, LoadoutDto } from "../../api";
+import {
+  GameDashboardHeader,
+  type HeaderAction,
+} from "../../components/Features/Dashboard/GameDashboardHeader";
+import { InstanceGrid } from "../../components/Features/Dashboard/InstanceGrid";
+import {
+  NOT_TRACKED,
+  NOT_TRACKED_TITLE,
+} from "../../components/Features/Dashboard/placeholders";
+import { Crumbs, Panel } from "../../components/ui";
+import { chromeFor, type TabId } from "../../gameChrome";
+import { Ico } from "../../Ico";
+import { Pop } from "../../Pop";
 
 /**
  * Import entry points, mapped from the adapter's `importSource` id — the same
@@ -41,7 +45,7 @@ type Props = {
   onUnwired: (label: string) => void;
 };
 
-export function Dashboard({
+export default function DashboardPage({
   game,
   loadouts,
   activeLoadoutId,
@@ -107,14 +111,7 @@ export function Dashboard({
 
   return (
     <>
-      <div className="tbar">
-        <div className="crumbs">
-          <Ico name="box" />
-          <b>{game.short}</b>
-          <Ico name="chevr" />
-          Tableau de bord
-        </div>
-      </div>
+      <Crumbs path={[game.short, "Tableau de bord"]} />
       <div className="content">
         <div className="dash">
           <GameDashboardHeader
@@ -174,58 +171,15 @@ export function Dashboard({
               ) : null}
             </div>
 
-            <div className="inst-grid">
-              {sorted.map((l) => {
-                const cur = l.id === activeLoadoutId;
-                const fav = isFavorite(l.id);
-                return (
-                  <div
-                    key={l.id}
-                    className={`inst-card ${cur ? "cur" : ""}`}
-                    role="button"
-                    tabIndex={0}
-                    style={heroStyle}
-                    onClick={() => onPickLoadout(l.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        onPickLoadout(l.id);
-                      }
-                    }}
-                  >
-                    <span className="thumb">{initials(l.name)}</span>
-                    <span className="ic-body">
-                      <span className="ic-top">
-                        <span className="t fade">{l.name}</span>
-                      </span>
-                      <span className="ic-meta fade">
-                        <span className="mono" title="Pas encore de révisions immuables">
-                          r.{NOT_TRACKED}
-                        </span>
-                        <span>{l.modCount} mods</span>
-                        {cur ? <span className="on">● active</span> : null}
-                      </span>
-                    </span>
-                    <FavoriteButton on={fav} onToggle={() => onToggleFavorite(l.id)} />
-                  </div>
-                );
-              })}
-              <div
-                className="inst-card add"
-                role="button"
-                tabIndex={0}
-                onClick={onCreateLoadout}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    onCreateLoadout();
-                  }
-                }}
-              >
-                <Ico name="box" className="sm" />
-                <span>Nouvelle instance</span>
-              </div>
-            </div>
+            <InstanceGrid
+              loadouts={sorted}
+              activeLoadoutId={activeLoadoutId}
+              cardStyle={heroStyle}
+              isFavorite={isFavorite}
+              onToggleFavorite={onToggleFavorite}
+              onPickLoadout={onPickLoadout}
+              onCreateLoadout={onCreateLoadout}
+            />
 
             <div className="dsel-row">
               <div className="dsel">
@@ -262,21 +216,20 @@ export function Dashboard({
               </span>
             </div>
 
-            <div className="box" style={{ marginTop: 22 }}>
-              <div className="bh">
-                <Ico name="info" className="sm" />
-                Ce que le Core ne suit pas encore
-              </div>
-              <div className="why">
-                Temps de jeu, dernière session, crashs et santé n’ont <b>aucune source</b>{" "}
-                dans le Core aujourd’hui : il n’existe ni journal de sessions ni métriques.
-                Les tuiles gardent leur place mais affichent « — » plutôt qu’un chiffre
-                inventé. Même chose pour la révision d’une instance — le cycle snapshot
-                n’est pas encore là — et pour le registre d’outils. Les favoris, eux, sont
-                stockés <b>dans ce navigateur uniquement</b> : le Core n’a pas encore de
-                champ « favori ».
-              </div>
-            </div>
+            <Panel
+              icon="info"
+              title="Ce que le Core ne suit pas encore"
+              bodyClassName="why"
+              style={{ marginTop: 22 }}
+            >
+              Temps de jeu, dernière session, crashs et santé n’ont <b>aucune source</b>{" "}
+              dans le Core aujourd’hui : il n’existe ni journal de sessions ni métriques.
+              Les tuiles gardent leur place mais affichent « — » plutôt qu’un chiffre
+              inventé. Même chose pour la révision d’une instance — le cycle snapshot
+              n’est pas encore là — et pour le registre d’outils. Les favoris, eux, sont
+              stockés <b>dans ce navigateur uniquement</b> : le Core n’a pas encore de
+              champ « favori ».
+            </Panel>
           </div>
         </div>
       </div>

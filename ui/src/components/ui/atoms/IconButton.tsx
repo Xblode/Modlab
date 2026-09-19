@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import { Ico } from "../../Ico";
+import { Ico } from "../../../Ico";
 
 export function IconButton({
   className,

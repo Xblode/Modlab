@@ -1,9 +1,10 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useRef } from "react";
-import { Ico } from "./Ico";
-import { IconButton } from "./components/ui/IconButton";
-import type { ModRow } from "./api";
-import { CONFLICT_PRIORITY_CAVEAT, type ModConflicts } from "./api";
+import { Ico } from "../../../Ico";
+import { Checkbox, IconButton } from "../../ui";
+import type { ModRow } from "../../../api";
+import type { ModConflicts } from "../../../api";
+import { ConflictBadge } from "./ConflictBadge";
 
 type Props = {
   rows: ModRow[];
@@ -17,51 +18,6 @@ type Props = {
    */
   conflicts: Map<number, ModConflicts> | null;
 };
-
-/**
- * The maquette's `badgeConflict()`: one badge per mod, and the *shape* of the
- * badge is the message — it only wins, it only loses, or both, in which case
- * the two counts are shown side by side. A mod in no conflict gets no badge
- * at all rather than a "0".
- */
-function ConflictBadge({ conflicts }: { conflicts: ModConflicts | undefined }) {
-  if (!conflicts) return null;
-  const { wins, loses } = conflicts;
-  if (wins > 0 && loses > 0) {
-    return (
-      <span
-        className="badge both"
-        title={`Écrase ${wins} fichier(s), écrasé sur ${loses} — ${CONFLICT_PRIORITY_CAVEAT}`}
-      >
-        <Ico name="zap" />
-        {wins}/{loses}
-      </span>
-    );
-  }
-  if (wins > 0) {
-    return (
-      <span
-        className="badge win"
-        title={`Écrase ${wins} fichier(s) — ${CONFLICT_PRIORITY_CAVEAT}`}
-      >
-        <Ico name="flag" />
-        {wins}
-      </span>
-    );
-  }
-  if (loses > 0) {
-    return (
-      <span
-        className="badge lose"
-        title={`${loses} fichier(s) écrasés — ${CONFLICT_PRIORITY_CAVEAT}`}
-      >
-        <Ico name="flag" />
-        {loses}
-      </span>
-    );
-  }
-  return null;
-}
 
 export function ModTable({
   rows,
@@ -136,17 +92,13 @@ export function ModTable({
                 <Ico name="grip" className="sm" />
               </div>
               <div>
-                <span
-                  className={`chk ${m.enabled ? "on" : ""}`}
-                  role="checkbox"
-                  aria-checked={m.enabled}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggle(m);
-                  }}
-                >
-                  {m.enabled ? <Ico name="check" className="sm" /> : null}
-                </span>
+                <Checkbox
+                  checked={m.enabled}
+                  onToggle={() => onToggle(m)}
+                  stopPropagation
+                  // The row's own name — the checked state is announced by the input itself.
+                  aria-label={m.name}
+                />
               </div>
               <div className="pri num">{pri}</div>
               <div className="nm">

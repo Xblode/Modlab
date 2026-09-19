@@ -1,38 +1,48 @@
-import { FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   getShellSnapshot,
-  getLoadoutConflicts,
   createLoadout,
   mo2Import,
   launchSkse,
   setModEnabled,
   aiAsk,
-  getTransactions,
   snapshotLoadout,
   rollbackLoadout,
-  KIND_LABELS,
-  CONFLICT_PRIORITY_CAVEAT,
   type DetectedGame,
-  type LoadoutConflicts,
   type LoadoutDto,
-  type ModConflicts,
   type ModRow,
   type ShellSnapshot,
 } from "./api";
-import { Dashboard } from "./Dashboard";
-import type { Transaction } from "./api";
 import { useFavorites } from "./favorites";
+import { useConflicts } from "./hooks/useConflicts";
+import { useTransactions } from "./hooks/useTransactions";
 import { tabsFor, type TabId } from "./gameChrome";
-import { Ico } from "./Ico";
-import { ModTable } from "./ModTable";
 import { StubTab } from "./StubTab";
-import { CommandPalette, type PaletteItem } from "./CommandPalette";
 
+import { LayoutShell } from "./components/Layout/LayoutShell";
+import { Sidebar, type SideAct } from "./components/Features/Sidebar/Sidebar";
+import { TabStrip } from "./components/Features/Tabs/TabStrip";
+import { RightPanel, type RightTab } from "./components/Features/Inspector/RightPanel";
+import { type ChatMsg } from "./components/Features/Chat/ChatPanel";
+import { Composer } from "./components/Features/Composer/Composer";
+import { TransactionsPanel } from "./components/Features/Transactions/TransactionsPanel";
+import { SettingsPane, type SettingsMenu } from "./components/Features/Settings/SettingsPane";
+import { CommandPalette, type PaletteItem } from "./components/Features/CommandPalette/CommandPalette";
+import { CreateLoadoutDialog } from "./components/Features/LoadoutDialogs/CreateLoadoutDialog";
+import { Mo2ImportDialog } from "./components/Features/LoadoutDialogs/Mo2ImportDialog";
+import type { MenuItem, MenuVariant } from "./components/Features/MenuPicker/MenuPicker";
+import { Crumbs, Toast } from "./components/ui";
 
-import { IconButton } from "./components/ui/IconButton";
-import { Button } from "./components/ui/Button";
-import { FavoriteButton } from "./components/ui/FavoriteButton";
-import { MenuPicker, type MenuItem, type MenuVariant } from "./MenuPicker";
+import DashboardPage from "./app/dashboard/page";
+import ModsPage from "./app/mods/page";
+import PluginsPage from "./app/plugins/page";
+import ArchivesPage from "./app/archives/page";
+import RepertoirePage from "./app/repertoire/page";
+import SavesPage from "./app/saves/page";
+import SantePage from "./app/sante/page";
+import PacksPage from "./app/packs/page";
+import WorldsPage from "./app/worlds/page";
+import ServersPage from "./app/servers/page";
 
 const LLM_MODELS = [
   ["qwen-1.5b", "Qwen2.5 1.5B", "défaut · CPU ok"],
@@ -40,13 +50,6 @@ const LLM_MODELS = [
   ["phi-mini", "Phi-3.5 mini", "compact"],
   ["qwen-8b", "Qwen3 8B", "si GPU ≥ 8 Go"],
 ] as const;
-
-type SideAct = "explorer" | "search" | "history" | "tools" | "settings";
-type RightTab = "info" | "claude";
-
-type ChatMsg = { who: "me" | "ai"; text: string; source?: string };
-
-export type SettingsMenu = "general" | "notifications" | "models" | "games";
 
 export default function App() {
   const [snap, setSnap] = useState<ShellSnapshot | null>(null);
@@ -68,10 +71,8 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [menuPickerOpen, setMenuPickerOpen] = useState(false);
   const [menuVariant, setMenuVariant] = useState<MenuVariant>("fichier");
-  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [txOpen, setTxOpen] = useState(false);
-  const [txs, setTxs] = useState<Transaction[] | null>(null);
 
   /** Ctrl+K / Ctrl+Shift+P — the palette is the keyboard entry point (§6.2).
    * Ctrl+J opens the bottom panel (transactions), same vocabulary. */
@@ -110,12 +111,7 @@ export default function App() {
         setToast(`« ${item.label} » : pas encore branché au Core.`);
     }
   }
-  /**
-   * Conflict scan of the active loadout. `null` means *not scanned yet* — the
-   * table must never render that as "no conflict".
-   */
-  const [conflicts, setConflicts] = useState<LoadoutConflicts | null>(null);
-  const conflictsCache = useRef(new Map<string, LoadoutConflicts>());
+
   const { isFavorite, toggleFavorite, favoriteIds } = useFavorites();
   const [chat, setChat] = useState<ChatMsg[]>([
     {
@@ -185,60 +181,8 @@ export default function App() {
     return entries.filter((e) => e.name.toLowerCase().includes(q));
   }, [entries, query]);
 
-  /**
-   * The enabled set the current conflict scan describes. Enabling or
-   * disabling a mod changes what conflicts exist, so this is what a scan is
-   * keyed on — not the entries array identity.
-   */
-  const enabledKey = useMemo(
-    () =>
-      entries
-        .filter((e) => e.enabled)
-        .map((e) => e.modId)
-        .join(","),
-    [entries],
-  );
-
-  /**
-   * Scanning a real loadout walks every enabled mod's folder, so this runs
-   * once per (loadout, enabled set) instead of on every render: results are
-   * memoized by that key, the call is debounced, and a key change cancels the
-   * pending one. A stale or missing scan renders as *unknown* (no badge), never
-   * as "no conflict".
-   */
-  useEffect(() => {
-    if (!activeLoadout) {
-      setConflicts(null);
-      return;
-    }
-    const key = `${activeLoadout.id}|${enabledKey}`;
-    const cached = conflictsCache.current.get(key);
-    if (cached) {
-      setConflicts(cached);
-      return;
-    }
-    setConflicts(null);
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      getLoadoutConflicts(activeLoadout.id)
-        .then((next) => {
-          conflictsCache.current.set(key, next);
-          if (!cancelled) setConflicts(next);
-        })
-        .catch(() => {
-          /* stays null: an unscanned loadout is not an empty one */
-        });
-    }, 250);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [activeLoadout, enabledKey]);
-
-  const conflictByMod = useMemo(() => {
-    if (!conflicts) return null;
-    return new Map(conflicts.mods.map((m) => [m.modId, m]));
-  }, [conflicts]);
+  const { conflictByMod } = useConflicts(activeLoadout, entries);
+  const { txs, refreshTxs } = useTransactions(txOpen);
 
   /**
    * The scan only covers enabled mods it could read. A disabled mod, or one
@@ -246,7 +190,7 @@ export default function App() {
    * inspector stays quiet about it instead of claiming it conflicts with
    * nothing.
    */
-  const modConflict: ModConflicts | undefined =
+  const modConflict =
     selectedRow && conflictByMod ? conflictByMod.get(selectedRow.modId) : undefined;
 
   async function refresh(id: number | null) {
@@ -363,18 +307,6 @@ export default function App() {
       setRunning(false);
     }
   }
-
-  /** The journal lives in the Core; the panel loads it on open and after
-   * every snapshot/rollback so it never shows a stale history. */
-  const refreshTxs = useCallback(() => {
-    getTransactions(50)
-      .then((next) => setTxs(next))
-      .catch(() => setTxs(null));
-  }, []);
-
-  useEffect(() => {
-    if (txOpen) refreshTxs();
-  }, [txOpen, refreshTxs]);
 
   async function doSnapshot() {
     if (!activeLoadout) {
@@ -544,6 +476,47 @@ export default function App() {
     return items;
   }, [tabs, loadouts, games, entries]);
 
+  /**
+   * One page per tab id — the shell's stand-in for a router: the active tab
+   * picks a page, and nothing else about it is dynamic. The dashboard is
+   * handled above, because it is also where the settings pane opens.
+   */
+  function pageForTab(): ReactNode {
+    switch (currentTab) {
+      case "mods":
+        return (
+          <ModsPage
+            rows={filtered}
+            entryCount={entries.length}
+            selectedId={selectedMod}
+            onSelect={openMod}
+            onToggle={(row) => void toggle(row)}
+            conflicts={conflictByMod}
+          />
+        );
+      case "plugins":
+        return <PluginsPage />;
+      case "archives":
+        return <ArchivesPage />;
+      case "repertoire":
+        return <RepertoirePage />;
+      case "saves":
+        return <SavesPage />;
+      case "sante":
+        return <SantePage />;
+      case "packs":
+        return <PacksPage />;
+      case "worlds":
+        return <WorldsPage />;
+      case "servers":
+        return <ServersPage />;
+      default:
+        // Only reachable on the dashboard tab when no game was detected at
+        // all: there is no dashboard to draw, so the tab says so itself.
+        return <StubTab tab={currentTab} />;
+    }
+  }
+
   if (error && !snap) {
     return (
       <div className="empty">
@@ -554,1018 +527,162 @@ export default function App() {
   }
 
   return (
-    <div className={`app ${rightOpen ? "" : "no-right"} ${running ? "running" : ""}`}>
-      <aside className="side">
-        <div className="side-tools">
-          <IconButton
-            name="menu"
-            title="Menu"
-            ref={menuButtonRef}
-            aria-pressed={menuPickerOpen}
-            onClick={() => setMenuPickerOpen((v) => !v)}
+    <LayoutShell
+      rightOpen={rightOpen}
+      running={running}
+      sidebar={
+        <Sidebar
+          act={act}
+          onAct={setAct}
+          menuOpen={menuPickerOpen}
+          onToggleMenu={() => setMenuPickerOpen((v) => !v)}
+          onCloseMenu={() => setMenuPickerOpen(false)}
+          menuVariant={menuVariant}
+          onMenuVariantChange={setMenuVariant}
+          onMenuAction={handleMenuAction}
+          activeGame={activeGame}
+          activeLoadout={activeLoadout}
+          games={games}
+          loadouts={loadouts}
+          favorites={favorites}
+          expanded={expanded}
+          enabledCount={enabledCount}
+          entryCount={entries.length}
+          running={running}
+          dataRoot={snap?.dataRoot}
+          isFavorite={isFavorite}
+          onToggleFavorite={onFavorite}
+          onPickLoadout={(id) => void pickLoadout(id, "mods")}
+          onPickGame={pickGame}
+          onToggleExpanded={(id) =>
+            setExpanded((v) => (v.includes(id) ? v.filter((x) => x !== id) : [...v, id]))
+          }
+          onAddGame={() => unwired("Ajouter un jeu")}
+          onPlay={() => void play()}
+          onShare={() => setToast("Partage d’instance : pas encore branché.")}
+          query={query}
+          onQueryChange={setQuery}
+          txCount={txs?.length ?? null}
+          onOpenTransactions={() => setTxOpen(true)}
+          settingsMenu={settingsMenu}
+          onSettingsMenu={setSettingsMenu}
+        />
+      }
+      right={
+        rightOpen ? (
+          <RightPanel
+            tab={rightTab}
+            onTab={setRightTab}
+            onClose={() => setRightOpen(false)}
+            mod={selectedRow}
+            conflicts={modConflict}
+            chat={chat}
+            llm={llm}
+            draft={draft}
+            chatContext={`${activeLoadout?.name ?? "—"}${selectedRow ? ` · ${selectedRow.name}` : ""}`}
+            onDraftChange={setDraft}
+            onSendChat={sendChat}
           />
-          <div className="hact">
-            {(
-              [
-                ["explorer", "Explorateur", "layers"],
-                ["search", "Recherche", "search"],
-                ["history", "Historique", "branch"],
-                ["tools", "Outils", "tool"],
-              ] as const
-            ).map(([id, title, icon]) => (
-              <IconButton key={id} name={icon} title={title} aria-pressed={act === id} onClick={() => setAct(id)} />
-            ))}
-          </div>
-          <span className="spacer" />
-          <IconButton name="globe" title="Nexus Mods" />
-          <IconButton
-            name="gear"
-            title="Réglages"
-            aria-pressed={act === "settings"}
-            onClick={() => setAct("settings")}
-          />
-        </div>
-
-        {menuPickerOpen ? (
-          <MenuPicker
-            anchorRef={menuButtonRef}
-            variant={menuVariant}
-            onClose={() => setMenuPickerOpen(false)}
-            onVariantChange={setMenuVariant}
-            onItemSelect={handleMenuAction}
-          />
-        ) : null}
-
-        {act !== "settings" && act === "explorer" && activeLoadout ? (
-          <div className="side-instance">
-            <div className="lo">
-              <div className="lo-top">
-                <button className="lo-name" type="button">
-                  <span className="fade">{activeLoadout.name}</span>
-                </button>
-                <span className="chan stable">stable</span>
-              </div>
-              <div className="lo-row">
-                <button className="vsel" type="button">
-                  r.—<span className="d ok">✓</span>
-                  <span className="hd ok" />
-                  <span className="spacer" />
-                  <Ico name="chev" />
-                </button>
-                <button className="btn save-btn" type="button" disabled>
-                  <Ico name="db" className="sm" />À jour
-                </button>
-              </div>
-              <button
-                className={`play-btn ${running ? "stop" : ""}`}
-                type="button"
-                onClick={() => void play()}
-              >
-                <Ico name={running ? "x" : "play"} />
-                {running ? "Arrêter" : "Jouer"}
-              </button>
-              <button
-                className="share-btn"
-                type="button"
-                onClick={() => setToast("Partage d’instance : pas encore branché.")}
-              >
-                <Ico name="share" />
-                Partager
-              </button>
-              <div className="st">
-                <span>
-                  <b>{enabledCount}</b> mods
-                </span>
-                <span>
-                  <b>{entries.length}</b> dans le loadout
-                </span>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        <div className="side-body">
-          {act === "explorer" ? (
-            <>
-              <Sec title="Favoris" count={favorites.length}>
-                {favorites.length === 0 ? (
-                  <div className="tr muted" style={{ fontStyle: "italic" }}>
-                    Aucun favori — clique l’étoile d’une instance
-                  </div>
-                ) : (
-                  favorites.map(({ loadout: l, short }) => (
-                    <div
-                      key={l.id}
-                      className={`tr-row inst-row ${l.id === activeLoadout?.id ? "cur" : ""}`}
-                    >
-                      <button
-                        className="tr-label"
-                        type="button"
-                        onClick={() => void pickLoadout(l.id, "mods")}
-                      >
-                        <Ico name="branch" />
-                        <span className="lbl">{l.name}</span>
-                        <span className="tail">
-                          <span className="muted" style={{ fontSize: 10 }}>
-                            {short}
-                          </span>
-                        </span>
-                      </button>
-                      <FavoriteButton on onToggle={() => onFavorite(l.id)} />
-                    </div>
-                  ))
-                )}
-              </Sec>
-              <Sec
-                title="Jeux"
-                count={games.length}
-                action={
-                  <IconButton
-                    name="plus"
-                    className="sec-act"
-                    title="Ajouter un jeu"
-                    onClick={() => unwired("Ajouter un jeu")}
-                  />
-                }
-              >
-                {games.length === 0 ? (
-                  <div className="tr muted" style={{ fontStyle: "italic" }}>
-                    Aucun jeu détecté
-                  </div>
-                ) : (
-                  games.map((g) => {
-                    const open = expanded.includes(g.id);
-                    return (
-                      <div key={g.id}>
-                        <div className={`tr-row ${g.id === activeGame?.id ? "sel" : ""}`}>
-                          <button
-                            className="tr-chev"
-                            type="button"
-                            title={open ? "Réduire" : "Déplier"}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setExpanded((v) =>
-                                v.includes(g.id)
-                                  ? v.filter((x) => x !== g.id)
-                                  : [...v, g.id],
-                              );
-                            }}
-                          >
-                            <Ico name={open ? "chev" : "chevr"} className="sm" />
-                          </button>
-                          <button
-                            className="tr-label"
-                            type="button"
-                            onClick={() => pickGame(g.id)}
-                          >
-                            <span className="lbl">{g.name}</span>
-                          </button>
-                        </div>
-                        {open
-                          ? loadouts
-                              .filter((l) => l.gameId === g.id)
-                              .map((l) => (
-                                <div
-                                  key={l.id}
-                                  className={`tr-row inst-row ${l.id === activeLoadout?.id ? "cur" : ""}`}
-                                >
-                                  <button
-                                    className="tr-label"
-                                    type="button"
-                                    onClick={() => void pickLoadout(l.id, "mods")}
-                                  >
-                                    <Ico name="branch" />
-                                    <span className="lbl">{l.name}</span>
-                                    <span className="tail">
-                                      <span className="mono">r.—</span>
-                                    </span>
-                                  </button>
-                                  <FavoriteButton
-                                    on={isFavorite(l.id)}
-                                    onToggle={() => onFavorite(l.id)}
-                                  />
-                                </div>
-                              ))
-                          : null}
-                      </div>
-                    );
-                  })
-                )}
-              </Sec>
-              <Sec title="Catégories" count={1}>
-                <button className="tr" type="button">
-                  <Ico name="folder" />
-                  <span className="lbl">Mods</span>
-                  <span className="tail">{entries.length}</span>
-                </button>
-              </Sec>
-            </>
-          ) : act === "search" ? (
-            <div style={{ padding: "8px 8px 6px" }}>
-              <div
-                className="composer"
-                style={{
-                  height: 28,
-                  padding: "0 10px",
-                  borderRadius: 6,
-                  fontSize: 12,
-                  boxShadow: "none",
-                  background: "var(--c2)",
-                }}
-              >
-                <Ico name="search" className="sm" />
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Filtrer les mods…"
-                  style={{ background: "none", border: 0, color: "var(--t1)", outline: "none", flex: 1 }}
-                />
-              </div>
-            </div>
-          ) : act === "history" ? (
-            <Sec title="Journal" count={txs?.length ?? 0}>
-              <button className="tr" type="button" onClick={() => setTxOpen(true)}>
-                <Ico name="history" />
-                <span className="lbl">Transactions</span>
-                <span className="tail">{txs?.length ?? "—"}</span>
-              </button>
-              <div className="tr muted" style={{ fontStyle: "italic" }}>
-                Panneau du bas : Ctrl+J.
-              </div>
-            </Sec>
-          ) : act === "tools" ? (
-            <Sec title="Outils" count={0}>
-              <div className="tr muted" style={{ fontStyle: "italic" }}>
-                Pas de registre d’outils dans le Core pour l’instant.
-              </div>
-            </Sec>
-          ) : null}
-          {act === "settings" ? (
-            <Sec title="Menu" count={4}>
-              {(
-                [
-                  ["general", "Général", "sliders"],
-                  ["notifications", "Notifications", "alert"],
-                  ["models", "Modèles", "box"],
-                  ["games", "Jeux", "layers"],
-                ] as const
-              ).map(([id, label, icon]) => (
-                <button
-                  key={id}
-                  className={`tr ${settingsMenu === id ? "sel" : ""}`}
-                  type="button"
-                  onClick={() => setSettingsMenu(id)}
-                >
-                  <Ico name={icon} />
-                  <span className="lbl">{label}</span>
-                </button>
-              ))}
-            </Sec>
-          ) : null}
-        </div>
-        {act === "settings" ? (
-          <div className="side-profile">
-            <div className="lo">
-              <div className="lo-top">
-                <span className="lo-name">
-                  <span className="fade">Profils info</span>
-                </span>
-                <span className="chan stable">local</span>
-              </div>
-              <div className="lo-row muted" style={{ fontSize: 11.5, padding: "0 2px" }}>
-                Racine : {snap?.dataRoot ?? "—"}
-              </div>
-            </div>
-          </div>
-        ) : null}
-        <div className="side-foot">
-          {running ? (
-            <span className="fi">
-              <Ico name="play" />
-              Skyrim en cours
-            </span>
-          ) : (
-            <>
-              <span className="fi fade" title="Contexte">
-                <Ico name="box" />
-                {activeGame?.short ?? "—"}
-                {activeLoadout ? ` · ${activeLoadout.name}` : ""}
-              </span>
-              <span className="spacer" />
-              <span className="fi" title="Backend de déploiement">
-                <Ico name="layers" />
-                {activeGame?.capabilities.deploymentLabel ?? "—"}
-              </span>
-            </>
-          )}
-        </div>
-      </aside>
-
-      <div className="main">
-        <div className="sheet">
-          <div className="tabs" role="tablist">
-            <div className="tabs-l">
-              {tabs.map((t) => (
-                <button
-                  key={t.id}
-                  className="tab"
-                  type="button"
-                  role="tab"
-                  aria-selected={currentTab === t.id}
-                  onClick={() => setTab(t.id)}
-                >
-                  <Ico name={t.icon} className="sm" />
-                  <span>{t.label}</span>
-                  {t.id === "mods" ? <span className="cnt">{entries.length}</span> : null}
-                </button>
-              ))}
-            </div>
-            <div className="tabs-r">
-              <button
-                className="ti claude"
-                type="button"
-                aria-pressed={rightOpen && rightTab === "claude"}
-                onClick={() => {
-                  setRightOpen(true);
-                  setRightTab("claude");
-                }}
-              >
-                <Ico name="sparkle" />
-                <span className="n">IA</span>
-              </button>
-            </div>
-          </div>
-
-          {currentTab === "dashboard" && activeGame ? (
-            act === "settings" ? (
-              <SettingsPane
-                menu={settingsMenu}
-                games={games}
-                llm={llm}
-                llmModels={LLM_MODELS}
-                onSelectModel={(id, name) => {
-                  setLlm(id);
-                  setToast(`Modèle local sélectionné : ${name}`);
-                }}
-              />
-            ) : (
-              <Dashboard
-                game={activeGame}
-                loadouts={gameLoadouts}
-                activeLoadoutId={activeLoadout?.id ?? null}
-                modCount={activeLoadout?.modCount ?? entries.length}
-                isFavorite={isFavorite}
-                onToggleFavorite={onFavorite}
-                onPickLoadout={(id) => void pickLoadout(id, "dashboard")}
-                onCreateLoadout={() => setCreateOpen(true)}
-                onImportSource={() => setMo2Open(true)}
-                onGoToTab={(t) => setTab(t)}
-                onUnwired={unwired}
-              />
-            )
-          ) : (
-            <>
-              <div className="tbar">
-                <div className="crumbs">
-                  <Ico name="box" />
-                  <b>{activeGame?.short ?? "—"}</b>
-                  <Ico name="chevr" />
-                  <b>{activeLoadout?.name ?? "—"}</b>
-                  <Ico name="chevr" />
-                  {tabLabel}
-                </div>
-                <span className="spacer" />
-                <span className="muted" style={{ fontSize: 11.5 }}>
-                  {snap?.dataRoot}
-                </span>
-              </div>
-              {currentTab === "mods" ? (
-                entries.length === 0 ? (
-                  <div className="content">
-                    <div className="empty">
-                      <div>
-                        <Ico name="box" />
-                        <h3>Aucun mod dans ce loadout</h3>
-                        <p>
-                          Importe une instance MO2 via la CLI (`modlab mo2-import`) — l’UI
-                          lit le même Core.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <ModTable
-                    rows={filtered}
-                    selectedId={selectedMod}
-                    onSelect={openMod}
-                    onToggle={(row) => void toggle(row)}
-                    conflicts={conflictByMod}
-                  />
-                )
-              ) : (
-                <StubTab tab={currentTab} />
-              )}
-            </>
-          )}
-        </div>
-
-
-        {rightOpen ? (
-          <aside className="right">
-            <div className="rhead">
-              <button
-                className="tab"
-                type="button"
-                aria-selected={rightTab === "info"}
-                onClick={() => setRightTab("info")}
-              >
-                Info
-              </button>
-              <button
-                className="tab"
-                type="button"
-                aria-selected={rightTab === "claude"}
-                onClick={() => setRightTab("claude")}
-              >
-                Claude
-              </button>
-              <span className="spacer" />
-              <IconButton name="x" title="Fermer" onClick={() => setRightOpen(false)} />
-            </div>
-            <div className="rbody">
-              {rightTab === "info" ? (
-                selectedRow ? (
-                  <>
-                    <div className="rtitle">
-                      <div className="eyebrow">Mod</div>
-                      <h2>{selectedRow.name}</h2>
-                      <div className="line">
-                        <span className="mono">#{selectedRow.modId}</span>
-                        <span>{selectedRow.enabled ? "activé" : "désactivé"}</span>
-                      </div>
-                      <dl className="kv" style={{ marginTop: 12 }}>
-                        <dt>Chemin</dt>
-                        <dd>{selectedRow.sourcePath}</dd>
-                        <dt>Priorité</dt>
-                        <dd>{selectedRow.position}</dd>
-                      </dl>
-                    </div>
-                    {modConflict ? (
-                      <Sec
-                        variant="rsec"
-                        title="Conflits"
-                        count={modConflict.wins + modConflict.loses}
-                      >
-                        <div style={{ fontSize: 12 }}>
-                          {modConflict.wins > 0 ? (
-                            <div style={{ display: "flex", gap: 8, padding: "3px 0" }}>
-                              <span
-                                className="badge win"
-                                title={CONFLICT_PRIORITY_CAVEAT}
-                              >
-                                <Ico name="flag" />
-                                {modConflict.wins}
-                              </span>
-                              <span>gagne sur des mods plus haut</span>
-                            </div>
-                          ) : null}
-                          {modConflict.loses > 0 ? (
-                            <div style={{ display: "flex", gap: 8, padding: "3px 0" }}>
-                              <span
-                                className="badge lose"
-                                title={CONFLICT_PRIORITY_CAVEAT}
-                              >
-                                <Ico name="flag" />
-                                {modConflict.loses}
-                              </span>
-                              <span>perd face à des mods plus bas</span>
-                            </div>
-                          ) : null}
-                          {modConflict.wins === 0 && modConflict.loses === 0 ? (
-                            <span className="muted">Aucun conflit de fichier.</span>
-                          ) : null}
-                        </div>
-                      </Sec>
-                    ) : null}
-                  </>
-                ) : (
-                  <div className="rtitle">
-                    <div className="eyebrow">Panneau</div>
-                    <h2>Aucun mod sélectionné</h2>
-                    <p className="muted">Clique une ligne de la table.</p>
-                  </div>
-                )
-              ) : (
-                <div className="chat" style={{ height: "100%" }}>
-                  <div className="msgs">
-                    {chat.map((m, i) => (
-                      <div key={i} className={`msg ${m.who}`}>
-                        {m.who === "ai" ? (
-                          <div className="who">
-                            <Ico name="sparkle" className="sm" />
-                            {m.source === "local-llm"
-                              ? `Local · ${llm}`
-                              : m.source === "pending"
-                                ? "Local · réflexion…"
-                                : "Local · moteur de règles"}
-                          </div>
-                        ) : null}
-                        {m.text}
-                      </div>
-                    ))}
-                  </div>
-                  <form className="in" onSubmit={sendChat}>
-                    <input
-                      value={draft}
-                      onChange={(e) => setDraft(e.target.value)}
-                      placeholder="Demander à Claude… (@mod pour cibler)"
-                    />
-                    <div className="row2">
-                      <span>
-                        Contexte : {activeLoadout?.name ?? "—"}
-                        {selectedRow ? ` · ${selectedRow.name}` : ""}
-                      </span>
-                      <span className="spacer" />
-                      <span className="kbd">↵</span>
-                      <Ico name="send" className="sm" />
-                    </div>
-                  </form>
-                </div>
-              )}
-            </div>
-          </aside>
-        ) : null}
-
-        <div className="dock">
+        ) : null
+      }
+      dock={
+        <>
           {txOpen ? (
-            <div className="tpanel open" role="dialog" aria-label="Panneau du bas">
-              <div className="tp-bar">
-                <button className="tab" type="button" aria-selected="true">
-                  <Ico name="history" className="sm" />
-                  <span>Transactions</span>
-                  <span className="cnt">{txs?.length ?? 0}</span>
-                </button>
-                <span className="spacer" />
-                <Button
-                  variant="sm-ghost"
-                  disabled={!activeLoadout}
-                  onClick={() => void doSnapshot()}
-                >
-                  <Ico name="shield" className="sm" />
-                  Instantané
-                </Button>
-                <IconButton name="x" title="Fermer (Ctrl+J)" onClick={() => setTxOpen(false)} />
-              </div>
-              <div className="tp-body">
-                {txs && txs.length === 0 ? (
-                  <div className="hint" style={{ border: 0 }}>
-                    Aucune mutation journalisée pour l'instant — importe une
-                    instance ou prends un instantané de l'instance active.
-                  </div>
-                ) : null}
-                {(txs ?? []).map((t) => (
-                  <div key={t.id} className="tx">
-                    <div className="t">
-                      <Ico
-                        name={
-                          t.kind === "loadout.snapshot"
-                            ? "shield"
-                            : t.kind === "loadout.rollback"
-                              ? "refresh"
-                              : "db"
-                        }
-                        className="sm"
-                      />
-                      {KIND_LABELS[t.kind] ?? t.kind}
-                      <span className="muted" style={{ fontWeight: 400 }}>
-                        {new Date(t.occurredAt).toLocaleString("fr-FR")}
-                      </span>
-                    </div>
-                    <div className="d">
-                      {t.steps.map((s, i) => (
-                        <div key={i}>{s}</div>
-                      ))}
-                    </div>
-                    {t.kind === "loadout.snapshot" ? (
-                      <div className="acts">
-                        <Button variant="sm-ghost" onClick={() => void doRollback()}>
-                          <Ico name="refresh" className="sm" />
-                          Restaurer
-                        </Button>
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </div>
+            <TransactionsPanel
+              txs={txs}
+              canSnapshot={Boolean(activeLoadout)}
+              onSnapshot={() => void doSnapshot()}
+              onRollback={() => void doRollback()}
+              onClose={() => setTxOpen(false)}
+            />
           ) : null}
-          <div className="composer-wrap">
-            <form className="composer-box" onSubmit={sendChat}>
-              <div className="composer">
-                <Ico name="search" />
-                <IconButton name="term" title="Console" />
-                <input
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onFocus={() => setPaletteOpen(true)}
-                  placeholder="Rechercher ou commander… (Ctrl+K)"
-                  autoComplete="off"
-                  readOnly
-                />
-                <span className="kbd">Ctrl K</span>
-              </div>
-              <div className="composer-toolbar">
-                <button className="cb-add" type="button" title="Ajouter">
-                  +
-                </button>
-                <button className="cb-select" type="button">
-                  {LLM_MODELS.find((m) => m[0] === llm)?.[1]}
-                  <Ico name="chev" />
-                </button>
-                <span className="spacer" />
-                <button className="cb-claude" type="button" onClick={() => sendChat()}>
-                  <Ico name="sparkle" />
-                  Claude
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      </div>
-
-      {toast ? (
-        <div className="toast show">
-          <Ico name="check" className="sm" />
-          <span>{toast}</span>
-        </div>
-      ) : null}
-      <CommandPalette
-        open={paletteOpen}
-        items={paletteItems}
-        onClose={() => setPaletteOpen(false)}
+          <Composer
+            draft={draft}
+            modelLabel={LLM_MODELS.find((m) => m[0] === llm)?.[1]}
+            onDraftChange={setDraft}
+            onFocus={() => setPaletteOpen(true)}
+            onSubmit={sendChat}
+          />
+        </>
+      }
+      overlays={
+        <>
+          {toast ? <Toast icon="check">{toast}</Toast> : null}
+          <CommandPalette
+            open={paletteOpen}
+            items={paletteItems}
+            onClose={() => setPaletteOpen(false)}
+          />
+          {error && snap ? (
+            <Toast icon="alert" style={{ bottom: 80 }}>
+              {error}
+            </Toast>
+          ) : null}
+          {createOpen && activeGame ? (
+            <CreateLoadoutDialog
+              gameName={activeGame.name}
+              onClose={() => setCreateOpen(false)}
+              onCreate={createInstance}
+            />
+          ) : null}
+          {mo2Open && activeGame ? (
+            <Mo2ImportDialog
+              gameName={activeGame.name}
+              onClose={() => setMo2Open(false)}
+              onImport={importMo2}
+            />
+          ) : null}
+        </>
+      }
+    >
+      <TabStrip
+        tabs={tabs}
+        currentTab={currentTab}
+        modCount={entries.length}
+        aiActive={rightOpen && rightTab === "claude"}
+        onSelect={setTab}
+        onOpenAi={() => {
+          setRightOpen(true);
+          setRightTab("claude");
+        }}
       />
-      {error && snap ? (
-        <div className="toast show" style={{ bottom: 80 }}>
-          <Ico name="alert" className="sm" />
-          <span>{error}</span>
-        </div>
-      ) : null}
-      {createOpen && activeGame ? (
-        <CreateLoadoutDialog
-          gameName={activeGame.name}
-          onClose={() => setCreateOpen(false)}
-          onCreate={createInstance}
-        />
-      ) : null}
-      {mo2Open && activeGame ? (
-        <Mo2ImportDialog
-          gameName={activeGame.name}
-          onClose={() => setMo2Open(false)}
-          onImport={importMo2}
-        />
-      ) : null}
-    </div>
-  );
-}
 
-/**
- * Migration entry point for an existing Mod Organizer 2 instance. Path
- * inputs, not a native folder picker: no dialog plugin is wired into the
- * shell yet, and paths are what the Core's import actually needs.
- */
-function Mo2ImportDialog({
-  gameName,
-  onClose,
-  onImport,
-}: {
-  gameName: string;
-  onClose: () => void;
-  onImport: (profile: string, modsDir: string, name: string) => Promise<number>;
-}) {
-  const [profile, setProfile] = useState("");
-  const [modsDir, setModsDir] = useState("");
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setMessage(null);
-    try {
-      await onImport(profile.trim(), modsDir.trim(), name);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <form
-        className="modal"
-        aria-labelledby="mo2-import-title"
-        onSubmit={(e) => void submit(e)}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="modal-head">
-          <div>
-            <div className="eyebrow">Importer depuis MO2</div>
-            <h2 id="mo2-import-title">{gameName}</h2>
-          </div>
-          <IconButton name="x" title="Fermer" onClick={onClose} />
-        </div>
-        <label className="modal-label" htmlFor="mo2-profile">
-          Dossier de profil MO2
-        </label>
-        <input
-          id="mo2-profile"
-          className="modal-input"
-          autoFocus
-          value={profile}
-          onChange={(e) => setProfile(e.target.value)}
-          placeholder={`…\\Mod Organazer\\profiles\\${"Default"}`}
-        />
-        <p className="modal-copy">
-          Celui qui contient <span className="mono">modlist.txt</span>.
-        </p>
-        <label className="modal-label" htmlFor="mo2-mods">
-          Dossier <span className="mono">mods</span> de MO2
-        </label>
-        <input
-          id="mo2-mods"
-          className="modal-input"
-          value={modsDir}
-          onChange={(e) => setModsDir(e.target.value)}
-          placeholder="…\Mod Organazer\mods"
-        />
-        <label className="modal-label" htmlFor="mo2-name">
-          Nom de l’instance
-        </label>
-        <input
-          id="mo2-name"
-          className="modal-input"
-          maxLength={100}
-          placeholder="Ex. Main 2026"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <p className="modal-copy">
-          Rien n’est copié ni déplacé : les mods pointeront vers les dossiers de
-          MO2, en place. Les DLC et contenus Creation Club listés dans le profil
-          sont ignorés.
-        </p>
-        {message ? <p className="modal-error">{message}</p> : null}
-        <div className="modal-actions">
-          <Button variant="sm-ghost" onClick={onClose}>
-            Annuler
-          </Button>
-          <Button
-            variant="sm"
-            type="submit"
-            disabled={busy || !profile.trim() || !modsDir.trim() || !name.trim()}
-          >
-            {busy ? "Import…" : "Importer"}
-          </Button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function CreateLoadoutDialog({
-  gameName,
-  onClose,
-  onCreate,
-}: {
-  gameName: string;
-  onClose: () => void;
-  onCreate: (name: string) => Promise<void>;
-}) {
-  const [name, setName] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setSaving(true);
-    setMessage(null);
-    try {
-      await onCreate(name);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <form className="modal" aria-labelledby="create-loadout-title" onSubmit={(e) => void submit(e)} onMouseDown={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <div><div className="eyebrow">Nouvelle instance</div><h2 id="create-loadout-title">{gameName}</h2></div>
-          <IconButton name="x" title="Fermer" onClick={onClose} />
-        </div>
-        <label className="modal-label" htmlFor="loadout-name">Nom de l’instance</label>
-        <input id="loadout-name" className="modal-input" autoFocus maxLength={100} placeholder="Ex. Labo météo" value={name} onChange={(e) => setName(e.target.value)} />
-        <p className="modal-copy">Une instance commence vide — pour récupérer une instance Mod Organizer 2 existante, utilise « Importer depuis MO2 ».</p>
-        {message ? <p className="modal-error">{message}</p> : null}
-        <div className="modal-actions">
-          <Button variant="sm-ghost" onClick={onClose}>Annuler</Button>
-          <Button variant="sm" type="submit" disabled={saving || !name.trim()}>{saving ? "Création…" : "Créer l’instance"}</Button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function Sec({
-  title,
-  count,
-  action,
-  variant,
-  children,
-}: {
-  title: string;
-  count: number;
-  /** Optional affordance for the section, pinned to the right of the title row. */
-  action?: ReactNode;
-  /** `rsec` is the right-hand inspector's compact variant (maquette's `.rsec`). */
-  variant?: "rsec";
-  children: ReactNode;
-}) {
-  const [open, setOpen] = useState(true);
-  return (
-    <div className={`sec ${variant ?? ""} ${open ? "" : "closed"}`}>
-      <div className="sec-h">
-        <button
-          className="sec-t"
-          type="button"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-        >
-          <Ico name="chev" />
-          <span className="u">{title}</span>
-          <span className="cnt">({count})</span>
-        </button>
-        {action}
-      </div>
-      <div className="sec-b">{children}</div>
-    </div>
-  );
-}
-
-/**
- * Settings detail surface, shown in the central content zone while the side
- * toolbar is in settings mode. One pane per "Side Menu" entry; only what the
- * app actually knows is shown interacted with, everything else is an honest,
- * Core-labelled placeholder.
- */
-function SettingsPane({
-  menu,
-  games,
-  llm,
-  llmModels,
-  onSelectModel,
-}: {
-  menu: SettingsMenu;
-  games: DetectedGame[];
-  llm: string;
-  llmModels: readonly (readonly [string, string, string])[];
-  onSelectModel: (id: string, name: string) => void;
-}) {
-  if (menu === "models") {
-    return (
-      <>
-        <div className="tbar">
-          <div className="crumbs">
-            <Ico name="box" />
-            <b>Réglages</b>
-            <Ico name="chevr" />
-            Modèles
-          </div>
-        </div>
-        <div className="content">
-          <div className="dash">
-            <div className="dh">Modèle local actif</div>
-            {llmModels.map(([id, name, sub]) => (
-              <button
-                key={id}
-                className={`tr ${llm === id ? "sel" : ""}`}
-                type="button"
-                onClick={() => onSelectModel(id, name)}
-                title={sub}
-              >
-                <Ico name={llm === id ? "check" : "box"} />
-                <span className="lbl">
-                  {name}
-                  <div className="muted" style={{ fontSize: 11 }}>
-                    {sub}
-                  </div>
-                </span>
-              </button>
-            ))}
-            <div className="box" style={{ marginTop: 22 }}>
-              <div className="bh">
-                <Ico name="info" className="sm" />
-                Téléchargement et chargement à la demande
-              </div>
-              <div className="why">
-                Pas encore branchés au Core : le modèle se choisira ici, le
-                téléchargement et le chargement resteront visibles dans ce
-                panneau.
-              </div>
-            </div>
-          </div>
-        </div>
-      </>
-    );
-  }
-  if (menu === "games") {
-    return (
-      <>
-        <div className="tbar">
-          <div className="crumbs">
-            <Ico name="box" />
-            <b>Réglages</b>
-            <Ico name="chevr" />
-            Jeux
-          </div>
-        </div>
-        <div className="content">
-          <div className="dash">
-            <div className="dh">Jeux détectés ({games.length})</div>
-            {games.length === 0 ? (
-              <div className="tr muted" style={{ fontStyle: "italic" }}>
-                Aucun jeu détecté par les adaptateurs.
-              </div>
-            ) : (
-              games.map((g) => (
-                <div key={g.id} className="tr-row">
-                  <span className="tr-label">
-                    <Ico name="layers" />
-                    <span className="lbl">{g.name}</span>
-                    <span className="tail">
-                      <span className="muted" style={{ fontSize: 10 }}>
-                        {g.short}
-                      </span>
-                    </span>
-                  </span>
-                </div>
-              ))
-            )}
-            <div className="dh">Ajouter un jeu</div>
-            <div className="tr muted" style={{ fontStyle: "italic" }}>
-              Requête Core : l’ajout manuel d’un dossier de jeu n’existe pas
-              encore.
-            </div>
-          </div>
-        </div>
-      </>
-    );
-  }
-  if (menu === "notifications") {
-    return (
-      <>
-        <div className="tbar">
-          <div className="crumbs">
-            <Ico name="box" />
-            <b>Réglages</b>
-            <Ico name="chevr" />
-            Notifications
-          </div>
-        </div>
-        <div className="content">
-          <div className="dash">
-            <div className="dh">Notifications</div>
-            <div className="tr muted" style={{ fontStyle: "italic" }}>
-              Pas encore suivi par le Core : fins de job, mises à jour de mods
-              et santé des instances arriveront ici.
-            </div>
-          </div>
-        </div>
-      </>
-    );
-  }
-  return (
-    <>
-      <div className="tbar">
-        <div className="crumbs">
-          <Ico name="box" />
-          <b>Réglages</b>
-          <Ico name="chevr" />
-          Général
-        </div>
-      </div>
-      <div className="content">
-        <div className="dash">
-          <div className="dh">Général</div>
-          <div className="tr muted" style={{ fontStyle: "italic" }}>
-            Préférences générales : pas encore suivi par le Core.
-          </div>
-        </div>
-      </div>
-    </>
+      {currentTab === "dashboard" && activeGame ? (
+        act === "settings" ? (
+          <SettingsPane
+            menu={settingsMenu}
+            games={games}
+            llm={llm}
+            llmModels={LLM_MODELS}
+            onSelectModel={(id, name) => {
+              setLlm(id);
+              setToast(`Modèle local sélectionné : ${name}`);
+            }}
+          />
+        ) : (
+          <DashboardPage
+            game={activeGame}
+            loadouts={gameLoadouts}
+            activeLoadoutId={activeLoadout?.id ?? null}
+            modCount={activeLoadout?.modCount ?? entries.length}
+            isFavorite={isFavorite}
+            onToggleFavorite={onFavorite}
+            onPickLoadout={(id) => void pickLoadout(id, "dashboard")}
+            onCreateLoadout={() => setCreateOpen(true)}
+            onImportSource={() => setMo2Open(true)}
+            onGoToTab={(t) => setTab(t)}
+            onUnwired={unwired}
+          />
+        )
+      ) : (
+        <>
+          <Crumbs
+            path={[activeGame?.short ?? "—", activeLoadout?.name ?? "—", tabLabel]}
+            tail={snap?.dataRoot ?? ""}
+          />
+          {pageForTab()}
+        </>
+      )}
+    </LayoutShell>
   );
 }

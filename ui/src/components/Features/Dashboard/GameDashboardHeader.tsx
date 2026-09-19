@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { Ico } from "../../../Ico";
-import { Button } from "../../ui/Button";
+import { Avatar, Button, StatTile } from "../../ui";
 
 export type HeaderMetadata = {
   id: string;
@@ -71,35 +71,23 @@ export function GameDashboardHeader({ name, artwork, metadata, stats, actions }:
   return (
     <header className="ghero" style={style}>
       <div className="ghero-top">
-        <div
-          className={`art ${artwork.art ? "has-img" : ""}`}
-          ref={artRef}
-          aria-hidden="true"
-          style={artwork.art ? { backgroundImage: `url('${artwork.art}')` } : undefined}
-        >
-          {artwork.art ? null : artwork.glyph}
-        </div>
+        <Avatar variant="art" label={artwork.glyph} image={artwork.art} ref={artRef} />
         <div className="ginfo" ref={infoRef}>
           <h1><span className="fade">{name}</span></h1>
           <div className="meta">
             {metadata.map((item) => <span key={item.id} title={item.title}>{item.content}</span>)}
           </div>
           <div className="stats">
-            {stats.map((stat) => {
-              const content = (
-                <>
-                  <span className="k">{stat.label}</span>
-                  <span className="v"><Ico name={stat.icon} />{stat.value}</span>
-                </>
-              );
-              return stat.onClick ? (
-                <button key={stat.id} className="stat" type="button" title={stat.title} onClick={stat.onClick}>
-                  {content}
-                </button>
-              ) : (
-                <div key={stat.id} className="stat" title={stat.title}>{content}</div>
-              );
-            })}
+            {stats.map((stat) => (
+              <StatTile
+                key={stat.id}
+                label={stat.label}
+                value={stat.value}
+                icon={stat.icon}
+                title={stat.title}
+                onClick={stat.onClick}
+              />
+            ))}
           </div>
         </div>
       </div>

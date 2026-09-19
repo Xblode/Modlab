@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Ico } from "./Ico";
+import { Ico } from "../../../Ico";
+import { Input } from "../../ui";
 
 /**
  * Command palette (Ctrl+K). Presentation follows the maquette's `.cp`
@@ -95,7 +96,7 @@ export function CommandPalette({
       <div className="cpk" role="dialog" aria-label="Palette de commandes">
         <div className="in">
           <Ico name="search" className="sm" />
-          <input
+          <Input
             ref={inputRef}
             value={query}
             onChange={(e) => {

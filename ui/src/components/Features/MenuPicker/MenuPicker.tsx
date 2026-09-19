@@ -1,4 +1,4 @@
-import { Ico } from "./Ico";
+import { Ico } from "../../../Ico";
 import { useRef, useLayoutEffect, useState, useEffect, type RefObject } from "react";
 
 export type MenuVariant = "fichier" | "loadout" | "outils" | "affichage";
