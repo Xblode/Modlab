@@ -53,11 +53,12 @@
   ::-webkit-scrollbar-corner{ background:transparent; }
 
   /* ============ Deux colonnes ============ */
-  /* The window is our own: title bar on top, the two-column app below it. */
-  .shell-root{ display:flex; flex-direction:column; height:100vh; min-height:0; background:var(--c2); }
-  .app{ display:grid; flex:1 1 auto; min-height:0; grid-template-columns:var(--sb,280px) minmax(0,1fr); grid-template-rows:minmax(0,1fr); grid-template-areas:"side main"; background:var(--c2); }
-  .app.no-side{ --sb:0px; }
-  @media (max-width:900px){ .app{ --sb:0px; } }
+  /* The sidebar runs full height on the left; the title bar only spans the
+     column to its right, above the main content — not the whole window. */
+  .shell-root{ display:flex; flex-direction:row; height:100vh; min-height:0; background:var(--c2); }
+  .shell-col{ display:flex; flex-direction:column; flex:1 1 auto; min-width:0; min-height:0; }
+  .app{ display:flex; flex:1 1 auto; min-height:0; position:relative; background:var(--c2); }
+  @media (max-width:900px){ .side{ display:none; } }
   .tb{ display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:6px; color:var(--t2); position:relative; }
   .tb:hover{ background:var(--c3); color:var(--t1); }
   .tb[aria-pressed="true"]{ color:var(--t1); background:var(--c3); }
@@ -72,7 +73,7 @@
   .dot{ position:absolute; top:3px; right:3px; width:7px; height:7px; border-radius:50%; background:var(--warn); }
 
   /* ---- Panneau gauche ---- */
-  .side{ grid-area:side; display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; background:var(--c1); border-right:1px solid var(--line2); }
+  .side{ flex:0 0 var(--sb,280px); display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; background:var(--c1); border-right:1px solid var(--line2); }
   .no-side .side{ display:none; }
   .side-tools{ display:flex; align-items:center; gap:2px; height:36px; padding:0 8px; flex:none; }
   .side-tools .hact{ display:flex; gap:2px; }
@@ -85,7 +86,7 @@
   .side-foot .fi{ display:inline-flex; align-items:center; gap:4px; padding:0 5px; height:20px; border-radius:4px; }
   .side-foot .fi .ico{ width:12px; height:12px; }
   .side-foot .fi.fade{ padding-right:14px; min-width:0; }
-  .app.running .side-foot{ background:var(--run); color:#fff; }
+  .shell-root.running .side-foot{ background:var(--run); color:#fff; }
   .sec-h{ display:flex; align-items:center; gap:4px; height:26px; padding:0 3px 0 6px; width:100%; text-align:left; margin-top:6px; }
   .sec-h .sec-t{ display:flex; align-items:center; gap:4px; flex:1; min-width:0; height:100%; text-align:left; }
   .sec-h .ico{ width:12px; height:12px; color:var(--t3); transition:transform .12s; }
@@ -193,9 +194,9 @@
   .cvfoot .btn{ flex:1; justify-content:center; }
 
   /* ---- Zone centrale ---- */
-  .main{ grid-area:main; position:relative; min-width:0; min-height:0; background:var(--c2); }
+  .main{ flex:1 1 auto; position:relative; min-width:0; min-height:0; background:var(--c2); }
   .sheet{ position:absolute; inset:0; background:var(--c2); display:flex; flex-direction:column; overflow:hidden; transition:right .2s cubic-bezier(.2,.8,.2,1); }
-  @media (min-width:1280px){ .app:not(.no-right) .sheet{ right:356px; } }
+  @media (min-width:1280px){ .shell-root:not(.no-right) .sheet{ right:356px; } }
   .tabs{ display:flex; align-items:stretch; height:36px; padding:4px 8px 0; gap:2px; flex:none; }
   .tabs-l{ display:flex; gap:2px; overflow-x:auto; scrollbar-width:none; min-width:0; }
   .tabs-l::-webkit-scrollbar{ display:none; }
@@ -401,7 +402,7 @@
   /* Dock : panneau du bas, palette ancrée, bandeau d'activité, composeur, suggestions */
   .dock{ position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:5; display:flex; flex-direction:column; align-items:center; gap:8px; width:min(720px,calc(100% - 32px)); pointer-events:none; transition:left .2s cubic-bezier(.2,.8,.2,1); }
   .dock > *, .composer-wrap > *{ pointer-events:auto; }
-  @media (min-width:1000px){ .app:not(.no-right) .dock{ left:calc(50% - 178px); } }
+  @media (min-width:1000px){ .shell-root:not(.no-right) .dock{ left:calc(50% - 178px); } }
   .tpanel{ display:none; flex-direction:column; overflow:hidden; width:100%; max-height:min(46vh,380px); background:var(--c3); border:1px solid var(--line2); border-radius:var(--r); box-shadow:var(--sh-float); }
   .tpanel.open{ display:flex; }
   .tp-bar{ display:flex; align-items:center; height:36px; padding:4px 6px 0 8px; gap:2px; }

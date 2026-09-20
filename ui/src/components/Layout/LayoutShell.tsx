@@ -31,21 +31,23 @@ export function LayoutShell({
   children: ReactNode;
 }) {
   return (
-    <div className="shell-root">
-      <Titlebar />
+    <div className={`shell-root ${rightOpen ? "" : "no-right"} ${running ? "running" : ""}`}>
+      {sidebar}
 
-      <div className={`app ${rightOpen ? "" : "no-right"} ${running ? "running" : ""}`}>
-        {sidebar}
+      <div className="shell-col">
+        <Titlebar />
 
-        <div className="main">
-          <div className="sheet">{children}</div>
+        <div className="app">
+          <div className="main">
+            <div className="sheet">{children}</div>
 
-          {right}
+            {right}
 
-          <div className="dock">{dock}</div>
+            <div className="dock">{dock}</div>
+          </div>
+
+          {overlays}
         </div>
-
-        {overlays}
       </div>
     </div>
   );
