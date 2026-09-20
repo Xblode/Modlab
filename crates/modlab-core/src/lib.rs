@@ -10,7 +10,7 @@
 //! the SQLite + event-log wiring works end to end. Revisions, transactions,
 //! the CAS store and the game/provider traits are deliberately not here yet.
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use std::path::Path;
 
 pub mod archive;
@@ -95,7 +95,58 @@ impl Core {
                 enabled    INTEGER NOT NULL,
                 position   INTEGER NOT NULL,
                 PRIMARY KEY (loadout_id, mod_id)
+            );
+            CREATE TABLE IF NOT EXISTS game_path_override (
+                game_id TEXT NOT NULL,
+                slot_id TEXT NOT NULL,
+                path    TEXT NOT NULL,
+                PRIMARY KEY (game_id, slot_id)
             );",
+        )?;
+        Ok(())
+    }
+
+    /// A human-set override for one of a Game Adapter's `PathSlot`s — takes
+    /// precedence over whatever that adapter's own detection finds. `None`
+    /// unless a human set one from Réglages → Jeux.
+    pub fn game_path_override(&self, game_id: &str, slot_id: &str) -> Result<Option<String>> {
+        self.db
+            .query_row(
+                "SELECT path FROM game_path_override WHERE game_id = ?1 AND slot_id = ?2",
+                (game_id, slot_id),
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(CoreError::from)
+    }
+
+    /// Every override recorded for one game, as `(slot_id, path)` pairs —
+    /// what a client merges with `GameAdapter::path_slots`' live detection.
+    pub fn game_path_overrides(&self, game_id: &str) -> Result<Vec<(String, String)>> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT slot_id, path FROM game_path_override WHERE game_id = ?1")?;
+        let rows = stmt
+            .query_map((game_id,), |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Set (or replace) a human override for one path slot.
+    pub fn set_game_path_override(&self, game_id: &str, slot_id: &str, path: &str) -> Result<()> {
+        self.db.execute(
+            "INSERT INTO game_path_override (game_id, slot_id, path) VALUES (?1, ?2, ?3)
+             ON CONFLICT(game_id, slot_id) DO UPDATE SET path = excluded.path",
+            (game_id, slot_id, path),
+        )?;
+        Ok(())
+    }
+
+    /// Drop a human override, falling back to the adapter's own detection again.
+    pub fn clear_game_path_override(&self, game_id: &str, slot_id: &str) -> Result<()> {
+        self.db.execute(
+            "DELETE FROM game_path_override WHERE game_id = ?1 AND slot_id = ?2",
+            (game_id, slot_id),
         )?;
         Ok(())
     }

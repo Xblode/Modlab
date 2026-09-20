@@ -2,7 +2,7 @@
 //! `modlab-core` — same rule as the CLI: no private state, no game rules.
 
 use modlab_ai::{diagnose, llm_phrase, rules_answer, LoadoutFacts, ModFact};
-use modlab_core::game_adapter::GameAdapter;
+use modlab_core::game_adapter::{GameAdapter, PathKind};
 use modlab_core::{conflicts, loadout, transaction, Core};
 use modlab_game_minecraft::MinecraftAdapter;
 use modlab_game_skyrim::SkyrimAdapter;
@@ -97,9 +97,32 @@ pub struct ShellSnapshot {
     pub usvfs_dll: Option<String>,
 }
 
+/// Every Game Adapter this shell knows about — the one place that lists
+/// them, so `detect_games` and `game_path_slots` can never drift apart on
+/// which games exist.
+fn adapters() -> [&'static dyn GameAdapter; 2] {
+    [&SkyrimAdapter, &MinecraftAdapter]
+}
+
+/// One `PathSlot`'s effective value: a human override if the Core has one,
+/// else the adapter's own live detection. Every command that actually *uses*
+/// a path (launching the game, deploying mods) must go through this instead
+/// of calling adapter detection directly — otherwise an override set from
+/// Réglages → Jeux is silently ignored, which is exactly the bug that made
+/// `launch_skse` keep reporting the DLL as missing after it was overridden.
+fn resolve_slot(core: &Core, adapter: &dyn GameAdapter, slot_id: &str) -> Option<PathBuf> {
+    if let Ok(Some(over)) = core.game_path_override(adapter.id(), slot_id) {
+        return Some(PathBuf::from(over));
+    }
+    adapter
+        .path_slots()
+        .into_iter()
+        .find(|s| s.id == slot_id)
+        .and_then(|s| s.detected)
+}
+
 fn detect_games() -> Vec<DetectedGameDto> {
-    let adapters: [&dyn GameAdapter; 2] = [&SkyrimAdapter, &MinecraftAdapter];
-    adapters
+    adapters()
         .into_iter()
         .filter_map(|adapter| {
             let install = adapter.detect()?;
@@ -196,8 +219,100 @@ fn get_shell_snapshot(
         loadouts,
         entries,
         selected_loadout_id: selected,
-        usvfs_dll: modlab_game_skyrim::find_usvfs_dll().map(|p| p.display().to_string()),
+        usvfs_dll: resolve_slot(&core, &SkyrimAdapter, "usvfs_dll").map(|p| p.display().to_string()),
     })
+}
+
+/// One `PathSlot`, merged with any human override the Core holds for it —
+/// the shape Réglages → Jeux needs to show "what ModLab found" vs "what you
+/// pointed it at" without doing that merge itself.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GamePathSlotDto {
+    pub id: String,
+    pub label: String,
+    pub kind: PathKind,
+    pub detected: Option<String>,
+    pub override_path: Option<String>,
+    /// `detected` unless `override_path` is set, in which case the override
+    /// wins — the single value a client actually uses (to launch, to deploy
+    /// into, …), so it never has to re-implement this precedence itself.
+    pub effective: Option<String>,
+}
+
+/// The path slots this game's adapter declares, each with whatever the Core
+/// has on file as a human override. Read-only (Lecture tier, §7.2): nothing
+/// is written here, so it needs no confirmation.
+#[tauri::command]
+fn game_path_slots(state: State<AppState>, game_id: String) -> Result<Vec<GamePathSlotDto>, String> {
+    let adapter = adapters()
+        .into_iter()
+        .find(|a| a.id() == game_id)
+        .ok_or_else(|| format!("jeu inconnu : {game_id}"))?;
+    let overrides = {
+        let core = state.core.lock().map_err(|e| e.to_string())?;
+        core.game_path_overrides(&game_id).map_err(|e| e.to_string())?
+    };
+    Ok(adapter
+        .path_slots()
+        .into_iter()
+        .map(|slot| {
+            let detected = slot.detected.map(|p| p.display().to_string());
+            let override_path = overrides
+                .iter()
+                .find(|(id, _)| id == slot.id)
+                .map(|(_, path)| path.clone());
+            let effective = override_path.clone().or_else(|| detected.clone());
+            GamePathSlotDto {
+                id: slot.id.to_string(),
+                label: slot.label.to_string(),
+                kind: slot.kind,
+                detected,
+                override_path,
+                effective,
+            }
+        })
+        .collect())
+}
+
+/// Point one of a game's path slots at a folder/file the human chose by
+/// hand — Mutation réversible tier (§7.2): it only ever changes what ModLab
+/// *reads from* next time, nothing on disk moves, and clearing it (see
+/// below) undoes it instantly. Returns the merged slot list so the panel can
+/// refresh from the Core's own answer rather than guessing what changed.
+#[tauri::command]
+fn set_game_path_override(
+    state: State<AppState>,
+    game_id: String,
+    slot_id: String,
+    path: String,
+) -> Result<Vec<GamePathSlotDto>, String> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err("Le chemin ne peut pas être vide.".into());
+    }
+    {
+        let core = state.core.lock().map_err(|e| e.to_string())?;
+        core.set_game_path_override(&game_id, &slot_id, path)
+            .map_err(|e| e.to_string())?;
+    }
+    game_path_slots(state, game_id)
+}
+
+/// Drop a human override for one slot, falling back to the adapter's own
+/// detection again.
+#[tauri::command]
+fn clear_game_path_override(
+    state: State<AppState>,
+    game_id: String,
+    slot_id: String,
+) -> Result<Vec<GamePathSlotDto>, String> {
+    {
+        let core = state.core.lock().map_err(|e| e.to_string())?;
+        core.clear_game_path_override(&game_id, &slot_id)
+            .map_err(|e| e.to_string())?;
+    }
+    game_path_slots(state, game_id)
 }
 
 #[tauri::command]
@@ -337,24 +452,30 @@ fn launch_skse(state: State<AppState>, loadout_id: i64) -> Result<(), String> {
     }
     #[cfg(windows)]
     {
-        let install = SkyrimAdapter
-            .detect()
-            .ok_or_else(|| "Skyrim SE introuvable sur cette machine".to_string())?;
-        let usvfs_dll = modlab_game_skyrim::find_usvfs_dll().ok_or_else(|| {
-            "usvfs_x64.dll introuvable (installe MO2, ou MODLAB_USVFS_DLL)".to_string()
-        })?;
-        let loader = install.root.join("skse64_loader.exe");
+        // A human override from Réglages → Jeux must win here — this is the
+        // one place that actually launches the game, so it's the one place
+        // an ignored override would be most visible (and most confusing).
+        let (install_root, usvfs_dll, data_dir, rows) = {
+            let core = state.core.lock().map_err(|e| e.to_string())?;
+            let install_root = resolve_slot(&core, &SkyrimAdapter, "root")
+                .ok_or_else(|| "Skyrim SE introuvable sur cette machine".to_string())?;
+            let usvfs_dll = resolve_slot(&core, &SkyrimAdapter, "usvfs_dll").ok_or_else(|| {
+                "usvfs_x64.dll introuvable — installe MO2, ou renseigne son chemin dans \
+                 Réglages → Jeux"
+                    .to_string()
+            })?;
+            let data_dir = resolve_slot(&core, &SkyrimAdapter, "data_dir")
+                .unwrap_or_else(|| install_root.join("Data"));
+            let rows = loadout::entries(&core, loadout_id).map_err(|e| e.to_string())?;
+            (install_root, usvfs_dll, data_dir, rows)
+        };
+        let loader = install_root.join("skse64_loader.exe");
         if !loader.is_file() {
             return Err(format!(
                 "skse64_loader.exe introuvable dans {}",
-                install.root.display()
+                install_root.display()
             ));
         }
-        let rows = {
-            let core = state.core.lock().map_err(|e| e.to_string())?;
-            loadout::entries(&core, loadout_id).map_err(|e| e.to_string())?
-        };
-        let data_dir = install.root.join("Data");
         // The whole session counts as "game running" (§6): while it lasts,
         // `ai_ask` refuses to run the local LLM.
         state.game_running.store(true, Ordering::SeqCst);
@@ -364,7 +485,7 @@ fn launch_skse(state: State<AppState>, loadout_id: i64) -> Result<(), String> {
         modlab_game_skyrim::usvfs::deploy_enabled_mods(&vfs, &rows, &data_dir)
             .map_err(|e| e.to_string())?;
         let cmd = format!("\"{}\"", loader.display());
-        vfs.launch_hooked_visible(&cmd, &install.root)
+        vfs.launch_hooked_visible(&cmd, &install_root)
             .map_err(|e| e.to_string())?;
         vfs.wait_for_session_end(Duration::from_secs(2), Duration::from_secs(60))
             .map_err(|e| e.to_string())?;
@@ -561,6 +682,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_shell_snapshot,
+            game_path_slots,
+            set_game_path_override,
+            clear_game_path_override,
             set_mod_enabled,
             get_loadout_conflicts,
             create_loadout,

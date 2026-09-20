@@ -79,8 +79,13 @@
   .side-tools .hact{ display:flex; gap:2px; }
   .side-instance{ flex:none; border-bottom:1px solid var(--line); }
   .side-instance:empty{ display:none; }
-  .side-profile{ flex:none; border-top:1px solid var(--line); }
+  .side-profile{ flex:none; border-top:1px solid var(--line); display:flex; align-items:center; gap:8px; padding:8px 10px; }
   .side-profile:empty{ display:none; }
+  .profile-avatar{ flex:none; width:26px; height:26px; border-radius:50%; background:var(--c4); color:var(--t2); display:grid; place-items:center; overflow:hidden; }
+  .profile-avatar .ico{ width:14px; height:14px; }
+  .profile-text{ flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+  .profile-name{ font-size:12.5px; font-weight:600; color:var(--t1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .profile-sub{ font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .side-body{ flex:1; overflow-y:auto; overflow-x:hidden; min-height:0; padding:0 6px 8px; }
   .side-foot{ flex:none; height:28px; border-top:1px solid var(--line); display:flex; align-items:center; gap:2px; padding:0 8px; font-size:11px; color:var(--t3); white-space:nowrap; overflow:hidden; }
   .side-foot .fi{ display:inline-flex; align-items:center; gap:4px; padding:0 5px; height:20px; border-radius:4px; }
@@ -314,6 +319,36 @@
   .gcard:hover{ background:var(--c4); }
   .gcard .cv{ grid-row:1 / span 3; width:44px; height:44px; border-radius:7px; background:linear-gradient(145deg,var(--c1g),var(--c2g)); display:grid; place-items:center; color:#fff; font-weight:700; font-size:13px; letter-spacing:.04em; }
   .gcard .nm{ font-weight:600; display:flex; align-items:center; gap:8px; min-width:0; } .gcard .st{ color:var(--t3); font-size:11.5px; } .gcard .lo2{ color:var(--t2); font-size:12px; }
+
+  /* Réglages — page façon app settings (Cursor-like), centrée dans le main */
+  .settings-page{ max-width:720px; margin:0 auto; padding:36px 28px 60px; }
+  .settings-page h1{ margin:0 0 24px; font-size:22px; font-weight:600; letter-spacing:-.01em; }
+  .settings-group{ margin-bottom:28px; }
+  .settings-group-title{ font-size:11.5px; font-weight:600; color:var(--t3); text-transform:uppercase; letter-spacing:.04em; margin:0 0 8px 2px; }
+  .settings-row{ display:flex; align-items:flex-start; justify-content:space-between; gap:20px; padding:14px 2px; border-top:1px solid var(--line); }
+  .settings-group > .settings-row:first-child{ border-top:none; }
+  .settings-row-text{ min-width:0; }
+  .settings-row-title{ font-size:13px; font-weight:600; color:var(--t1); }
+  .settings-row-desc{ font-size:12px; color:var(--t3); line-height:1.45; margin-top:3px; max-width:52ch; }
+  .settings-row-control{ flex:none; padding-top:1px; display:flex; align-items:center; gap:6px; }
+  .settings-row.indent{ padding-left:28px; }
+  .settings-row.indent .settings-row-title{ font-size:12px; font-weight:500; color:var(--t2); }
+
+  /* Toggle switch — atome générique, pas seulement pour les Réglages */
+  .switch{ position:relative; display:inline-flex; align-items:center; width:34px; height:20px; border-radius:99px; background:var(--c4); flex:none; }
+  .switch.on{ background:var(--accent); }
+  .switch.disabled{ opacity:.5; }
+  .switch .thumb{ position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:#fff; transition:transform .15s; box-shadow:0 1px 2px rgba(0,0,0,.35); pointer-events:none; }
+  .switch.on .thumb{ transform:translateX(14px); }
+
+  /* SideBack — ligne de retour réutilisable en haut d'un sous-panneau du sidebar */
+  .side-back{ display:flex; align-items:center; gap:8px; height:32px; padding:0 8px; margin:6px 6px 6px; border-radius:6px; color:var(--t2); font-size:12.5px; font-weight:500; text-align:left; flex:none; }
+  .side-back:hover{ background:var(--c3); color:var(--t1); }
+  .side-back .ico{ width:15px; height:15px; }
+
+  /* Menu Réglages — liste groupée, pas d'accordéon */
+  .side-menu{ display:flex; flex-direction:column; min-height:0; }
+  .side-menu-group + .side-menu-group{ margin-top:14px; padding-top:12px; border-top:1px solid var(--line); }
 
   /* Tableau de bord par jeu */
   .dash{ padding:0 0 32px; }

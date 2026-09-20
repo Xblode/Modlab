@@ -39,6 +39,46 @@ impl GameAdapter for SkyrimAdapter {
             root,
         })
     }
+
+    /// Skyrim is found from its own `.exe` (see `find_special_edition`), so
+    /// the exe and `Data/` are just that root plus a fixed suffix; the USVFS
+    /// DLL is a wholly separate lookup (MO2's own install, not Skyrim's).
+    fn path_slots(&self) -> Vec<modlab_core::game_adapter::PathSlot> {
+        use modlab_core::game_adapter::{PathKind, PathSlot};
+        let root = find_special_edition();
+        vec![
+            PathSlot {
+                id: "root",
+                label: "Dossier d'installation",
+                kind: PathKind::Dir,
+                detected: root.clone(),
+            },
+            PathSlot {
+                id: "exe",
+                label: "Exécutable du jeu (SkyrimSE.exe)",
+                kind: PathKind::File,
+                detected: root
+                    .as_ref()
+                    .map(|r| r.join("SkyrimSE.exe"))
+                    .filter(|p| p.is_file()),
+            },
+            PathSlot {
+                id: "data_dir",
+                label: "Dossier Data",
+                kind: PathKind::Dir,
+                detected: root
+                    .as_ref()
+                    .map(|r| r.join("Data"))
+                    .filter(|p| p.is_dir()),
+            },
+            PathSlot {
+                id: "usvfs_dll",
+                label: "usvfs_x64.dll (Mod Organizer 2)",
+                kind: PathKind::File,
+                detected: find_usvfs_dll(),
+            },
+        ]
+    }
 }
 
 /// Scan likely Steam library locations across all drive letters for a
@@ -131,6 +171,21 @@ mod tests {
             Some("mo2"),
             "Skyrim SE is migratable from Mod Organizer 2"
         );
+    }
+
+    #[test]
+    fn path_slots_declare_the_expected_ids() {
+        let slots = SkyrimAdapter.path_slots();
+        let ids: Vec<&str> = slots.iter().map(|s| s.id).collect();
+        assert_eq!(ids, ["root", "exe", "data_dir", "usvfs_dll"]);
+        // A file slot derived from a dir slot must never be reported detected
+        // unless it actually exists on disk — `filter(.is_file())` above is
+        // what this pins down.
+        for slot in &slots {
+            if let Some(p) = &slot.detected {
+                assert!(p.exists(), "{} claims a path that doesn't exist: {p:?}", slot.id);
+            }
+        }
     }
 
     #[test]

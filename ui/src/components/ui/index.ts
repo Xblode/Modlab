@@ -10,9 +10,11 @@ export { Checkbox } from "./atoms/Checkbox";
 export { FavoriteButton } from "./atoms/FavoriteButton";
 export { IconButton } from "./atoms/IconButton";
 export { Input, type InputVariant } from "./atoms/Input";
+export { Switch } from "./atoms/Switch";
 
 export { Crumbs } from "./molecules/Crumbs";
 export { SearchInput } from "./molecules/SearchInput";
+export { SideBack } from "./molecules/SideBack";
 export { StatTile } from "./molecules/StatTile";
 export { Toast } from "./molecules/Toast";
 

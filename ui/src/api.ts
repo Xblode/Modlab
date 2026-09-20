@@ -24,6 +24,22 @@ export type DetectedGame = {
   capabilities: GameCapabilities;
 };
 
+export type PathKind = "dir" | "file";
+
+/**
+ * One folder/executable a Game Adapter cares about, merged with any human
+ * override the Core holds for it. `effective` is `overridePath ?? detected`
+ * — the value anything downstream should actually use.
+ */
+export type GamePathSlot = {
+  id: string;
+  label: string;
+  kind: PathKind;
+  detected: string | null;
+  overridePath: string | null;
+  effective: string | null;
+};
+
 export type LoadoutDto = {
   id: number;
   gameId: string;
@@ -125,6 +141,48 @@ export async function launchSkse(loadoutId: number): Promise<void> {
   }
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("launch_skse", { loadoutId });
+}
+
+/**
+ * The path slots one game's adapter declares (§3.1 — each Game Adapter
+ * decides its own list, e.g. an `.exe`-anchored root for Skyrim vs an
+ * `%APPDATA%`-anchored one for Minecraft), merged with whatever override the
+ * Core has on file. Read-only: Lecture tier (§7.2), no confirmation needed.
+ */
+export async function getGamePathSlots(gameId: string): Promise<GamePathSlot[]> {
+  if (!isTauri()) return previewPathSlots(gameId);
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<GamePathSlot[]>("game_path_slots", { gameId });
+}
+
+/**
+ * Point one path slot at a folder/file chosen by hand — Mutation réversible
+ * tier (§7.2): nothing on disk moves, and `clearGamePathOverride` undoes it
+ * instantly. Returns the merged slot list so the caller refreshes from the
+ * Core's own answer instead of guessing what changed.
+ */
+export async function setGamePathOverride(
+  gameId: string,
+  slotId: string,
+  path: string,
+): Promise<GamePathSlot[]> {
+  if (!isTauri()) {
+    throw new Error("La modification des chemins n'est disponible que dans le shell Tauri.");
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<GamePathSlot[]>("set_game_path_override", { gameId, slotId, path });
+}
+
+/** Drop a human override for one slot, falling back to auto-detection again. */
+export async function clearGamePathOverride(
+  gameId: string,
+  slotId: string,
+): Promise<GamePathSlot[]> {
+  if (!isTauri()) {
+    throw new Error("La modification des chemins n'est disponible que dans le shell Tauri.");
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<GamePathSlot[]>("clear_game_path_override", { gameId, slotId });
 }
 
 export type ModConflicts = {
@@ -302,6 +360,69 @@ function mockSnapshot(): ShellSnapshot {
     selectedLoadoutId: 1,
     usvfsDll: null,
   };
+}
+
+/**
+ * Browser-preview fixture for path slots — same rule as `mockSnapshot`: only
+ * reachable outside the Tauri shell. Mirrors each real adapter's actual slot
+ * ids (`skyrimse`: root/exe/data_dir/usvfs_dll, `minecraft`: root/mods_dir)
+ * so the Réglages → Jeux layout can be built and eyeballed without the Core.
+ */
+function previewPathSlots(gameId: string): GamePathSlot[] {
+  if (gameId === "minecraft") {
+    return [
+      {
+        id: "root",
+        label: "Dossier .minecraft / launcher",
+        kind: "dir",
+        detected: "C:\\Users\\dev\\AppData\\Roaming\\.minecraft",
+        overridePath: null,
+        effective: "C:\\Users\\dev\\AppData\\Roaming\\.minecraft",
+      },
+      {
+        id: "mods_dir",
+        label: "Dossier mods/",
+        kind: "dir",
+        detected: null,
+        overridePath: null,
+        effective: null,
+      },
+    ];
+  }
+  return [
+    {
+      id: "root",
+      label: "Dossier d'installation",
+      kind: "dir",
+      detected: "C:\\Steam\\Skyrim Special Edition",
+      overridePath: null,
+      effective: "C:\\Steam\\Skyrim Special Edition",
+    },
+    {
+      id: "exe",
+      label: "Exécutable du jeu (SkyrimSE.exe)",
+      kind: "file",
+      detected: "C:\\Steam\\Skyrim Special Edition\\SkyrimSE.exe",
+      overridePath: null,
+      effective: "C:\\Steam\\Skyrim Special Edition\\SkyrimSE.exe",
+    },
+    {
+      id: "data_dir",
+      label: "Dossier Data",
+      kind: "dir",
+      detected: "C:\\Steam\\Skyrim Special Edition\\Data",
+      overridePath: null,
+      effective: "C:\\Steam\\Skyrim Special Edition\\Data",
+    },
+    {
+      id: "usvfs_dll",
+      label: "usvfs_x64.dll (Mod Organizer 2)",
+      kind: "file",
+      detected: null,
+      overridePath: null,
+      effective: null,
+    },
+  ];
 }
 
 /**

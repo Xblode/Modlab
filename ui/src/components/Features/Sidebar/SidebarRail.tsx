@@ -9,7 +9,8 @@ const ACTIVITIES = [
   ["tools", "Outils", "tool"],
 ] as const;
 
-/** The sidebar's icon rail: the menu button, the activities, the settings. */
+/** The sidebar's icon rail: the menu button and the activities. Réglages
+ * lives only in the profile row now (`SidebarProfile`), not here too. */
 export function SidebarRail({
   act,
   onAct,
@@ -37,14 +38,6 @@ export function SidebarRail({
           <IconButton key={id} name={icon} title={title} aria-pressed={act === id} onClick={() => onAct(id)} />
         ))}
       </div>
-      <span className="spacer" />
-      <IconButton name="globe" title="Nexus Mods" />
-      <IconButton
-        name="gear"
-        title="Réglages"
-        aria-pressed={act === "settings"}
-        onClick={() => onAct("settings")}
-      />
     </div>
   );
 }

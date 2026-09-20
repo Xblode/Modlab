@@ -36,6 +36,33 @@ impl GameAdapter for MinecraftAdapter {
             root,
         })
     }
+
+    /// Minecraft is found from `%APPDATA%` (see `find_install`), not from a
+    /// game `.exe` — there is no single "Minecraft.exe" to anchor on the way
+    /// Skyrim's adapter anchors on `SkyrimSE.exe`. `mods_dir` only reports
+    /// detected once it actually exists — ModLab creating it on first
+    /// install is a mutation, not something detection should imply happened.
+    fn path_slots(&self) -> Vec<modlab_core::game_adapter::PathSlot> {
+        use modlab_core::game_adapter::{PathKind, PathSlot};
+        let root = find_install();
+        vec![
+            PathSlot {
+                id: "root",
+                label: "Dossier .minecraft / launcher",
+                kind: PathKind::Dir,
+                detected: root.clone(),
+            },
+            PathSlot {
+                id: "mods_dir",
+                label: "Dossier mods/",
+                kind: PathKind::Dir,
+                detected: root
+                    .as_ref()
+                    .map(|r| r.join("mods"))
+                    .filter(|p| p.is_dir()),
+            },
+        ]
+    }
 }
 
 /// Vanilla `.minecraft`, then common Prism / Modrinth / CurseForge app
@@ -101,6 +128,18 @@ mod tests {
             caps.import_source.is_none(),
             "Minecraft has no MO2-style manager to migrate from yet"
         );
+    }
+
+    #[test]
+    fn path_slots_declare_the_expected_ids() {
+        let slots = MinecraftAdapter.path_slots();
+        let ids: Vec<&str> = slots.iter().map(|s| s.id).collect();
+        assert_eq!(ids, ["root", "mods_dir"]);
+        for slot in &slots {
+            if let Some(p) = &slot.detected {
+                assert!(p.exists(), "{} claims a path that doesn't exist: {p:?}", slot.id);
+            }
+        }
     }
 
     #[test]

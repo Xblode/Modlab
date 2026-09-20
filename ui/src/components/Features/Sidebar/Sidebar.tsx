@@ -1,22 +1,17 @@
 import { useRef } from "react";
 import type { DetectedGame, LoadoutDto } from "../../../api";
 import { Ico } from "../../../Ico";
-import { Accordion, ChannelBadge, SearchInput } from "../../ui";
+import { Accordion, SearchInput } from "../../ui";
 import { MenuPicker, type MenuItem } from "../MenuPicker/MenuPicker";
 import type { SettingsMenu } from "../Settings/SettingsPane";
+import { SideMenu } from "../Settings/SideMenu";
 import { ActiveInstanceCard } from "./ActiveInstanceCard";
 import { ExplorerTree, type FavoriteEntry } from "./ExplorerTree";
 import { SidebarFooter } from "./SidebarFooter";
+import { SidebarProfile } from "./SidebarProfile";
 import { SidebarRail } from "./SidebarRail";
 
 export type SideAct = "explorer" | "search" | "history" | "tools" | "settings";
-
-const SETTINGS_ENTRIES = [
-  ["general", "Général", "sliders"],
-  ["notifications", "Notifications", "alert"],
-  ["models", "Modèles", "box"],
-  ["games", "Jeux", "layers"],
-] as const;
 
 type Props = {
   act: SideAct;
@@ -56,6 +51,7 @@ type Props = {
 
   settingsMenu: SettingsMenu;
   onSettingsMenu: (menu: SettingsMenu) => void;
+  onSettingsBack: () => void;
 };
 
 /**
@@ -94,6 +90,7 @@ export function Sidebar({
   onOpenTransactions,
   settingsMenu,
   onSettingsMenu,
+  onSettingsBack,
 }: Props) {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -171,36 +168,10 @@ export function Sidebar({
           </Accordion>
         ) : null}
         {act === "settings" ? (
-          <Accordion title="Menu" count={4}>
-            {SETTINGS_ENTRIES.map(([id, label, icon]) => (
-              <button
-                key={id}
-                className={`tr ${settingsMenu === id ? "sel" : ""}`}
-                type="button"
-                onClick={() => onSettingsMenu(id)}
-              >
-                <Ico name={icon} />
-                <span className="lbl">{label}</span>
-              </button>
-            ))}
-          </Accordion>
+          <SideMenu active={settingsMenu} onSelect={onSettingsMenu} onBack={onSettingsBack} />
         ) : null}
       </div>
-      {act === "settings" ? (
-        <div className="side-profile">
-          <div className="lo">
-            <div className="lo-top">
-              <span className="lo-name">
-                <span className="fade">Profils info</span>
-              </span>
-              <ChannelBadge channel="stable">local</ChannelBadge>
-            </div>
-            <div className="lo-row muted" style={{ fontSize: 11.5, padding: "0 2px" }}>
-              Racine : {dataRoot ?? "—"}
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <SidebarProfile act={act} onAct={onAct} dataRoot={dataRoot} />
       <SidebarFooter
         running={running}
         gameShort={activeGame?.short}

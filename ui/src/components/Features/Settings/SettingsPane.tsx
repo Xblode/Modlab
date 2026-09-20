@@ -1,130 +1,402 @@
-import type { DetectedGame } from "../../../api";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
+import {
+  clearGamePathOverride,
+  getGamePathSlots,
+  setGamePathOverride,
+  type DetectedGame,
+  type GamePathSlot,
+} from "../../../api";
 import { Ico } from "../../../Ico";
-import { Crumbs, Panel } from "../../ui";
+import { Badge, IconButton, Input, Panel, Switch } from "../../ui";
 
-export type SettingsMenu = "general" | "notifications" | "models" | "games";
+export type SettingsMenu =
+  | "general"
+  | "profile"
+  | "appearance"
+  | "notifications"
+  | "games"
+  | "models"
+  | "mcp"
+  | "privacy";
+
+/** A titled group of rows — the maquette-agnostic building block every
+ * settings page is made of. */
+function SettingsGroup({ title, children }: { title?: string; children: ReactNode }) {
+  return (
+    <div className="settings-group">
+      {title ? <div className="settings-group-title">{title}</div> : null}
+      {children}
+    </div>
+  );
+}
+
+/** One label/description row with a control (or note) pinned to the right —
+ * the shape every non-list settings page uses. */
+function SettingsRow({
+  title,
+  desc,
+  control,
+}: {
+  title: ReactNode;
+  desc?: ReactNode;
+  control?: ReactNode;
+}) {
+  return (
+    <div className="settings-row">
+      <div className="settings-row-text">
+        <div className="settings-row-title">{title}</div>
+        {desc ? <div className="settings-row-desc">{desc}</div> : null}
+      </div>
+      {control ? <div className="settings-row-control">{control}</div> : null}
+    </div>
+  );
+}
 
 /**
- * Settings detail surface, shown in the central content zone while the side
- * toolbar is in settings mode. One pane per "Side Menu" entry; only what the
- * app actually knows is shown interacted with, everything else is an honest,
- * Core-labelled placeholder.
+ * The folders/executables one game's adapter cares about (§3.1 — each
+ * adapter decides its own list and how it finds them: Skyrim from its own
+ * `.exe`, Minecraft from `%APPDATA%`), each editable in place. Rows are
+ * returned flat (a `Fragment`, no wrapping element) so they stay direct
+ * children of the surrounding `SettingsGroup` and inherit its row borders.
+ */
+function GamePathList({
+  gameId,
+  onUnwired,
+}: {
+  gameId: string;
+  onUnwired: (label: string) => void;
+}) {
+  const [slots, setSlots] = useState<GamePathSlot[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setSlots(null);
+    setError(null);
+    getGamePathSlots(gameId)
+      .then((s) => {
+        if (!cancelled) setSlots(s);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [gameId]);
+
+  async function save(slotId: string) {
+    const value = draft.trim();
+    if (!value) {
+      setEditing(null);
+      return;
+    }
+    try {
+      setSlots(await setGamePathOverride(gameId, slotId, value));
+      setEditing(null);
+    } catch (e) {
+      onUnwired(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function reset(slotId: string) {
+    try {
+      setSlots(await clearGamePathOverride(gameId, slotId));
+    } catch (e) {
+      onUnwired(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  if (error) {
+    return <SettingsRow title="Chemins" desc={error} />;
+  }
+  if (!slots) {
+    return <SettingsRow title="Chemins" desc="Détection en cours…" />;
+  }
+
+  return (
+    <>
+      {slots.map((slot) => (
+        <div className="settings-row indent" key={slot.id}>
+          <div className="settings-row-text">
+            <div className="settings-row-title">{slot.label}</div>
+            {editing === slot.id ? (
+              <Input
+                variant="field"
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void save(slot.id);
+                  if (e.key === "Escape") setEditing(null);
+                }}
+                onBlur={() => void save(slot.id)}
+                style={{ marginTop: 4, height: 28, fontFamily: "var(--font-mono)", fontSize: 11.5 }}
+              />
+            ) : (
+              <div
+                className="settings-row-desc"
+                style={{ fontFamily: "var(--font-mono)", maxWidth: "none", wordBreak: "break-all" }}
+              >
+                {slot.effective ?? "Non détecté sur cette machine"}
+              </div>
+            )}
+          </div>
+          {editing === slot.id ? null : (
+            <div className="settings-row-control">
+              <Badge tone={slot.overridePath ? "root" : slot.detected ? "root" : "bad"}>
+                {slot.overridePath ? "personnalisé" : slot.detected ? "détecté" : "introuvable"}
+              </Badge>
+              <IconButton
+                name="edit"
+                title="Modifier le chemin"
+                onClick={() => {
+                  setEditing(slot.id);
+                  setDraft(slot.effective ?? "");
+                }}
+              />
+              {slot.overridePath ? (
+                <IconButton
+                  name="refresh"
+                  title="Revenir à la détection automatique"
+                  onClick={() => void reset(slot.id)}
+                />
+              ) : null}
+            </div>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
+function Page({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="content">
+      <div className="settings-page">
+        <h1>{title}</h1>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Settings detail surface, shown centered in the main content zone while the
+ * sidebar is in Réglages mode — no tab strip, no breadcrumb toolbar above it,
+ * same as a normal app settings screen. One page per `SideMenu` entry; only
+ * what the app actually knows is shown interacted with, everything else is an
+ * honest, Core-labelled placeholder rather than a fake control.
  */
 export function SettingsPane({
   menu,
   games,
   llm,
   llmModels,
+  dataRoot,
   onSelectModel,
+  onUnwired,
 }: {
   menu: SettingsMenu;
   games: DetectedGame[];
   llm: string;
   llmModels: readonly (readonly [string, string, string])[];
+  dataRoot: string | undefined;
   onSelectModel: (id: string, name: string) => void;
+  onUnwired: (label: string) => void;
 }) {
+  if (menu === "profile") {
+    return (
+      <Page title="Profil">
+        <SettingsGroup>
+          <SettingsRow
+            title="Compte"
+            desc="ModLab est local et personnel : pas de compte, pas de synchronisation cloud. Ta modlist ne quitte cette machine que lorsque tu déclenches toi-même un appel à un Provider (Nexus, CurseForge)."
+            control={<Badge tone="root">local</Badge>}
+          />
+        </SettingsGroup>
+      </Page>
+    );
+  }
+
+  if (menu === "appearance") {
+    return (
+      <Page title="Apparence">
+        <SettingsGroup title="Thème">
+          {(["Clair", "Sombre", "Auto"] as const).map((label) => (
+            <button
+              key={label}
+              type="button"
+              className="tr"
+              onClick={() => onUnwired(`Thème : ${label}`)}
+            >
+              <Ico name={label === "Clair" ? "sparkle" : label === "Sombre" ? "disc" : "refresh"} />
+              <span className="lbl">{label}</span>
+            </button>
+          ))}
+        </SettingsGroup>
+        <SettingsGroup title="Texte">
+          <SettingsRow
+            title="Taille de police"
+            desc="Ajuster la taille du texte dans toute l'application."
+            control={<Badge tone="root">pas branché</Badge>}
+          />
+        </SettingsGroup>
+      </Page>
+    );
+  }
+
   if (menu === "models") {
     return (
-      <>
-        <Crumbs path={["Réglages", "Modèles"]} />
-        <div className="content">
-          <div className="dash">
-            <div className="dh">Modèle local actif</div>
-            {llmModels.map(([id, name, sub]) => (
-              <button
-                key={id}
-                className={`tr ${llm === id ? "sel" : ""}`}
-                type="button"
-                onClick={() => onSelectModel(id, name)}
-                title={sub}
-              >
-                <Ico name={llm === id ? "check" : "box"} />
-                <span className="lbl">
-                  {name}
-                  <div className="muted" style={{ fontSize: 11 }}>
-                    {sub}
-                  </div>
-                </span>
-              </button>
-            ))}
-            <Panel
-              icon="info"
-              title="Téléchargement et chargement à la demande"
-              bodyClassName="why"
-              style={{ marginTop: 22 }}
+      <Page title="Modèles">
+        <SettingsGroup title="Modèle local actif">
+          {llmModels.map(([id, name, sub]) => (
+            <button
+              key={id}
+              className={`tr ${llm === id ? "sel" : ""}`}
+              type="button"
+              onClick={() => onSelectModel(id, name)}
+              title={sub}
             >
-              Pas encore branchés au Core : le modèle se choisira ici, le
-              téléchargement et le chargement resteront visibles dans ce
-              panneau.
-            </Panel>
-          </div>
-        </div>
-      </>
+              <Ico name={llm === id ? "check" : "box"} />
+              <span className="lbl">
+                {name}
+                <div className="muted" style={{ fontSize: 11 }}>
+                  {sub}
+                </div>
+              </span>
+            </button>
+          ))}
+        </SettingsGroup>
+        <Panel
+          icon="info"
+          title="Téléchargement et chargement à la demande"
+          bodyClassName="why"
+        >
+          Pas encore branchés au Core : le modèle se choisira ici, le
+          téléchargement et le chargement resteront visibles dans ce panneau.
+        </Panel>
+      </Page>
     );
   }
+
   if (menu === "games") {
     return (
-      <>
-        <Crumbs path={["Réglages", "Jeux"]} />
-        <div className="content">
-          <div className="dash">
-            <div className="dh">Jeux détectés ({games.length})</div>
-            {games.length === 0 ? (
-              <div className="tr muted" style={{ fontStyle: "italic" }}>
-                Aucun jeu détecté par les adaptateurs.
-              </div>
-            ) : (
-              games.map((g) => (
-                <div key={g.id} className="tr-row">
-                  <span className="tr-label">
-                    <Ico name="layers" />
-                    <span className="lbl">{g.name}</span>
-                    <span className="tail">
-                      <span className="muted" style={{ fontSize: 10 }}>
-                        {g.short}
-                      </span>
+      <Page title="Jeux">
+        <SettingsGroup title={`Jeux détectés (${games.length})`}>
+          {games.length === 0 ? (
+            <SettingsRow
+              title="Aucun jeu détecté"
+              desc="Aucun adaptateur n'a trouvé d'installation sur cette machine."
+            />
+          ) : (
+            games.map((g) => (
+              <Fragment key={g.id}>
+                <SettingsRow
+                  title={
+                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <Ico name="layers" />
+                      {g.name}
                     </span>
-                  </span>
-                </div>
-              ))
-            )}
-            <div className="dh">Ajouter un jeu</div>
-            <div className="tr muted" style={{ fontStyle: "italic" }}>
-              Requête Core : l’ajout manuel d’un dossier de jeu n’existe pas
-              encore.
-            </div>
-          </div>
-        </div>
-      </>
+                  }
+                  control={<Badge tone="root">détecté</Badge>}
+                />
+                <GamePathList gameId={g.id} onUnwired={onUnwired} />
+              </Fragment>
+            ))
+          )}
+        </SettingsGroup>
+        <SettingsGroup title="Ajouter un jeu">
+          <SettingsRow
+            title="Dossier de jeu manuel"
+            desc="L'ajout manuel d'un dossier de jeu n'existe pas encore côté Core."
+            control={
+              <button type="button" className="btn ghost" onClick={() => onUnwired("Ajouter un jeu")}>
+                Ajouter
+              </button>
+            }
+          />
+        </SettingsGroup>
+      </Page>
     );
   }
+
+  if (menu === "mcp") {
+    return (
+      <Page title="MCP & Outils">
+        <SettingsGroup title="Serveur MCP">
+          <SettingsRow
+            title="Outils exposés à une IA compatible MCP"
+            desc="Lecture, mutation réversible et transactionnel (inspect_game, install_mod, modlab_plan…) — voir docs/01-architecture-decidee.md §7."
+            control={<Badge tone="root">Phase 3</Badge>}
+          />
+          <SettingsRow
+            title="Permissions à 3 niveaux"
+            desc="Lecture automatique, mutation réversible configurable, action dangereuse toujours confirmée."
+            control={<Badge tone="root">Phase 3</Badge>}
+          />
+        </SettingsGroup>
+      </Page>
+    );
+  }
+
+  if (menu === "privacy") {
+    return (
+      <Page title="Confidentialité">
+        <SettingsGroup title="Données locales">
+          <SettingsRow
+            title="Tout reste sur cette machine"
+            desc="Aucune télémétrie, aucun envoi de données hors de F:\\ModLab, sauf les appels aux Providers (Nexus, CurseForge) que tu déclenches toi-même."
+          />
+        </SettingsGroup>
+        <SettingsGroup title="Suppression">
+          <SettingsRow
+            title="Corbeille interne"
+            desc="ModLab ne supprime jamais un fichier directement : chaque suppression passe par une corbeille interne et reste réversible."
+            control={<Badge tone="root">toujours actif</Badge>}
+          />
+        </SettingsGroup>
+      </Page>
+    );
+  }
+
   if (menu === "notifications") {
     return (
-      <>
-        <Crumbs path={["Réglages", "Notifications"]} />
-        <div className="content">
-          <div className="dash">
-            <div className="dh">Notifications</div>
-            <div className="tr muted" style={{ fontStyle: "italic" }}>
-              Pas encore suivi par le Core : fins de job, mises à jour de mods
-              et santé des instances arriveront ici.
-            </div>
-          </div>
-        </div>
-      </>
+      <Page title="Notifications">
+        <SettingsGroup>
+          <SettingsRow
+            title="Fins de job et santé des instances"
+            desc="Pas encore suivi par le Core : fins de job, mises à jour de mods et santé des instances arriveront ici."
+            control={<Badge tone="root">pas branché</Badge>}
+          />
+        </SettingsGroup>
+      </Page>
     );
   }
+
   return (
-    <>
-      <Crumbs path={["Réglages", "Général"]} />
-      <div className="content">
-        <div className="dash">
-          <div className="dh">Général</div>
-          <div className="tr muted" style={{ fontStyle: "italic" }}>
-            Préférences générales : pas encore suivi par le Core.
-          </div>
-        </div>
-      </div>
-    </>
+    <Page title="Général">
+      <SettingsGroup title="Confirmations">
+        <SettingsRow
+          title="Mutations réversibles"
+          desc="Demander confirmation avant d'appliquer une mutation réversible (installer, activer/désactiver un mod, changer l'ordre de charge) — voir §7.2."
+          control={<Switch checked disabled onToggle={() => onUnwired("Confirmation des mutations réversibles")} />}
+        />
+        <SettingsRow
+          title="Actions dangereuses"
+          desc="Suppression, écriture hors du périmètre ModLab : toujours confirmées, sans exception."
+          control={<Badge tone="root">toujours actif</Badge>}
+        />
+      </SettingsGroup>
+      <SettingsGroup title="Données">
+        <SettingsRow
+          title="Racine des données"
+          desc="Le dossier où ModLab range archives, mods déployés et la base SQLite."
+          control={<code className="muted" style={{ fontSize: 12 }}>{dataRoot ?? "—"}</code>}
+        />
+      </SettingsGroup>
+    </Page>
   );
 }

@@ -35,6 +35,32 @@ pub enum GameSection {
     Servers,
 }
 
+/// Whether a path slot names a directory or a single file — purely so a
+/// client can pick the right file-picker mode. The Core never validates it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PathKind {
+    Dir,
+    File,
+}
+
+/// One folder or executable a Game Adapter cares about — e.g. Skyrim's
+/// install root (found from its `.exe`) or Minecraft's `.minecraft` folder
+/// (found from `%APPDATA%`). `detected` is whatever this adapter's own
+/// heuristics find *right now*; a client may let a human override it —
+/// persisted by the Core, keyed by `(game id, slot id)` — without this
+/// module knowing overrides exist at all. Every game gets to define its own
+/// list: nothing here assumes a Skyrim-shaped or Minecraft-shaped install.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathSlot {
+    /// Stable id within this adapter, e.g. `"root"`, `"data_dir"`.
+    pub id: &'static str,
+    pub label: &'static str,
+    pub kind: PathKind,
+    pub detected: Option<PathBuf>,
+}
+
 /// A relevant game tool. Declaration does not imply installation or execution support.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -78,4 +104,11 @@ pub trait GameAdapter {
 
     /// Try to find a real install of this game on the current machine.
     fn detect(&self) -> Option<GameInstall>;
+
+    /// The named folders/executables this game cares about, each with
+    /// whatever this adapter's own detection finds right now. Independent of
+    /// `detect()` succeeding — a slot can be reported even when the overall
+    /// install wasn't found, so a human can point ModLab at it by hand from
+    /// Réglages → Jeux instead.
+    fn path_slots(&self) -> Vec<PathSlot>;
 }

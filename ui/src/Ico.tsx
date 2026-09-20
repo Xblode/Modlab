@@ -69,6 +69,8 @@ const PATHS: Record<string, string> = {
   maximize: '<rect width="14" height="14" x="5" y="5" rx="1"/>',
   restore:
     '<rect width="11" height="11" x="4" y="9" rx="1"/><path d="M8 6.5A1.5 1.5 0 0 1 9.5 5H18a2 2 0 0 1 2 2v8.5A1.5 1.5 0 0 1 18.5 17"/>',
+  arrowleft: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+  user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
 };
 
 export function Ico({

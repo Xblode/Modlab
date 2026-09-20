@@ -55,6 +55,9 @@ export default function App() {
   const [snap, setSnap] = useState<ShellSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [act, setAct] = useState<SideAct>("explorer");
+  // The activity to return to when leaving Réglages — captured the moment we
+  // enter it, so `SideBack` can undo whichever icon actually opened it.
+  const [prevAct, setPrevAct] = useState<SideAct>("explorer");
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsMenu, setSettingsMenu] = useState<SettingsMenu>("general");
   const [tab, setTab] = useState<TabId>("dashboard");
@@ -109,6 +112,16 @@ export default function App() {
       default:
         setToast(`« ${item.label} » : pas encore branché au Core.`);
     }
+  }
+
+  /** Every rail click and the palette's "Ouvrir les réglages" go through
+   * here so `prevAct` always names whatever was active right before
+   * Réglages opened, not just a hardcoded default. */
+  function handleAct(next: SideAct) {
+    if (next === "settings" && act !== "settings") {
+      setPrevAct(act);
+    }
+    setAct(next);
   }
 
   const { isFavorite, toggleFavorite, favoriteIds } = useFavorites();
@@ -425,7 +438,7 @@ export default function App() {
         label: "Ouvrir les réglages",
         icon: "gear",
         run: () => {
-          setAct("settings");
+          handleAct("settings");
           setTab("dashboard");
         },
       },
@@ -473,7 +486,7 @@ export default function App() {
       });
     }
     return items;
-  }, [tabs, loadouts, games, entries]);
+  }, [tabs, loadouts, games, entries, act]);
 
   /**
    * One page per tab id — the shell's stand-in for a router: the active tab
@@ -532,7 +545,7 @@ export default function App() {
       sidebar={
         <Sidebar
           act={act}
-          onAct={setAct}
+          onAct={handleAct}
           menuOpen={menuOpen}
           onToggleMenu={() => setMenuOpen((v) => !v)}
           onCloseMenu={() => setMenuOpen(false)}
@@ -563,6 +576,7 @@ export default function App() {
           onOpenTransactions={() => setTxOpen(true)}
           settingsMenu={settingsMenu}
           onSettingsMenu={setSettingsMenu}
+          onSettingsBack={() => setAct(prevAct)}
         />
       }
       right={
@@ -632,52 +646,56 @@ export default function App() {
         </>
       }
     >
-      <TabStrip
-        tabs={tabs}
-        currentTab={currentTab}
-        modCount={entries.length}
-        aiActive={rightOpen && rightTab === "claude"}
-        onSelect={setTab}
-        onOpenAi={() => {
-          setRightOpen(true);
-          setRightTab("claude");
-        }}
-      />
-
-      {currentTab === "dashboard" && activeGame ? (
-        act === "settings" ? (
-          <SettingsPane
-            menu={settingsMenu}
-            games={games}
-            llm={llm}
-            llmModels={LLM_MODELS}
-            onSelectModel={(id, name) => {
-              setLlm(id);
-              setToast(`Modèle local sélectionné : ${name}`);
-            }}
-          />
-        ) : (
-          <DashboardPage
-            game={activeGame}
-            loadouts={gameLoadouts}
-            activeLoadoutId={activeLoadout?.id ?? null}
-            modCount={activeLoadout?.modCount ?? entries.length}
-            isFavorite={isFavorite}
-            onToggleFavorite={onFavorite}
-            onPickLoadout={(id) => void pickLoadout(id, "dashboard")}
-            onCreateLoadout={() => setCreateOpen(true)}
-            onImportSource={() => setMo2Open(true)}
-            onGoToTab={(t) => setTab(t)}
-            onUnwired={unwired}
-          />
-        )
+      {act === "settings" ? (
+        <SettingsPane
+          menu={settingsMenu}
+          games={games}
+          llm={llm}
+          llmModels={LLM_MODELS}
+          dataRoot={snap?.dataRoot}
+          onSelectModel={(id, name) => {
+            setLlm(id);
+            setToast(`Modèle local sélectionné : ${name}`);
+          }}
+          onUnwired={unwired}
+        />
       ) : (
         <>
-          <Crumbs
-            path={[activeGame?.short ?? "—", activeLoadout?.name ?? "—", tabLabel]}
-            tail={snap?.dataRoot ?? ""}
+          <TabStrip
+            tabs={tabs}
+            currentTab={currentTab}
+            modCount={entries.length}
+            aiActive={rightOpen && rightTab === "claude"}
+            onSelect={setTab}
+            onOpenAi={() => {
+              setRightOpen(true);
+              setRightTab("claude");
+            }}
           />
-          {pageForTab()}
+
+          {currentTab === "dashboard" && activeGame ? (
+            <DashboardPage
+              game={activeGame}
+              loadouts={gameLoadouts}
+              activeLoadoutId={activeLoadout?.id ?? null}
+              modCount={activeLoadout?.modCount ?? entries.length}
+              isFavorite={isFavorite}
+              onToggleFavorite={onFavorite}
+              onPickLoadout={(id) => void pickLoadout(id, "dashboard")}
+              onCreateLoadout={() => setCreateOpen(true)}
+              onImportSource={() => setMo2Open(true)}
+              onGoToTab={(t) => setTab(t)}
+              onUnwired={unwired}
+            />
+          ) : (
+            <>
+              <Crumbs
+                path={[activeGame?.short ?? "—", activeLoadout?.name ?? "—", tabLabel]}
+                tail={snap?.dataRoot ?? ""}
+              />
+              {pageForTab()}
+            </>
+          )}
         </>
       )}
     </LayoutShell>
