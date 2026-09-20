@@ -1,3 +1,4 @@
+import type { RefObject } from "react";
 import { IconButton } from "../../ui";
 import type { SideAct } from "./Sidebar";
 
@@ -8,17 +9,29 @@ const ACTIVITIES = [
   ["tools", "Outils", "tool"],
 ] as const;
 
-/** The sidebar's icon rail: the activities and the settings. The application
- * menu is not here any more — it lives in the window's title bar. */
+/** The sidebar's icon rail: the menu button, the activities, the settings. */
 export function SidebarRail({
   act,
   onAct,
+  menuButtonRef,
+  menuOpen,
+  onToggleMenu,
 }: {
   act: SideAct;
   onAct: (act: SideAct) => void;
+  menuButtonRef: RefObject<HTMLButtonElement | null>;
+  menuOpen: boolean;
+  onToggleMenu: () => void;
 }) {
   return (
     <div className="side-tools">
+      <IconButton
+        name="menu"
+        title="Menu"
+        ref={menuButtonRef}
+        aria-pressed={menuOpen}
+        onClick={onToggleMenu}
+      />
       <div className="hact">
         {ACTIVITIES.map(([id, title, icon]) => (
           <IconButton key={id} name={icon} title={title} aria-pressed={act === id} onClick={() => onAct(id)} />

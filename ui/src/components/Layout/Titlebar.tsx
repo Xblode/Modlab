@@ -1,7 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Ico } from "../../Ico";
-import { IconButton } from "../ui";
-import { MenuPicker, type MenuItem } from "../Features/MenuPicker/MenuPicker";
 
 /** Same guard as `api.ts`: outside the Tauri shell there is no window to drive. */
 function isTauri(): boolean {
@@ -52,12 +50,11 @@ function useMaximized(): [boolean, () => void] {
 
 /**
  * The window's own title bar — Windows has none of its own
- * (`decorations: false`). Left: the application menu and the app name.
- * Middle: the drag region. Right: minimize / maximize / close.
+ * (`decorations: false`). Just the drag region and the three window
+ * controls for now: no app menu (back in the sidebar, its original spot)
+ * and no title/logo.
  */
-export function Titlebar({ onMenuAction }: { onMenuAction: (item: MenuItem) => void }) {
-  const menuButtonRef = useRef<HTMLButtonElement>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+export function Titlebar() {
   const [maximized, toggleMaximize] = useMaximized();
 
   function minimize() {
@@ -72,24 +69,10 @@ export function Titlebar({ onMenuAction }: { onMenuAction: (item: MenuItem) => v
 
   return (
     <header className="titlebar">
-      <div className="tb-left">
-        <IconButton
-          name="menu"
-          title="Menu"
-          variant="sm"
-          ref={menuButtonRef}
-          aria-pressed={menuOpen}
-          aria-haspopup="menu"
-          onClick={() => setMenuOpen((v) => !v)}
-        />
-        <Ico name="layers" className="sm tb-logo" />
-        <span className="tb-title">ModLab</span>
-      </div>
-
-      {/* Everything not interactive drags the window; the clusters on either
-          side deliberately do not carry the attribute, so their buttons stay
-          clickable instead of starting a drag. Double-click is Tauri's own
-          maximize toggle on a drag region. */}
+      {/* Everything not interactive drags the window; the controls
+          deliberately do not carry the attribute, so they stay clickable
+          instead of starting a drag. Double-click is Tauri's own maximize
+          toggle on a drag region. */}
       <div className="tb-drag" data-tauri-drag-region />
 
       <div className="tb-controls">
@@ -121,14 +104,6 @@ export function Titlebar({ onMenuAction }: { onMenuAction: (item: MenuItem) => v
           <Ico name="x" className="sm" />
         </button>
       </div>
-
-      {menuOpen ? (
-        <MenuPicker
-          anchorRef={menuButtonRef}
-          onClose={() => setMenuOpen(false)}
-          onItemSelect={onMenuAction}
-        />
-      ) : null}
     </header>
   );
 }

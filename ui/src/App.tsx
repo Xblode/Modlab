@@ -55,6 +55,7 @@ export default function App() {
   const [snap, setSnap] = useState<ShellSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [act, setAct] = useState<SideAct>("explorer");
+  const [menuOpen, setMenuOpen] = useState(false);
   const [settingsMenu, setSettingsMenu] = useState<SettingsMenu>("general");
   const [tab, setTab] = useState<TabId>("dashboard");
   const [gameId, setGameId] = useState<string | null>(null);
@@ -528,11 +529,14 @@ export default function App() {
     <LayoutShell
       rightOpen={rightOpen}
       running={running}
-      onMenuAction={handleMenuAction}
       sidebar={
         <Sidebar
           act={act}
           onAct={setAct}
+          menuOpen={menuOpen}
+          onToggleMenu={() => setMenuOpen((v) => !v)}
+          onCloseMenu={() => setMenuOpen(false)}
+          onMenuAction={handleMenuAction}
           activeGame={activeGame}
           activeLoadout={activeLoadout}
           games={games}

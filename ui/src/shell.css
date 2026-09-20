@@ -568,10 +568,7 @@
 /* ============ Barre de titre — chrome de fenêtre maison ============ */
   /* `decorations: false` côté Tauri : cette barre remplace celle de Windows. */
   .titlebar{ flex:none; display:flex; align-items:stretch; height:34px; background:var(--c1); border-bottom:1px solid var(--line2); user-select:none; position:relative; z-index:60; }
-  .tb-left{ display:flex; align-items:center; gap:6px; flex:none; padding:0 8px 0 6px; }
-  .tb-logo{ color:var(--accent); }
-  .tb-title{ font-size:12px; color:var(--t2); letter-spacing:.02em; white-space:nowrap; }
-  /* Only this strip drags the window — the two clusters stay clickable. */
+  /* Only this strip drags the window — the controls stay clickable. */
   .tb-drag{ flex:1; min-width:0; }
   .tb-controls{ display:flex; align-items:stretch; flex:none; }
   .tb-win{ display:inline-flex; align-items:center; justify-content:center; width:44px; color:var(--t2); }

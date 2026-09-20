@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { Titlebar } from "./Titlebar";
-import type { MenuItem } from "../Features/MenuPicker/MenuPicker";
 
 /**
  * The shell's frame: our own title bar, then sidebar, main sheet, floating
@@ -14,7 +13,6 @@ import type { MenuItem } from "../Features/MenuPicker/MenuPicker";
 export function LayoutShell({
   rightOpen,
   running,
-  onMenuAction,
   sidebar,
   right,
   dock,
@@ -23,8 +21,6 @@ export function LayoutShell({
 }: {
   rightOpen: boolean;
   running: boolean;
-  /** Every entry of the title bar's menu tree lands here. */
-  onMenuAction: (item: MenuItem) => void;
   sidebar: ReactNode;
   /** The right panel itself, or `null` when it is closed. */
   right?: ReactNode;
@@ -36,7 +32,7 @@ export function LayoutShell({
 }) {
   return (
     <div className="shell-root">
-      <Titlebar onMenuAction={onMenuAction} />
+      <Titlebar />
 
       <div className={`app ${rightOpen ? "" : "no-right"} ${running ? "running" : ""}`}>
         {sidebar}
