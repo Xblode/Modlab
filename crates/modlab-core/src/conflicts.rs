@@ -131,6 +131,54 @@ pub fn tally(conflicts: &[FileConflict], mods: &[ModFiles]) -> Vec<ModConflictCo
         .collect()
 }
 
+/// One relative path in the merged view — whichever mod's copy the game
+/// actually sees there, and how many enabled mods provide that same path at
+/// all (`> 1` is exactly what `find_conflicts` reports as a conflict).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergedFile {
+    pub relative_path: PathBuf,
+    pub winner_mod_id: i64,
+    pub winner_mod_name: String,
+    pub contributor_count: usize,
+}
+
+/// Every relative path across `mods`, resolved to whichever mod's copy
+/// wins — the logical "what the game would see in Data/" view (§ the
+/// Répertoire tab), computed without needing a live USVFS session: this is
+/// exactly the same last-in-sequence-wins rule `find_conflicts` already
+/// applies, just reported for every path instead of only the contested
+/// ones. `mods` must already be in priority order, same requirement as
+/// `find_conflicts`.
+#[must_use]
+pub fn merged_view(mods: &[ModFiles]) -> Vec<MergedFile> {
+    let mut by_path: HashMap<&Path, Vec<(i64, &str)>> = HashMap::new();
+    for m in mods {
+        for file in &m.files {
+            by_path
+                .entry(file.as_path())
+                .or_default()
+                .push((m.mod_id, m.name.as_str()));
+        }
+    }
+
+    let mut out: Vec<MergedFile> = by_path
+        .into_iter()
+        .map(|(path, contributors)| {
+            let (winner_id, winner_name) = contributors
+                .last()
+                .expect("a grouped path always has at least one contributor");
+            MergedFile {
+                relative_path: path.to_path_buf(),
+                winner_mod_id: *winner_id,
+                winner_mod_name: (*winner_name).to_string(),
+                contributor_count: contributors.len(),
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+    out
+}
+
 /// Filenames that are mod-manager bookkeeping, never real mod content, and
 /// so must never be treated as "this file conflicts." Found for real, not
 /// guessed: importing Benjamin's actual MO2 instance flagged `meta.ini` —
@@ -352,6 +400,42 @@ mod tests {
         );
     }
 
+    #[test]
+    fn merged_view_reports_every_path_not_just_conflicts() {
+        let mods = vec![
+            ModFiles {
+                mod_id: 1,
+                name: "Lux".into(),
+                files: vec![
+                    PathBuf::from("interface/config.txt"),
+                    PathBuf::from("only/lux.nif"),
+                ],
+            },
+            ModFiles {
+                mod_id: 2,
+                name: "JK's Skyrim".into(),
+                files: vec![PathBuf::from("interface/config.txt")],
+            },
+        ];
+
+        let mut view = merged_view(&mods);
+        view.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+
+        assert_eq!(view.len(), 2, "every path appears once, conflicting or not");
+        let shared = view
+            .iter()
+            .find(|f| f.relative_path == PathBuf::from("interface/config.txt"))
+            .unwrap();
+        assert_eq!(shared.winner_mod_id, 2, "last in priority order wins");
+        assert_eq!(shared.contributor_count, 2);
+        let solo = view
+            .iter()
+            .find(|f| f.relative_path == PathBuf::from("only/lux.nif"))
+            .unwrap();
+        assert_eq!(solo.winner_mod_id, 1);
+        assert_eq!(solo.contributor_count, 1, "an uncontested path is still reported");
+    }
+
     fn row(
         mod_id: i64,
         name: &str,
@@ -365,6 +449,10 @@ mod tests {
             source_path,
             enabled,
             position,
+            version: None,
+            status: crate::loadout::STATUS_INSTALLED.to_string(),
+            category: None,
+            archive_path: None,
         }
     }
 

@@ -21,23 +21,11 @@ const COPY: Partial<Record<TabId, { title: string; body: string }>> = {
   },
   saves: {
     title: "Sauvegardes — pas encore branché au Core",
-    body: "Aucune lecture des fichiers de sauvegarde, et pas de révisions immuables auxquelles les rattacher : la compatibilité save ↔ révision attend le cycle snapshot.",
+    body: "Aucune lecture des fichiers de sauvegarde : le Core ne sait pas encore associer une sauvegarde à la révision qui tournait au moment où elle a été écrite.",
   },
   sante: {
     title: "Santé — pas encore branché au Core",
     body: "Le moteur de règles de diagnostic n’existe pas encore. La détection de conflits de fichiers, elle, est réelle côté Core — elle remontera ici quand l’API sera exposée.",
-  },
-  packs: {
-    title: "Packs & shaders — pas encore branché au Core",
-    body: "L’adaptateur Minecraft ne fait que de la détection pour l’instant : ni resource packs, ni shaders, ni ressources du profil.",
-  },
-  worlds: {
-    title: "Mondes — pas encore branché au Core",
-    body: "L’adaptateur Minecraft ne lit pas encore les sauvegardes de monde ni leur compatibilité avec la liste de mods active.",
-  },
-  servers: {
-    title: "Serveurs — pas encore branché au Core",
-    body: "Déployer un pack de mods vers un serveur suppose un backend de déploiement distant : rien de tel dans le Core aujourd’hui.",
   },
 };
 

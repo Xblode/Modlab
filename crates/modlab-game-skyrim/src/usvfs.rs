@@ -76,6 +76,28 @@ pub enum UsvfsError {
     GetProcessListFailed,
     #[error("no process ever registered with the VFS — the launch likely failed silently")]
     NeverRegistered,
+    #[error(
+        "usvfs instance '{instance}' disconnect could not be confirmed — {remaining} process(es) still registered"
+    )]
+    DisconnectNotConfirmed { instance: String, remaining: usize },
+}
+
+/// Deterministic, stable VFS instance name for a given game + loadout.
+///
+/// Two different loadouts — even for the same game — must never share a VFS
+/// instance name: `usvfs` instances are named, machine-wide, shared-memory
+/// resources (see `Vfs`'s doc), so a shared name means two independently
+/// "isolated" mod setups actually see each other's virtual file mappings.
+/// `loadout_id` is the SQLite primary key backing every loadout, so it's
+/// already globally unique and immutable — deriving the name from it means
+/// relaunching the *same* loadout always reconnects under the *same*
+/// identity (useful for recovering a stale session left by a crash, see
+/// `Vfs::create`) while two different loadouts can never collide. The
+/// `modlab-` prefix namespaces this away from unrelated tools (e.g. MO2's
+/// own instance, if MO2 is open at the same time).
+#[must_use]
+pub fn instance_name(game_id: &str, loadout_id: i64) -> String {
+    format!("modlab-{game_id}-{loadout_id}")
 }
 
 /// Opaque handle — `usvfs.h` forward-declares `struct usvfsParameters;` and
@@ -127,6 +149,10 @@ type FnGetVfsProcessList = unsafe extern "system" fn(*mut usize, *mut u32) -> i3
 pub struct Vfs {
     lib: Library,
     instance_name: String,
+    /// Set once `disconnect()` has confirmed no process remains registered.
+    /// Lets `Drop` skip redundant teardown work for a connection that was
+    /// already cleanly closed by an explicit `disconnect()` call.
+    disconnected: bool,
 }
 
 impl Vfs {
@@ -134,11 +160,41 @@ impl Vfs {
     /// instance. `instance_name` must be distinct from any VFS instance
     /// already running on the machine (e.g. MO2's own, if MO2 is open) —
     /// each instance is isolated behind its own named shared-memory
-    /// segment, keyed by this name.
+    /// segment, keyed by this name. Use `instance_name()` (this module) to
+    /// derive one that's guaranteed distinct per loadout.
+    ///
+    /// If creation fails for a name under our own `modlab-` namespace, this
+    /// assumes it may be a stale session left behind by a crashed prior
+    /// ModLab run (crashing skips `Drop`, so a machine-wide named VFS
+    /// session can outlive the process that created it) and makes one
+    /// best-effort disconnect-then-retry attempt before giving up. Never
+    /// retries for a name outside our namespace — that's some other tool's
+    /// instance, and blindly disconnecting it would be destructive.
     pub fn create(dll_path: &Path, instance_name: &str) -> Result<Self, UsvfsError> {
         let lib = unsafe { Library::new(dll_path) }
             .map_err(|e| UsvfsError::LoadLibrary(dll_path.to_path_buf(), e))?;
 
+        match Self::try_create_vfs(&lib, instance_name) {
+            Ok(()) => {}
+            Err(UsvfsError::CreateVfsFailed(_)) if instance_name.starts_with("modlab-") => {
+                unsafe {
+                    if let Ok(disconnect) = lib.get::<FnDisconnectVfs>(b"DisconnectVFS\0") {
+                        disconnect();
+                    }
+                }
+                Self::try_create_vfs(&lib, instance_name)?;
+            }
+            Err(e) => return Err(e),
+        }
+
+        Ok(Self {
+            lib,
+            instance_name: instance_name.to_string(),
+            disconnected: false,
+        })
+    }
+
+    fn try_create_vfs(lib: &Library, instance_name: &str) -> Result<(), UsvfsError> {
         let name_c = CString::new(instance_name)
             .map_err(|_| UsvfsError::InvalidInstanceName(instance_name.to_string()))?;
 
@@ -166,11 +222,7 @@ impl Vfs {
         if created == 0 {
             return Err(UsvfsError::CreateVfsFailed(instance_name.to_string()));
         }
-
-        Ok(Self {
-            lib,
-            instance_name: instance_name.to_string(),
-        })
+        Ok(())
     }
 
     /// Layer `source`'s files virtually on top of `destination`, recursively.
@@ -357,6 +409,35 @@ impl Vfs {
     pub fn instance_name(&self) -> &str {
         &self.instance_name
     }
+
+    /// Explicitly disconnect from this VFS instance and confirm — by
+    /// re-checking `GetVFSProcessList` — that no process is left registered
+    /// against it. Prefer calling this over relying solely on `Drop`
+    /// wherever the `Result` can actually be checked: `Drop` can't
+    /// propagate an error, so a teardown that silently fails there can only
+    /// ever be logged, never surfaced to a caller who might want to retry
+    /// or warn the user. Safe to call more than once.
+    pub fn disconnect(&mut self) -> Result<(), UsvfsError> {
+        if self.disconnected {
+            return Ok(());
+        }
+
+        unsafe {
+            let disconnect: Symbol<FnDisconnectVfs> = self.lib.get(b"DisconnectVFS\0")?;
+            disconnect();
+        }
+
+        let remaining = self.registered_process_count()?;
+        if remaining == 0 {
+            self.disconnected = true;
+            Ok(())
+        } else {
+            Err(UsvfsError::DisconnectNotConfirmed {
+                instance: self.instance_name.clone(),
+                remaining,
+            })
+        }
+    }
 }
 
 /// Virtually link every *enabled* entry in `entries` onto `data_dir`, in the
@@ -366,11 +447,22 @@ impl Vfs {
 /// highest-position enabled mod wins any file conflict, consistent with
 /// `modlab_core::conflicts`. Returns how many mods were linked. Doesn't
 /// touch a single real file: `data_dir` itself is never written to.
+///
+/// Links `data_dir` onto itself *first*, before any mod, so the real
+/// base-game files already sitting there (`Skyrim.esm`, the DLC `.esm`s,
+/// `_ResourcePack.esl`, ...) are an explicit, guaranteed layer of the merged
+/// view rather than an unverified assumption that `usvfs` passes pre-existing
+/// files through for free. Every mod is linked afterwards, so a mod's file
+/// still wins over a same-named base-game file — this only adds a layer
+/// underneath, it doesn't change who's on top (see
+/// `mod_overlay_still_wins_over_base_game_file_of_same_name`).
 pub fn deploy_enabled_mods(
     vfs: &Vfs,
     entries: &[modlab_core::loadout::LoadoutEntryRow],
     data_dir: &Path,
 ) -> Result<usize, UsvfsError> {
+    vfs.link_directory_recursive(data_dir, data_dir)?;
+
     let mut linked = 0;
     for entry in entries.iter().filter(|e| e.enabled) {
         vfs.link_directory_recursive(&entry.source_path, data_dir)?;
@@ -381,13 +473,35 @@ pub fn deploy_enabled_mods(
 
 impl Drop for Vfs {
     fn drop(&mut self) {
+        // Fallback safety net for early returns / panics that skip an
+        // explicit `disconnect()` call — prefer calling `disconnect()`
+        // directly wherever the `Result` can be checked, since `Drop` can't
+        // propagate an error. If `disconnect()` already ran and confirmed
+        // teardown, there's nothing left to do.
+        if self.disconnected {
+            return;
+        }
+
         // Best-effort: if the symbol lookup itself fails there's nothing
         // more we can do from a Drop impl, and nothing on real disk was
         // ever touched regardless.
-        unsafe {
-            if let Ok(disconnect) = self.lib.get::<FnDisconnectVfs>(b"DisconnectVFS\0") {
-                disconnect();
+        let confirmed = unsafe {
+            match self.lib.get::<FnDisconnectVfs>(b"DisconnectVFS\0") {
+                Ok(disconnect) => {
+                    disconnect();
+                    self.registered_process_count()
+                        .map(|remaining| remaining == 0)
+                        .unwrap_or(false)
+                }
+                Err(_) => false,
             }
+        };
+
+        if !confirmed {
+            eprintln!(
+                "modlab: WARNING: usvfs instance '{}' disconnect on drop could not be confirmed — a stale VFS session may remain",
+                self.instance_name
+            );
         }
     }
 }
@@ -523,6 +637,216 @@ mod tests {
         assert!(
             elapsed < Duration::from_secs(15),
             "took too long ({elapsed:?}) — de-registration may never be observed"
+        );
+    }
+
+    #[test]
+    fn instance_name_is_deterministic_and_distinct_per_loadout() {
+        assert_eq!(
+            instance_name("skyrim", 42),
+            instance_name("skyrim", 42),
+            "same game + loadout must always derive the same name"
+        );
+        assert_ne!(
+            instance_name("skyrim", 42),
+            instance_name("skyrim", 43),
+            "different loadouts of the same game must not collide"
+        );
+        assert_ne!(
+            instance_name("skyrim", 42),
+            instance_name("minecraft", 42),
+            "different games sharing a loadout id must not collide"
+        );
+        assert!(
+            instance_name("skyrim", 42).starts_with("modlab-"),
+            "must live under ModLab's own namespace, distinct from other tools (e.g. MO2)"
+        );
+    }
+
+    fn entry(name: &str, source_path: PathBuf, position: i64) -> modlab_core::loadout::LoadoutEntryRow {
+        modlab_core::loadout::LoadoutEntryRow {
+            mod_id: position,
+            name: name.to_string(),
+            source_path,
+            enabled: true,
+            position,
+            version: None,
+            status: modlab_core::loadout::STATUS_INSTALLED.to_string(),
+            category: None,
+            archive_path: None,
+        }
+    }
+
+    /// Regression for the reported bug: installing SKSE on one loadout, then
+    /// creating a second, fresh loadout, must NOT show SKSE (or anything
+    /// else) as already present — two loadouts must never share VFS state.
+    #[test]
+    fn two_instances_for_different_loadouts_do_not_share_vfs_state() {
+        let dll = real_dll_path();
+        if !dll.is_file() {
+            return;
+        }
+
+        let skse_mod = tempfile::tempdir().unwrap();
+        fs::write(skse_mod.path().join("skse64_loader.exe"), b"fake skse").unwrap();
+
+        let _guard = VFS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        // Loadout 1: deploy SKSE into its own destination, then disconnect —
+        // simulating "SKSE installed on instance A".
+        let dest_a = tempfile::tempdir().unwrap();
+        {
+            let mut vfs_a =
+                Vfs::create(&dll, &instance_name("skyrim", 1)).expect("should connect (loadout 1)");
+            vfs_a
+                .link_directory_recursive(skse_mod.path(), dest_a.path())
+                .expect("linking SKSE into loadout 1 should succeed");
+            vfs_a.disconnect().expect("loadout 1 should disconnect cleanly");
+        }
+
+        // Loadout 2: a brand new, empty destination — must stay vanilla.
+        let dest_b = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let out_file = work.path().join("out.txt");
+        let vfs_b =
+            Vfs::create(&dll, &instance_name("skyrim", 2)).expect("should connect (loadout 2)");
+        let cmd = format!(
+            "cmd.exe /c dir /b \"{}\" > \"{}\" 2>&1",
+            dest_b.path().display(),
+            out_file.display()
+        );
+        vfs_b
+            .run_hooked(&cmd, Duration::from_secs(10))
+            .expect("hooked dir should run");
+
+        let listing = fs::read_to_string(&out_file).unwrap();
+        assert!(
+            !listing.contains("skse64_loader.exe"),
+            "a fresh loadout must not see another loadout's mods: got {listing:?}"
+        );
+    }
+
+    /// Best-effort simulation, not a true crash test: a genuine process
+    /// crash (`TerminateProcess`, power loss) skips `Drop` entirely, which
+    /// this can't reproduce from inside a normal test. What it does confirm
+    /// is that `Vfs::create`'s disconnect-then-retry path (for our own
+    /// `modlab-` namespace) lets the *same* instance name be recreated
+    /// rather than getting permanently stuck.
+    #[test]
+    fn stale_instance_name_after_ungraceful_drop_can_be_recreated() {
+        let dll = real_dll_path();
+        if !dll.is_file() {
+            return;
+        }
+
+        let _guard = VFS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let name = instance_name("skyrim", 999);
+
+        {
+            let _vfs = Vfs::create(&dll, &name).expect("first connect should succeed");
+            // Deliberately no explicit disconnect() — falls out of scope and
+            // only `Drop`'s best-effort teardown runs.
+        }
+
+        let _vfs2 = Vfs::create(&dll, &name)
+            .expect("recreating the same instance name after a Drop-only teardown must not get permanently stuck");
+    }
+
+    /// Regression for the reported bug: after deploying mods, loading an
+    /// existing save reported every DLC (and even Skyrim.esm itself) as
+    /// missing. Base-game files that already exist at `data_dir` must be
+    /// part of the merged view even though no mod provides them.
+    #[test]
+    fn base_game_files_survive_mod_overlay() {
+        let dll = real_dll_path();
+        if !dll.is_file() {
+            return;
+        }
+
+        let dest = tempfile::tempdir().unwrap();
+        for base_file in ["Skyrim.esm", "Update.esm", "Dawnguard.esm", "Dragonborn.esm"] {
+            fs::write(dest.path().join(base_file), b"base game placeholder").unwrap();
+        }
+
+        let skyui = tempfile::tempdir().unwrap();
+        fs::write(skyui.path().join("SkyUI.esp"), b"skyui placeholder").unwrap();
+
+        let entries = vec![entry("SkyUI", skyui.path().to_path_buf(), 1)];
+        let work = tempfile::tempdir().unwrap();
+        let listing_file = work.path().join("listing.txt");
+        let base_readback = work.path().join("skyrim_esm.txt");
+
+        let _guard = VFS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let vfs = Vfs::create(&dll, "modlab_test_base_layer").expect("should connect to usvfs");
+        deploy_enabled_mods(&vfs, &entries, dest.path()).expect("deploy should succeed");
+
+        let list_cmd = format!(
+            "cmd.exe /c dir /b \"{}\" > \"{}\" 2>&1",
+            dest.path().display(),
+            listing_file.display()
+        );
+        vfs.run_hooked(&list_cmd, Duration::from_secs(10))
+            .expect("hooked dir should run");
+        let listing = fs::read_to_string(&listing_file).unwrap();
+        for expected in ["Skyrim.esm", "Update.esm", "Dawnguard.esm", "Dragonborn.esm", "SkyUI.esp"] {
+            assert!(
+                listing.contains(expected),
+                "merged view is missing {expected}: got {listing:?}"
+            );
+        }
+
+        let read_cmd = format!(
+            "cmd.exe /c type \"{}\\Skyrim.esm\" > \"{}\" 2>&1",
+            dest.path().display(),
+            base_readback.display()
+        );
+        vfs.run_hooked(&read_cmd, Duration::from_secs(10))
+            .expect("hooked type should run");
+        let content = fs::read_to_string(&base_readback).unwrap();
+        assert_eq!(
+            content.trim(),
+            "base game placeholder",
+            "base-game file must be present with real content, not just an empty listing entry"
+        );
+    }
+
+    /// The new base layer (data_dir linked onto itself) must not invert
+    /// existing overlay priority: a mod's file still wins over a
+    /// same-named base-game file.
+    #[test]
+    fn mod_overlay_still_wins_over_base_game_file_of_same_name() {
+        let dll = real_dll_path();
+        if !dll.is_file() {
+            return;
+        }
+
+        let dest = tempfile::tempdir().unwrap();
+        fs::write(dest.path().join("Skyrim.esm"), b"real-base-game").unwrap();
+
+        let patch_mod = tempfile::tempdir().unwrap();
+        fs::write(patch_mod.path().join("Skyrim.esm"), b"patched-by-mod").unwrap();
+
+        let entries = vec![entry("Patch", patch_mod.path().to_path_buf(), 1)];
+        let work = tempfile::tempdir().unwrap();
+        let out_file = work.path().join("out.txt");
+
+        let _guard = VFS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let vfs = Vfs::create(&dll, "modlab_test_base_priority").expect("should connect to usvfs");
+        deploy_enabled_mods(&vfs, &entries, dest.path()).expect("deploy should succeed");
+
+        let cmd = format!(
+            "cmd.exe /c type \"{}\\Skyrim.esm\" > \"{}\" 2>&1",
+            dest.path().display(),
+            out_file.display()
+        );
+        vfs.run_hooked(&cmd, Duration::from_secs(10))
+            .expect("hooked type should run");
+
+        let content = fs::read_to_string(&out_file).unwrap();
+        assert_eq!(
+            content.trim(),
+            "patched-by-mod",
+            "a mod's file must still win over a same-named base-game file"
         );
     }
 }

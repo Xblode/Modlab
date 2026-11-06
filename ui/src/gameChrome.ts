@@ -21,7 +21,11 @@ export type TabId =
   | "sante"
   | "packs"
   | "worlds"
-  | "servers";
+  | "servers"
+  /** The embedded browser. Not an adapter section: a shell-level tab the
+   * user opens from the strip's own globe button, so it never appears in
+   * `TAB_META` or in a game's `capabilities.sections`. */
+  | "web";
 
 export type TabDef = { id: TabId; label: string; icon: string };
 
@@ -51,6 +55,25 @@ export function tabsFor(capabilities: GameCapabilities | undefined | null): TabD
   return capabilities.sections
     .map((section) => TAB_META[section])
     .filter((tab): tab is TabDef => tab !== undefined);
+}
+
+/**
+ * Where the embedded browser lands when it is opened for a given game.
+ *
+ * A UI default, not a Core fact: the Core has no Provider and knows nothing
+ * about Nexus or CurseForge. The day a real Provider lands, "where this
+ * game's mods live" becomes its business and this table goes away.
+ */
+const BROWSE_HOME: Record<string, string> = {
+  skyrimse: "https://www.nexusmods.com/skyrimspecialedition",
+  minecraft: "https://www.curseforge.com/minecraft",
+};
+
+const BROWSE_FALLBACK = "https://www.nexusmods.com";
+
+export function browseHomeFor(gameId: string | null | undefined): string {
+  if (!gameId) return BROWSE_FALLBACK;
+  return BROWSE_HOME[gameId] ?? BROWSE_FALLBACK;
 }
 
 export type GameChrome = {

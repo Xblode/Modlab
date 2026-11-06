@@ -1,10 +1,15 @@
 //! Tauri host for the React shell. This crate is a *client* of
 //! `modlab-core` — same rule as the CLI: no private state, no game rules.
 
+pub mod browser;
+pub mod downloads;
+
 use modlab_ai::{diagnose, llm_phrase, rules_answer, LoadoutFacts, ModFact};
 use modlab_core::game_adapter::{GameAdapter, PathKind};
-use modlab_core::{conflicts, loadout, transaction, Core};
+use modlab_core::{conflicts, download, loadout, transaction, Core};
 use modlab_game_minecraft::MinecraftAdapter;
+use modlab_game_skyrim::fomod;
+use modlab_game_skyrim::installer::ArchiveShape;
 use modlab_game_skyrim::SkyrimAdapter;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -19,6 +24,12 @@ pub struct AppState {
     /// §6 lifecycle guard: the local LLM is never allowed to infer while a
     /// game session runs. `launch_skse` sets this for the whole session.
     game_running: AtomicBool,
+    /// Whichever game's page the embedded browser was last opened on — set
+    /// by `browser_show`. Downloads captured while browsing land under this
+    /// game's own subfolder (`downloads::on_requested`); `None` before the
+    /// browser has ever been opened, or for a page opened with no active
+    /// game selected.
+    active_game: Mutex<Option<String>>,
 }
 
 /// Resets `game_running` on drop — including on every early-return path.
@@ -48,9 +59,16 @@ pub struct LoadoutDto {
     pub name: String,
     /// Number of mods the Core holds for this loadout. Real count, not an
     /// estimate — the dashboard instance cards show it. Everything else the
-    /// maquette puts on those cards (revision, last played) has no Core
-    /// backing yet and is rendered as an explicit placeholder by the UI.
+    /// maquette puts on those cards (last played) has no Core backing yet
+    /// and is rendered as an explicit placeholder by the UI.
     pub mod_count: i64,
+    /// `"stable"`, `"beta"` or `"alpha"` — see `modlab_core::loadout::CHANNELS`.
+    pub channel: String,
+    /// How many snapshots this loadout has — `transaction::revision_count`.
+    /// Carried on every listed loadout (not just the active one) so a card
+    /// in the dashboard grid or the sidebar tree can show `r.N` without a
+    /// second round-trip per row.
+    pub revision: i64,
 }
 
 #[derive(Serialize)]
@@ -61,6 +79,16 @@ pub struct ModRowDto {
     pub source_path: String,
     pub enabled: bool,
     pub position: i64,
+    /// The version the mod's own source declared, when it declared one —
+    /// a Minecraft jar's manifest does, an MO2 import doesn't. `None`
+    /// renders as a dash; the table never invents one.
+    pub version: Option<String>,
+    /// `"archived"` (captured by the browser, nothing extracted yet — the
+    /// table shows it but it cannot be enabled) or `"installed"`.
+    pub status: String,
+    /// The human's own free tag, `None` until they type one.
+    pub category: Option<String>,
+    pub archive_path: Option<String>,
 }
 
 /// One mod's share of a loadout's file conflicts. `wins`/`loses` count the
@@ -182,6 +210,10 @@ fn entries_dto(core: &Core, loadout_id: i64) -> Result<Vec<ModRowDto>, String> {
                     source_path: r.source_path.display().to_string(),
                     enabled: r.enabled,
                     position: r.position,
+                    version: r.version,
+                    status: r.status,
+                    category: r.category,
+                    archive_path: r.archive_path.map(|p| p.display().to_string()),
                 })
                 .collect()
         })
@@ -200,11 +232,14 @@ fn get_shell_snapshot(
             let mod_count = loadout::entries(&core, l.id)
                 .map(|rows| rows.len() as i64)
                 .unwrap_or(0);
+            let revision = transaction::revision_count(&core, l.id).unwrap_or(0);
             LoadoutDto {
                 id: l.id,
                 game_id: l.game_id,
                 name: l.name,
                 mod_count,
+                channel: l.channel,
+                revision,
             }
         })
         .collect();
@@ -324,7 +359,46 @@ fn set_mod_enabled(
 ) -> Result<Vec<ModRowDto>, String> {
     let core = state.core.lock().map_err(|e| e.to_string())?;
     loadout::set_enabled(&core, loadout_id, mod_id, enabled).map_err(|e| e.to_string())?;
+    sync_engine_mod_direct_install(&core, loadout_id, mod_id, enabled)?;
     entries_dto(&core, loadout_id)
+}
+
+/// If `mod_id` is Skyrim's engine mod (SKSE), mirror its freshly toggled
+/// enabled state onto the real install root — see
+/// `modlab_game_skyrim::engine`'s doc for why this one mod is handled
+/// outside USVFS entirely. A no-op for every other mod, every other game,
+/// and an archived (not yet extracted) row: there is nothing to copy from
+/// yet in that last case.
+fn sync_engine_mod_direct_install(
+    core: &Core,
+    loadout_id: i64,
+    mod_id: i64,
+    enabled: bool,
+) -> Result<(), String> {
+    let is_skyrim = loadout::list(core)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .any(|l| l.id == loadout_id && l.game_id == SkyrimAdapter.id());
+    if !is_skyrim {
+        return Ok(());
+    }
+    let rows = loadout::entries(core, loadout_id).map_err(|e| e.to_string())?;
+    let Some(row) = rows.into_iter().find(|r| r.mod_id == mod_id) else {
+        return Ok(());
+    };
+    if row.status != loadout::STATUS_INSTALLED || !modlab_game_skyrim::engine::is_engine_mod(&row.name)
+    {
+        return Ok(());
+    }
+    let Some(install_root) = resolve_slot(core, &SkyrimAdapter, "root") else {
+        return Ok(());
+    };
+    let result = if enabled {
+        modlab_game_skyrim::engine::install_direct(&row.source_path, &install_root)
+    } else {
+        modlab_game_skyrim::engine::uninstall_direct(&row.source_path, &install_root)
+    };
+    result.map_err(|e| e.to_string())
 }
 
 /// File conflicts for a loadout — the same scan `modlab loadout-conflicts`
@@ -381,6 +455,197 @@ fn get_loadout_conflicts(
     loadout_conflicts(&core, loadout_id)
 }
 
+/// One dependency the shell knows to look for on a mod — today just "SKSE,
+/// if this mod isn't SKSE itself" for Skyrim. Deliberately structured as a
+/// list rather than a single flag: the real "known mods" registry (SKSE,
+/// Forge, Fabric… each with real metadata) is tracked as separate, bigger
+/// Core work — this is the stopgap that's easy to grow into it, one more
+/// `ModDependencyDto` at a time, without changing the shape callers see.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModDependencyDto {
+    pub name: String,
+    /// Whether the dependency is currently enabled in this same loadout.
+    pub satisfied: bool,
+}
+
+/// The Inspector's "Dépendances" section. Read-only (Lecture tier, §7.2).
+/// Every non-engine mod in a Skyrim loadout is reported as depending on
+/// SKSE — true for the near-totality of real Skyrim mods, and cheap enough
+/// to just always say rather than trying to detect it per mod from data
+/// nobody parses yet (FOMOD conditions, Nexus requirement lists).
+#[tauri::command]
+fn mod_dependencies(
+    state: State<AppState>,
+    loadout_id: i64,
+    mod_id: i64,
+) -> Result<Vec<ModDependencyDto>, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    let is_skyrim = loadout::list(&core)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .any(|l| l.id == loadout_id && l.game_id == SkyrimAdapter.id());
+    if !is_skyrim {
+        return Ok(Vec::new());
+    }
+    let rows = loadout::entries(&core, loadout_id).map_err(|e| e.to_string())?;
+    let Some(row) = rows.iter().find(|r| r.mod_id == mod_id) else {
+        return Ok(Vec::new());
+    };
+    if modlab_game_skyrim::engine::is_engine_mod(&row.name) {
+        return Ok(Vec::new());
+    }
+    let skse_enabled = rows
+        .iter()
+        .any(|r| r.enabled && modlab_game_skyrim::engine::is_engine_mod(&r.name));
+    Ok(vec![ModDependencyDto {
+        name: "SKSE".to_string(),
+        satisfied: skse_enabled,
+    }])
+}
+
+/// One resolved path in the merged view (Répertoire tab), or one plugin/
+/// archive file within it (Plugins/Archives tabs, filtered by extension).
+/// The Core's own "what the game would see in Data/" answer — computed the
+/// same way the conflict scan already is, just reporting every path
+/// instead of only the contested ones (`modlab_core::conflicts::merged_view`).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryEntryDto {
+    pub relative_path: String,
+    pub mod_id: i64,
+    pub mod_name: String,
+    pub contributor_count: i64,
+}
+
+fn merged_view_dto(core: &Core, loadout_id: i64) -> Result<Vec<DirectoryEntryDto>, String> {
+    let rows = loadout::entries(core, loadout_id).map_err(|e| e.to_string())?;
+    let mods: Vec<conflicts::ModFiles> = rows
+        .iter()
+        .filter(|r| r.enabled)
+        .filter_map(|r| {
+            conflicts::list_files_relative(&r.source_path)
+                .ok()
+                .map(|files| conflicts::ModFiles {
+                    mod_id: r.mod_id,
+                    name: r.name.clone(),
+                    files,
+                })
+        })
+        .collect();
+    Ok(conflicts::merged_view(&mods)
+        .into_iter()
+        .map(|f| DirectoryEntryDto {
+            relative_path: f.relative_path.display().to_string(),
+            mod_id: f.winner_mod_id,
+            mod_name: f.winner_mod_name,
+            contributor_count: i64::try_from(f.contributor_count).unwrap_or(i64::MAX),
+        })
+        .collect())
+}
+
+fn has_extension(path: &str, extensions: &[&str]) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| extensions.iter().any(|want| e.eq_ignore_ascii_case(want)))
+}
+
+/// The Répertoire tab: every path the enabled mods provide, resolved to
+/// whichever one wins — logically "what Data/ looks like", without needing
+/// a live USVFS session to ask the real one. Read-only (Lecture tier, §7.2).
+#[tauri::command]
+fn loadout_directory(
+    state: State<AppState>,
+    loadout_id: i64,
+) -> Result<Vec<DirectoryEntryDto>, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    merged_view_dto(&core, loadout_id)
+}
+
+/// The Plugins tab: the same merged view, filtered to `.esp`/`.esm`/`.esl`.
+/// This is the mod-position order the loadout itself stores, not a real
+/// LOOT-sorted load order and not master-dependency validation — neither
+/// exists yet (see `StubTab`'s former copy for this tab).
+#[tauri::command]
+fn loadout_plugins(
+    state: State<AppState>,
+    loadout_id: i64,
+) -> Result<Vec<DirectoryEntryDto>, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    Ok(merged_view_dto(&core, loadout_id)?
+        .into_iter()
+        .filter(|e| has_extension(&e.relative_path, &["esp", "esm", "esl"]))
+        .collect())
+}
+
+/// The Archives tab: the same merged view, filtered to `.bsa`/`.ba2`. Which
+/// files exist and which mod provides each — not an inventory of what's
+/// packed inside them, and not an integrity check (BSA/BA2 parsing doesn't
+/// exist here yet, see `StubTab`'s former copy for this tab).
+#[tauri::command]
+fn loadout_archives(
+    state: State<AppState>,
+    loadout_id: i64,
+) -> Result<Vec<DirectoryEntryDto>, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    Ok(merged_view_dto(&core, loadout_id)?
+        .into_iter()
+        .filter(|e| has_extension(&e.relative_path, &["bsa", "ba2"]))
+        .collect())
+}
+
+/// One save file, as found on disk — the Sauvegardes tab. `revision` is
+/// always `None` today: the Core has no way yet to know which loadout
+/// revision was active when a given save was written (see `StubTab`'s
+/// former copy for this tab) — this only ever lists what's on disk.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveFileDto {
+    pub file_name: String,
+    pub size_bytes: u64,
+    /// Unix seconds — no `chrono` dependency just for this, the client
+    /// formats it for display.
+    pub modified_at: Option<i64>,
+}
+
+/// Read-only (Lecture tier, §7.2). An empty list — missing saves folder or
+/// none written yet — is not an error, same rule `minecraft_content` follows.
+#[tauri::command]
+fn skyrim_saves(state: State<AppState>) -> Result<Vec<SaveFileDto>, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    let Some(dir) = resolve_slot(&core, &SkyrimAdapter, "saves_dir") else {
+        return Ok(Vec::new());
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Ok(Vec::new());
+    };
+    let mut saves: Vec<SaveFileDto> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .extension()
+                .and_then(|x| x.to_str())
+                .is_some_and(|x| x.eq_ignore_ascii_case("ess"))
+        })
+        .filter_map(|e| {
+            let meta = e.metadata().ok()?;
+            let modified_at = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+            Some(SaveFileDto {
+                file_name: e.file_name().to_string_lossy().into_owned(),
+                size_bytes: meta.len(),
+                modified_at,
+            })
+        })
+        .collect();
+    saves.sort_by(|a, b| b.file_name.cmp(&a.file_name));
+    Ok(saves)
+}
+
 /// Create an empty loadout through the Core. The UI never writes SQLite
 /// directly; it remains a client of the engine just like the CLI.
 #[tauri::command]
@@ -403,6 +668,601 @@ fn create_loadout(
         game_id,
         name: loadout.name,
         mod_count: 0,
+        // A brand-new loadout is always on the column's own default —
+        // there is no path that creates one on another channel yet.
+        channel: "stable".to_string(),
+        revision: 0,
+    })
+}
+
+/// Rename a loadout. Mutation réversible tier (§7.2) — a metadata edit, not
+/// a configuration change, so it doesn't go through the snapshot cycle.
+#[tauri::command]
+fn rename_loadout(state: State<AppState>, loadout_id: i64, name: String) -> Result<(), String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    loadout::rename(&core, loadout_id, &name).map_err(|e| e.to_string())
+}
+
+/// Move a loadout to a different channel ("stable" / "beta" / "alpha").
+#[tauri::command]
+fn set_loadout_channel(
+    state: State<AppState>,
+    loadout_id: i64,
+    channel: String,
+) -> Result<(), String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    loadout::set_channel(&core, loadout_id, &channel).map_err(|e| e.to_string())
+}
+
+/// Soft-delete a loadout — see `loadout::delete`. Reversible in the Core
+/// (the row and its entries survive) — `list_deleted_loadouts`/
+/// `restore_loadout` are the trash screen that undoes it.
+#[tauri::command]
+fn delete_loadout(state: State<AppState>, loadout_id: i64) -> Result<(), String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    loadout::delete(&core, loadout_id).map_err(|e| e.to_string())
+}
+
+/// One soft-deleted loadout, as the trash screen lists it — deliberately
+/// thinner than `LoadoutDto`: mod count and revision don't change while a
+/// loadout sits in the trash, so there is nothing to compute for them.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletedLoadoutDto {
+    pub id: i64,
+    pub game_id: String,
+    pub name: String,
+}
+
+#[tauri::command]
+fn list_deleted_loadouts(state: State<AppState>) -> Result<Vec<DeletedLoadoutDto>, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    Ok(loadout::list_trash(&core)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|l| DeletedLoadoutDto {
+            id: l.id,
+            game_id: l.game_id,
+            name: l.name,
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn restore_loadout(state: State<AppState>, loadout_id: i64) -> Result<(), String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    loadout::restore(&core, loadout_id).map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadDto {
+    pub id: i64,
+    pub url: String,
+    pub file_name: String,
+    pub path: String,
+    pub size_bytes: Option<i64>,
+    pub captured_at: String,
+    pub loadout_id: Option<i64>,
+    pub mod_id: Option<i64>,
+}
+
+/// Everything the browser has captured, newest first — the "dossier
+/// téléchargements" as a list rather than as a folder to go dig through.
+#[tauri::command]
+fn list_downloads(state: State<AppState>) -> Result<Vec<DownloadDto>, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    Ok(download::list(&core)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|d| DownloadDto {
+            id: d.id,
+            url: d.url,
+            file_name: d.file_name,
+            path: d.path.display().to_string(),
+            size_bytes: d.size_bytes,
+            captured_at: d.captured_at,
+            loadout_id: d.loadout_id,
+            mod_id: d.mod_id,
+        })
+        .collect())
+}
+
+/// File a capture into a loadout: it appears in the mod table right away,
+/// archived and disabled.
+#[tauri::command]
+fn attach_download(
+    state: State<AppState>,
+    download_id: i64,
+    loadout_id: i64,
+    category: Option<String>,
+) -> Result<i64, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    download::attach_to_loadout(&core, download_id, loadout_id, category.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_mod_category(
+    state: State<AppState>,
+    mod_id: i64,
+    category: Option<String>,
+) -> Result<(), String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    download::set_category(&core, mod_id, category.as_deref()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn rename_mod(
+    state: State<AppState>,
+    mod_id: i64,
+    loadout_id: i64,
+    name: String,
+) -> Result<Vec<ModRowDto>, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    download::rename(&core, mod_id, &name).map_err(|e| e.to_string())?;
+    entries_dto(&core, loadout_id)
+}
+
+/// Soft-delete only — see `download::remove`'s doc. Nothing on disk is
+/// touched, so there is no folder to clean up here.
+#[tauri::command]
+fn delete_mod(state: State<AppState>, mod_id: i64, loadout_id: i64) -> Result<Vec<ModRowDto>, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    download::remove(&core, mod_id).map_err(|e| e.to_string())?;
+    entries_dto(&core, loadout_id)
+}
+
+/// Revert an installed mod to its archive. The extracted copy this removes
+/// is disposable derived data — `install_archived_mod` already treats
+/// `mod_dest_dir` as something it can freely `remove_dir_all` and recreate,
+/// so doing the same here on the way back out is the same guarantee, not a
+/// new one. The archive itself is never touched.
+#[tauri::command]
+fn uninstall_mod(
+    state: State<AppState>,
+    mod_id: i64,
+    loadout_id: i64,
+) -> Result<Vec<ModRowDto>, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    download::uninstall(&core, mod_id).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_dir_all(mod_dest_dir(&state, mod_id));
+    entries_dto(&core, loadout_id)
+}
+
+/// Open Explorer at `path` — either the folder itself, or (`select: true`)
+/// the folder containing `path` with that file highlighted. Fire-and-forget
+/// by design: `explorer.exe` routinely exits non-zero even on success, so
+/// waiting on its status would misreport a perfectly normal open as failed.
+#[tauri::command]
+fn reveal_path(path: String, select: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let arg = if select {
+            format!("/select,{path}")
+        } else {
+            path
+        };
+        std::process::Command::new("explorer")
+            .arg(arg)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (path, select);
+        Err("ouverture du dossier disponible uniquement sous Windows".to_string())
+    }
+}
+
+/// Move an archived mod (not-yet-extracted only) to a different instance.
+#[tauri::command]
+fn reassign_mod(
+    state: State<AppState>,
+    mod_id: i64,
+    from_loadout_id: i64,
+    to_loadout_id: i64,
+) -> Result<Vec<ModRowDto>, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    download::reassign(&core, mod_id, from_loadout_id, to_loadout_id).map_err(|e| e.to_string())?;
+    entries_dto(&core, from_loadout_id)
+}
+
+#[tauri::command]
+fn mod_categories(state: State<AppState>) -> Result<Vec<String>, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    download::categories(&core).map_err(|e| e.to_string())
+}
+
+/// What an archive turns out to contain, once extracted to staging — the
+/// shell needs this to know whether it can install silently or must run the
+/// FOMOD wizard first.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchivePlanDto {
+    pub mod_id: i64,
+    pub name: String,
+    /// `"fomod"`, `"bare-data"`, `"wrapped-data"` or `"unknown"`.
+    pub shape: String,
+    /// True only for a FOMOD: nothing lands in the loadout until the human
+    /// has answered the installer's own questions.
+    pub needs_wizard: bool,
+    /// Where the archive was unpacked, and where inside that the real
+    /// content starts (an archive often wraps everything in one folder).
+    pub staged_path: String,
+    pub content_root: String,
+}
+
+fn shape_id(shape: &ArchiveShape) -> &'static str {
+    match shape {
+        ArchiveShape::Fomod => "fomod",
+        ArchiveShape::BareData => "bare-data",
+        ArchiveShape::WrappedData { .. } => "wrapped-data",
+        ArchiveShape::Unknown => "unknown",
+    }
+}
+
+/// Unpack an archived mod into the data root's staging area and classify it.
+/// Stops there on purpose: extracting is reversible and touches nothing the
+/// game can see, while *installing* is the step that needs a decision.
+#[tauri::command]
+fn inspect_archived_mod(state: State<AppState>, mod_id: i64) -> Result<ArchivePlanDto, String> {
+    let pending = {
+        let core = state.core.lock().map_err(|e| e.to_string())?;
+        download::archived_mod(&core, mod_id).map_err(|e| e.to_string())?
+    };
+
+    let staged = state.data_root.join("staging").join(mod_id.to_string());
+    if staged.exists() {
+        std::fs::remove_dir_all(&staged).map_err(|e| e.to_string())?;
+    }
+    std::fs::create_dir_all(&staged).map_err(|e| e.to_string())?;
+    modlab_core::archive::extract(&pending.archive_path, &staged).map_err(|e| e.to_string())?;
+
+    let detected = modlab_game_skyrim::installer::detect_shape(&staged)
+        .map_err(|e| format!("lecture de l'archive extraite : {e}"))?;
+
+    Ok(ArchivePlanDto {
+        mod_id,
+        name: pending.name,
+        shape: shape_id(&detected.shape).to_string(),
+        needs_wizard: detected.shape == ArchiveShape::Fomod,
+        staged_path: staged.display().to_string(),
+        content_root: detected.content_root.display().to_string(),
+    })
+}
+
+fn mod_dest_dir(state: &AppState, mod_id: i64) -> PathBuf {
+    state.data_root.join("mods").join(mod_id.to_string())
+}
+
+/// Common tail of every install path: record the extraction, drop the now
+/// useless staging copy, and hand back the loadout's fresh entry list so the
+/// table can show the flipped checkbox immediately.
+fn finish_install(
+    core: &Core,
+    state: &AppState,
+    mod_id: i64,
+    loadout_id: i64,
+    dest: &Path,
+) -> Result<Vec<ModRowDto>, String> {
+    download::mark_installed(core, mod_id, dest).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_dir_all(state.data_root.join("staging").join(mod_id.to_string()));
+    entries_dto(core, loadout_id)
+}
+
+/// Finish the install of a non-FOMOD archive: move the staged content into
+/// the loadout's own mod folder and flip the row to `installed`, which is
+/// what finally makes the checkbox real.
+#[tauri::command]
+fn install_archived_mod(
+    state: State<AppState>,
+    mod_id: i64,
+    loadout_id: i64,
+    content_root: String,
+) -> Result<Vec<ModRowDto>, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    // Refuses anything already installed — the guard lives in the Core so
+    // the CLI gets it too.
+    download::archived_mod(&core, mod_id).map_err(|e| e.to_string())?;
+
+    let dest = mod_dest_dir(&state, mod_id);
+    if dest.exists() {
+        std::fs::remove_dir_all(&dest).map_err(|e| e.to_string())?;
+    }
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    // A rename inside the same data root is atomic and instant; the copy
+    // fallback covers a staging area that landed on another volume.
+    if std::fs::rename(&content_root, &dest).is_err() {
+        copy_dir(Path::new(&content_root), &dest).map_err(|e| e.to_string())?;
+    }
+
+    finish_install(&core, &state, mod_id, loadout_id, &dest)
+}
+
+/// The FOMOD wizard's questions, translated to plain data — see
+/// `modlab_game_skyrim::fomod` for what is and isn't parsed.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FomodPluginDto {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FomodGroupDto {
+    pub id: String,
+    pub name: String,
+    /// `"select-exactly-one"`, `"select-at-most-one"`, `"select-at-least-one"`,
+    /// `"select-any"` or `"select-all"`.
+    pub group_type: String,
+    pub plugins: Vec<FomodPluginDto>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FomodStepDto {
+    pub id: String,
+    pub name: String,
+    pub groups: Vec<FomodGroupDto>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FomodModuleDto {
+    pub name: String,
+    pub steps: Vec<FomodStepDto>,
+}
+
+fn group_type_id(t: fomod::GroupType) -> &'static str {
+    match t {
+        fomod::GroupType::SelectExactlyOne => "select-exactly-one",
+        fomod::GroupType::SelectAtMostOne => "select-at-most-one",
+        fomod::GroupType::SelectAtLeastOne => "select-at-least-one",
+        fomod::GroupType::SelectAny => "select-any",
+        fomod::GroupType::SelectAll => "select-all",
+    }
+}
+
+fn read_fomod_module(content_root: &str) -> Result<fomod::Module, String> {
+    let root = Path::new(content_root);
+    let config_path = fomod::find_module_config(root)
+        .ok_or_else(|| "fomod/ModuleConfig.xml introuvable dans l'archive".to_string())?;
+    fomod::read_module_config(&config_path)
+}
+
+/// What the wizard asks, for a `content_root` `inspect_archived_mod` already
+/// reported as `"fomod"`.
+#[tauri::command]
+fn get_fomod_module(content_root: String) -> Result<FomodModuleDto, String> {
+    let module = read_fomod_module(&content_root)?;
+    Ok(FomodModuleDto {
+        name: module.name,
+        steps: module
+            .steps
+            .into_iter()
+            .map(|s| FomodStepDto {
+                id: s.id,
+                name: s.name,
+                groups: s
+                    .groups
+                    .into_iter()
+                    .map(|g| FomodGroupDto {
+                        id: g.id,
+                        name: g.name,
+                        group_type: group_type_id(g.group_type).to_string(),
+                        plugins: g
+                            .plugins
+                            .into_iter()
+                            .map(|p| FomodPluginDto {
+                                id: p.id,
+                                name: p.name,
+                                description: p.description,
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+    })
+}
+
+/// Finish a FOMOD install: `picked` is every plugin id the wizard's answers
+/// checked. Group rules are re-checked here — the wizard UI enforces them
+/// too, but a real mutation never trusts the frontend alone for that.
+#[tauri::command]
+fn install_fomod(
+    state: State<AppState>,
+    mod_id: i64,
+    loadout_id: i64,
+    content_root: String,
+    picked: Vec<String>,
+) -> Result<Vec<ModRowDto>, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    download::archived_mod(&core, mod_id).map_err(|e| e.to_string())?;
+
+    let module = read_fomod_module(&content_root)?;
+    for step in &module.steps {
+        for group in &step.groups {
+            let count = group.plugins.iter().filter(|p| picked.contains(&p.id)).count();
+            if !group.group_type.accepts(count) {
+                return Err(format!(
+                    "« {} » : sélection invalide pour le groupe « {} »",
+                    module.name, group.name
+                ));
+            }
+        }
+    }
+
+    let root = Path::new(&content_root);
+    let files = fomod::resolve(&module, &picked);
+    let dest = mod_dest_dir(&state, mod_id);
+    if dest.exists() {
+        std::fs::remove_dir_all(&dest).map_err(|e| e.to_string())?;
+    }
+    for mapping in &files {
+        let from = root.join(&mapping.source);
+        let to = dest.join(&mapping.destination);
+        if let Some(parent) = to.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        if from.is_dir() {
+            copy_dir(&from, &to).map_err(|e| e.to_string())?;
+        } else {
+            std::fs::copy(&from, &to)
+                .map_err(|e| format!("copie de {} : {e}", mapping.source.display()))?;
+        }
+    }
+
+    finish_install(&core, &state, mod_id, loadout_id, &dest)
+}
+
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
+/// Show the embedded browser at `rect` (CSS pixels, measured by the React
+/// side), creating it on the first call. `url` is only used for that first
+/// call — afterwards the browser keeps whatever page it is on, which is the
+/// point of a single persistent tab. `game_id` records which game this open
+/// belongs to, so a download captured while this page is up files under
+/// that game's own downloads subfolder (`downloads::on_requested`).
+#[tauri::command]
+fn browser_show(
+    state: State<AppState>,
+    app: tauri::AppHandle,
+    url: String,
+    rect: browser::Rect,
+    game_id: Option<String>,
+) -> Result<(), String> {
+    if let Ok(mut active) = state.active_game.lock() {
+        *active = game_id;
+    }
+    browser::show(&app, &url, rect)
+}
+
+#[tauri::command]
+fn browser_hide(app: tauri::AppHandle) -> Result<(), String> {
+    browser::hide(&app)
+}
+
+#[tauri::command]
+fn browser_navigate(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    browser::navigate(&app, &url)
+}
+
+/// `-1` back, `1` forward — the address bar's arrows.
+#[tauri::command]
+fn browser_go(app: tauri::AppHandle, delta: i32) -> Result<(), String> {
+    browser::go(&app, delta)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadsDirDto {
+    /// `<data root>/downloads` — where captures land absent any override.
+    pub default_path: String,
+    /// A human-set override, if any (Réglages → Général).
+    pub override_path: Option<String>,
+    /// `override_path` if set, `default_path` otherwise — the one value a
+    /// client actually displays.
+    pub effective: String,
+}
+
+fn downloads_dir_dto(state: &State<AppState>) -> Result<DownloadsDirDto, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    let default_path = downloads::default_downloads_root(&state.data_root)
+        .display()
+        .to_string();
+    let override_path = core
+        .game_path_override(downloads::SETTINGS_SCOPE, downloads::DOWNLOADS_DIR_SLOT)
+        .map_err(|e| e.to_string())?;
+    let effective = override_path.clone().unwrap_or_else(|| default_path.clone());
+    Ok(DownloadsDirDto {
+        default_path,
+        override_path,
+        effective,
+    })
+}
+
+/// Read-only (Lecture tier, §7.2): what Réglages → Général shows.
+#[tauri::command]
+fn downloads_dir_setting(state: State<AppState>) -> Result<DownloadsDirDto, String> {
+    downloads_dir_dto(&state)
+}
+
+/// Point the downloads folder at a location the human chose — Mutation
+/// réversible tier (§7.2): nothing already on disk moves, this only changes
+/// where the *next* capture lands, and clearing it undoes it instantly.
+#[tauri::command]
+fn set_downloads_dir_override(
+    state: State<AppState>,
+    path: String,
+) -> Result<DownloadsDirDto, String> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err("Le chemin ne peut pas être vide.".into());
+    }
+    {
+        let core = state.core.lock().map_err(|e| e.to_string())?;
+        core.set_game_path_override(downloads::SETTINGS_SCOPE, downloads::DOWNLOADS_DIR_SLOT, path)
+            .map_err(|e| e.to_string())?;
+    }
+    downloads_dir_dto(&state)
+}
+
+#[tauri::command]
+fn clear_downloads_dir_override(state: State<AppState>) -> Result<DownloadsDirDto, String> {
+    {
+        let core = state.core.lock().map_err(|e| e.to_string())?;
+        core.clear_game_path_override(downloads::SETTINGS_SCOPE, downloads::DOWNLOADS_DIR_SLOT)
+            .map_err(|e| e.to_string())?;
+    }
+    downloads_dir_dto(&state)
+}
+
+/// What `ActiveInstanceCard`'s version badge shows: how many revisions this
+/// loadout has (`r.{revision}`, `b.{revision}`… — the channel-letter prefix
+/// is the UI's own presentation, this DTO just carries the number) and
+/// whether the live state has drifted from the latest one. Read-only
+/// (Lecture tier, §7.2) and recomputed per call, same rule as
+/// `get_loadout_conflicts`: a cached dirty count would go stale the moment
+/// a mod is toggled elsewhere.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadoutVersionDto {
+    pub revision: i64,
+    pub dirty_plus: i64,
+    pub dirty_minus: i64,
+}
+
+#[tauri::command]
+fn get_loadout_version(
+    state: State<AppState>,
+    loadout_id: i64,
+) -> Result<LoadoutVersionDto, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    let revision = transaction::revision_count(&core, loadout_id).map_err(|e| e.to_string())?;
+    let dirty = transaction::dirty_summary(&core, loadout_id).map_err(|e| e.to_string())?;
+    Ok(LoadoutVersionDto {
+        revision,
+        dirty_plus: dirty.plus,
+        dirty_minus: dirty.minus,
     })
 }
 
@@ -438,9 +1298,119 @@ fn mo2_import(
             game_id: SkyrimAdapter.id().to_string(),
             name: created.name,
             mod_count: i64::try_from(imported).unwrap_or(i64::MAX),
+            channel: "stable".to_string(),
+            revision: 0,
         },
         imported,
     })
+}
+
+/// Where a Minecraft command should act: the human's override from
+/// Réglages → Jeux if there is one, else the adapter's own detection.
+/// Refuses rather than falling back to a guess — writing jars into the
+/// wrong folder is not a mistake worth being clever about.
+fn minecraft_root(core: &Core) -> Result<PathBuf, String> {
+    resolve_slot(core, &MinecraftAdapter, "root").ok_or_else(|| {
+        "Minecraft introuvable — renseigne son dossier dans Réglages → Jeux".to_string()
+    })
+}
+
+/// Import an existing modded instance's `mods/` folder into a new loadout.
+/// Read-only on the game's side: not a jar is moved. Same shape as
+/// `mo2_import`, and like it the real work lives in the adapter so the CLI
+/// and the shell cannot drift apart.
+#[tauri::command]
+fn minecraft_import_instance(
+    state: State<AppState>,
+    name: String,
+) -> Result<Mo2ImportResultDto, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Donne un nom à l'instance.".into());
+    }
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    let root = minecraft_root(&core)?;
+    let (created, imported) =
+        modlab_game_minecraft::instance::import_instance(&core, &root, name)?;
+    Ok(Mo2ImportResultDto {
+        loadout: LoadoutDto {
+            id: created.id,
+            game_id: MinecraftAdapter.id().to_string(),
+            name: created.name,
+            mod_count: i64::try_from(imported).unwrap_or(i64::MAX),
+            channel: "stable".to_string(),
+            revision: 0,
+        },
+        imported,
+    })
+}
+
+/// Install one downloaded `.jar` into the instance's `mods/` folder and
+/// register it in the loadout. A real write into the game's own folder —
+/// see `instance::install_jar` for what it does to stay safe (staged copy,
+/// refuses to overwrite, removes the file again if the database write
+/// fails). Mutation réversible tier (§7.2): the client confirms first.
+#[tauri::command]
+fn minecraft_install_jar(
+    state: State<AppState>,
+    loadout_id: i64,
+    jar_path: String,
+) -> Result<Vec<ModRowDto>, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    let root = minecraft_root(&core)?;
+    modlab_game_minecraft::instance::install_jar(
+        &core,
+        loadout_id,
+        Path::new(jar_path.trim()),
+        &root,
+    )?;
+    entries_dto(&core, loadout_id)
+}
+
+/// What a Minecraft instance holds besides its mods — what the Packs and
+/// Worlds views list. Plain directory listings, nothing parsed.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MinecraftContentDto {
+    pub resource_packs: Vec<String>,
+    pub shader_packs: Vec<String>,
+    pub worlds: Vec<String>,
+    /// Whether `servers.dat` exists. Its contents are **not** read: that
+    /// file is binary NBT, and ModLab has no NBT parser — the Servers view
+    /// says so out loud rather than showing an empty list that would read
+    /// as "you have no servers".
+    pub servers_dat_present: bool,
+}
+
+/// List an instance's resource packs, shader packs and worlds. Read-only
+/// (Lecture tier, §7.2). A missing folder is an empty list, not an error —
+/// a fresh instance simply has none yet.
+#[tauri::command]
+fn minecraft_content(state: State<AppState>) -> Result<MinecraftContentDto, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    let root = minecraft_root(&core)?;
+    Ok(MinecraftContentDto {
+        resource_packs: list_dir_names(&root.join("resourcepacks")),
+        shader_packs: list_dir_names(&root.join("shaderpacks")),
+        worlds: list_dir_names(&root.join("saves")),
+        servers_dat_present: root.join("servers.dat").is_file(),
+    })
+}
+
+/// Entry names directly inside `dir`, sorted, hidden entries skipped.
+/// Unreadable or missing directory → empty list: these feed views that
+/// should show "nothing here" rather than an error nobody can act on.
+fn list_dir_names(dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| !n.starts_with('.'))
+        .collect();
+    names.sort_by_key(|n| n.to_lowercase());
+    names
 }
 
 #[tauri::command]
@@ -469,28 +1439,154 @@ fn launch_skse(state: State<AppState>, loadout_id: i64) -> Result<(), String> {
             let rows = loadout::entries(&core, loadout_id).map_err(|e| e.to_string())?;
             (install_root, usvfs_dll, data_dir, rows)
         };
+        // SKSE is deployed for real, directly into `install_root`, by
+        // `sync_engine_mod_direct_install` whenever its row is enabled —
+        // never through USVFS (see `modlab_game_skyrim::engine`'s doc for
+        // why). Excluding it from the virtual deployment here is what keeps
+        // the two paths from fighting over the same files.
+        let vfs_rows: Vec<_> = rows
+            .iter()
+            .filter(|r| !modlab_game_skyrim::engine::is_engine_mod(&r.name))
+            .cloned()
+            .collect();
+
+        // SKSE not installed (no loader sitting in the install root) is not
+        // an error — it means a vanilla launch. Every enabled mod's files
+        // still need USVFS to be visible to whichever executable runs, so
+        // the virtual session below is built the same way either way.
         let loader = install_root.join("skse64_loader.exe");
-        if !loader.is_file() {
+        let vanilla_exe = install_root.join("SkyrimSE.exe");
+        let exe_to_launch = if loader.is_file() {
+            loader
+        } else if vanilla_exe.is_file() {
+            vanilla_exe
+        } else {
             return Err(format!(
-                "skse64_loader.exe introuvable dans {}",
+                "Ni skse64_loader.exe ni SkyrimSE.exe trouvés dans {}",
                 install_root.display()
             ));
-        }
+        };
         // The whole session counts as "game running" (§6): while it lasts,
         // `ai_ask` refuses to run the local LLM.
         state.game_running.store(true, Ordering::SeqCst);
         let _session = GameSessionGuard(&state.game_running);
-        let vfs = modlab_game_skyrim::usvfs::Vfs::create(&usvfs_dll, "modlab")
+
+        // Deterministic per-loadout name, not a shared literal: two
+        // loadouts launching independently must never reconnect to the
+        // same VFS session (see modlab_game_skyrim::usvfs::instance_name's
+        // doc — this is what keeps a fresh loadout from appearing to
+        // already have another loadout's mods installed).
+        let vfs_instance_name = modlab_game_skyrim::usvfs::instance_name("skyrim", loadout_id);
+        let mut vfs = modlab_game_skyrim::usvfs::Vfs::create(&usvfs_dll, &vfs_instance_name)
             .map_err(|e| e.to_string())?;
-        modlab_game_skyrim::usvfs::deploy_enabled_mods(&vfs, &rows, &data_dir)
+        {
+            let core = state.core.lock().map_err(|e| e.to_string())?;
+            let mut tx = transaction::Transaction::new(&core, "skyrim.usvfs");
+            tx.step(format!("usvfs instance '{vfs_instance_name}' connected"));
+            tx.commit().map_err(|e| e.to_string())?;
+        }
+        modlab_game_skyrim::usvfs::deploy_enabled_mods(&vfs, &vfs_rows, &data_dir)
             .map_err(|e| e.to_string())?;
-        let cmd = format!("\"{}\"", loader.display());
+        let cmd = format!("\"{}\"", exe_to_launch.display());
         vfs.launch_hooked_visible(&cmd, &install_root)
             .map_err(|e| e.to_string())?;
         vfs.wait_for_session_end(Duration::from_secs(2), Duration::from_secs(60))
             .map_err(|e| e.to_string())?;
+
+        // Explicit, verified disconnect rather than leaving it to `Drop`:
+        // `Drop` can't propagate an error, so a teardown that silently
+        // fails there could leave a stale session for the next launch to
+        // collide with.
+        let disconnect_result = vfs.disconnect();
+        {
+            let core = state.core.lock().map_err(|e| e.to_string())?;
+            let step = match &disconnect_result {
+                Ok(()) => format!("usvfs instance '{vfs_instance_name}' disconnected (confirmed)"),
+                Err(e) => format!("usvfs instance '{vfs_instance_name}' disconnect FAILED: {e}"),
+            };
+            let mut tx = transaction::Transaction::new(&core, "skyrim.usvfs");
+            tx.step(step);
+            tx.commit().map_err(|e| e.to_string())?;
+        }
+        disconnect_result.map_err(|e| e.to_string())?;
         Ok(())
     }
+}
+
+#[derive(Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphicsSettingsDto {
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub fullscreen: Option<bool>,
+    pub vsync: Option<bool>,
+    pub antialiasing: Option<u32>,
+    pub fxaa: Option<bool>,
+}
+
+impl From<modlab_game_skyrim::graphics::GraphicsSettings> for GraphicsSettingsDto {
+    fn from(s: modlab_game_skyrim::graphics::GraphicsSettings) -> Self {
+        Self {
+            width: s.width,
+            height: s.height,
+            fullscreen: s.fullscreen,
+            vsync: s.vsync,
+            antialiasing: s.antialiasing,
+            fxaa: s.fxaa,
+        }
+    }
+}
+
+impl From<GraphicsSettingsDto> for modlab_game_skyrim::graphics::GraphicsSettings {
+    fn from(s: GraphicsSettingsDto) -> Self {
+        Self {
+            width: s.width,
+            height: s.height,
+            fullscreen: s.fullscreen,
+            vsync: s.vsync,
+            antialiasing: s.antialiasing,
+            fxaa: s.fxaa,
+        }
+    }
+}
+
+fn prefs_ini_path(core: &Core) -> Result<PathBuf, String> {
+    resolve_slot(core, &SkyrimAdapter, "prefs_ini").ok_or_else(|| {
+        "SkyrimPrefs.ini introuvable — lance le jeu au moins une fois pour qu'il le crée, \
+         ou renseigne son chemin dans Réglages → Jeux"
+            .to_string()
+    })
+}
+
+/// The dashboard's "Graphismes" quick action — read-only (Lecture tier,
+/// §7.2). An empty settings object (every field `None`) means the file
+/// exists but doesn't set that key yet — the dialog shows the game's own
+/// hardcoded default in that case, not a blank field.
+#[tauri::command]
+fn skyrim_graphics_settings(state: State<AppState>) -> Result<GraphicsSettingsDto, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    let path = prefs_ini_path(&core)?;
+    modlab_game_skyrim::graphics::read(&path)
+        .map(GraphicsSettingsDto::from)
+        .map_err(|e| e.to_string())
+}
+
+/// Mutation réversible tier (§7.2): writes straight to `SkyrimPrefs.ini`,
+/// but only the handful of keys this dialog exposes, and every other line
+/// in the file is preserved untouched (see `modlab_game_skyrim::graphics`'s
+/// doc) — nothing here can corrupt an install, and the previous values are
+/// always still readable/restorable by hand if a human wants to undo it.
+#[tauri::command]
+fn set_skyrim_graphics_settings(
+    state: State<AppState>,
+    settings: GraphicsSettingsDto,
+) -> Result<GraphicsSettingsDto, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    let path = prefs_ini_path(&core)?;
+    modlab_game_skyrim::graphics::write(&path, &settings.into()).map_err(|e| e.to_string())?;
+    modlab_game_skyrim::graphics::read(&path)
+        .map(GraphicsSettingsDto::from)
+        .map_err(|e| e.to_string())
 }
 
 /// What the AI layer is allowed to know about a loadout — the same facts the
@@ -631,6 +1727,10 @@ pub struct TransactionDto {
     pub occurred_at: String,
     pub kind: String,
     pub steps: Vec<String>,
+    /// Which loadout this is about — only populated for snapshot/rollback
+    /// entries, whose payload structurally carries it. `null` for everything
+    /// else; a client filtering "this loadout's revisions" must expect gaps.
+    pub loadout_id: Option<i64>,
 }
 
 #[tauri::command]
@@ -648,6 +1748,7 @@ fn get_transactions(
             occurred_at: r.occurred_at,
             kind: r.kind,
             steps: r.steps,
+            loadout_id: r.loadout_id,
         })
         .collect())
 }
@@ -679,6 +1780,15 @@ pub fn run() {
             core: Mutex::new(core),
             data_root,
             game_running: AtomicBool::new(false),
+            active_game: Mutex::new(None),
+        })
+        .setup(|app| {
+            // Must happen here, before the event loop runs — see
+            // `browser::create_parked` for why lazy creation deadlocks.
+            if let Err(e) = browser::create_parked(app.handle()) {
+                eprintln!("[browser] indisponible : {e}");
+            }
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_shell_snapshot,
@@ -687,9 +1797,45 @@ pub fn run() {
             clear_game_path_override,
             set_mod_enabled,
             get_loadout_conflicts,
+            mod_dependencies,
+            loadout_directory,
+            loadout_plugins,
+            loadout_archives,
+            skyrim_saves,
             create_loadout,
+            rename_loadout,
+            set_loadout_channel,
+            delete_loadout,
+            list_deleted_loadouts,
+            restore_loadout,
+            get_loadout_version,
             mo2_import,
+            minecraft_import_instance,
+            minecraft_install_jar,
+            minecraft_content,
+            browser_show,
+            browser_hide,
+            browser_navigate,
+            browser_go,
+            downloads_dir_setting,
+            set_downloads_dir_override,
+            clear_downloads_dir_override,
+            list_downloads,
+            attach_download,
+            set_mod_category,
+            rename_mod,
+            delete_mod,
+            uninstall_mod,
+            reveal_path,
+            mod_categories,
+            reassign_mod,
+            inspect_archived_mod,
+            install_archived_mod,
+            get_fomod_module,
+            install_fomod,
             launch_skse,
+            skyrim_graphics_settings,
+            set_skyrim_graphics_settings,
             ai_ask,
             get_transactions,
             snapshot_loadout,
@@ -726,16 +1872,19 @@ mod tests {
                     name: "Mod A".into(),
                     source_path: dir_a.clone(),
                     enabled: true,
+                    version: None,
                 },
                 ImportEntry {
                     name: "Mod B".into(),
                     source_path: dir_b.clone(),
                     enabled: true,
+                    version: None,
                 },
                 ImportEntry {
                     name: "Mod Off".into(),
                     source_path: dir_a.join("nope").join("deeper"),
                     enabled: false,
+                    version: None,
                 },
             ],
         )
@@ -811,16 +1960,19 @@ mod tests {
                     name: "Lux".into(),
                     source_path: losing.clone(),
                     enabled: true,
+                    version: None,
                 },
                 ImportEntry {
                     name: "Disabled Overhaul".into(),
                     source_path: disabled.clone(),
                     enabled: false,
+                    version: None,
                 },
                 ImportEntry {
                     name: "SkyUI".into(),
                     source_path: winning.clone(),
                     enabled: true,
+                    version: None,
                 },
             ],
         )
@@ -860,11 +2012,13 @@ mod tests {
                     name: "Present".into(),
                     source_path: present.clone(),
                     enabled: true,
+                    version: None,
                 },
                 ImportEntry {
                     name: "Renamed Away".into(),
                     source_path: gone,
                     enabled: true,
+                    version: None,
                 },
             ],
         )

@@ -24,8 +24,12 @@ modlab-game-skyrim = { path = "../modlab-game-skyrim" }
 modlab-game-minecraft = { path = "../modlab-game-minecraft" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2", features = [] }
+# `unstable` is what gates multiwebview (`Window::add_child`): the embedded
+# browser tab is a real second WebView2 control layered over the shell's own,
+# not an iframe — Nexus sends `X-Frame-Options`, so an iframe cannot work.
+tauri = { version = "2", features = ["unstable"] }
 thiserror = "1"
+url = "2"
 
 [features]
 # Ships the llama.cpp inference backend (ADR 0004) — off by default because it

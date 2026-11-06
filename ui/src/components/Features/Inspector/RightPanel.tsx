@@ -2,9 +2,10 @@ import type { FormEvent } from "react";
 import type { ModConflicts, ModRow } from "../../../api";
 import { IconButton, Panel } from "../../ui";
 import { ChatPanel, type ChatMsg } from "../Chat/ChatPanel";
+import { ConfigPane } from "./ConfigPane";
 import { ModInspector } from "./ModInspector";
 
-export type RightTab = "info" | "claude";
+export type RightTab = "info" | "config" | "claude";
 
 /**
  * The floating right panel: the selected mod's inspector, or the local AI
@@ -16,6 +17,7 @@ export function RightPanel({
   onClose,
   mod,
   conflicts,
+  loadoutId,
   chat,
   llm,
   draft,
@@ -28,6 +30,7 @@ export function RightPanel({
   onClose: () => void;
   mod: ModRow | null;
   conflicts: ModConflicts | undefined;
+  loadoutId: number | null;
   chat: ChatMsg[];
   llm: string;
   draft: string;
@@ -51,6 +54,14 @@ export function RightPanel({
           <button
             className="tab"
             type="button"
+            aria-selected={tab === "config"}
+            onClick={() => onTab("config")}
+          >
+            Config
+          </button>
+          <button
+            className="tab"
+            type="button"
             aria-selected={tab === "claude"}
             onClick={() => onTab("claude")}
           >
@@ -62,7 +73,9 @@ export function RightPanel({
       }
     >
       {tab === "info" ? (
-        <ModInspector mod={mod} conflicts={conflicts} />
+        <ModInspector mod={mod} conflicts={conflicts} loadoutId={loadoutId} />
+      ) : tab === "config" ? (
+        <ConfigPane mod={mod} />
       ) : (
         <ChatPanel
           messages={chat}

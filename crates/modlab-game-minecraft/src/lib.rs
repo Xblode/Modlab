@@ -3,9 +3,12 @@
 //! vanilla launcher put instances — none of that belongs in `modlab-core`.
 //! See `docs/01-architecture-decidee.md` §3.1.
 //!
-//! Phase 2 first slice: detection only. Install, CurseForge/Modrinth
-//! Providers, and launch come once the UI can actually show a second game
-//! next to Skyrim — that is the point of this crate existing now.
+//! Detection lives here; reading and writing an instance's `mods/` folder
+//! lives in `instance`. Still deliberately absent, and tracked as such:
+//! the CurseForge/Modrinth Providers (need an official API key) and
+//! launching the game (needs a launcher decision) — neither is guessed at.
+
+pub mod instance;
 
 use modlab_core::game_adapter::{GameAdapter, GameInstall};
 use std::path::{Path, PathBuf};
@@ -25,7 +28,11 @@ impl GameAdapter for MinecraftAdapter {
             deployment_label: "dossier mods/",
             script_extender: None,
             load_order_tool: None,
-            import_source: None,
+            // Not an external manager like MO2 — Minecraft's own detected
+            // instance *is* the migration source: its `mods/` folder is
+            // already the real modlist. Clients map this id to a label the
+            // same way they map any other capability id (ADR 0005).
+            import_source: Some("minecraft-instance"),
         }
     }
 
@@ -124,9 +131,10 @@ mod tests {
         assert_eq!(caps.script_extender, None);
         assert!(caps.sections.contains(&GameSection::Worlds));
         assert!(caps.load_order_tool.is_none());
-        assert!(
-            caps.import_source.is_none(),
-            "Minecraft has no MO2-style manager to migrate from yet"
+        assert_eq!(
+            caps.import_source,
+            Some("minecraft-instance"),
+            "the detected instance's own mods/ folder is the migration source"
         );
     }
 

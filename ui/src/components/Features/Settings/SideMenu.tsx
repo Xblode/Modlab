@@ -7,11 +7,12 @@ import type { SettingsMenu } from "./SettingsPane";
  * VS Code…) groups them: everyday preferences first, the more specialised
  * ModLab-platform sections after. Purely a nav model — every id maps to a
  * `SettingsPane` branch, nothing here decides what a section contains.
+ * Profil and Communauté are not here: they're identity/social, not
+ * configuration — see `SidebarProfile` and `CommunityMenu`.
  */
 const SETTINGS_GROUPS: readonly (readonly (readonly [SettingsMenu, string, string])[])[] = [
   [
     ["general", "Général", "sliders"],
-    ["profile", "Profil", "user"],
     ["appearance", "Apparence", "palette"],
     ["notifications", "Notifications", "alert"],
   ],

@@ -1,6 +1,19 @@
-import { StubTab } from "../../StubTab";
+import { getLoadoutPlugins } from "../../api";
+import { DirectoryList } from "../../components/Features/Directory/DirectoryList";
 
-/** Not wired to the Core yet — `StubTab` says why, in the tab's own words. */
-export default function PluginsPage() {
-  return <StubTab tab="plugins" />;
+/**
+ * Every `.esp`/`.esm`/`.esl` the enabled mods provide, resolved to whichever
+ * mod wins when more than one provides the same file. Mod-position order,
+ * not a validated LOOT load order, and no missing-master detection — that
+ * still doesn't exist (see `docs`/ClickUp for the tracked follow-up).
+ */
+export default function PluginsPage({ loadoutId }: { loadoutId: number | null }) {
+  return (
+    <DirectoryList
+      loadoutId={loadoutId}
+      fetchEntries={getLoadoutPlugins}
+      emptyTitle="Aucun plugin"
+      emptyBody="Aucun .esp/.esm/.esl trouvé dans les mods activés de cette instance."
+    />
+  );
 }

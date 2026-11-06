@@ -8,6 +8,7 @@ description = "The Skyrim Game Adapter — everything Bethesda-modding-specific 
 [dependencies]
 modlab-core = { path = "../modlab-core" }
 thiserror = "1"
+roxmltree = "0.20"
 
 [target.'cfg(windows)'.dependencies]
 libloading = "0.8"

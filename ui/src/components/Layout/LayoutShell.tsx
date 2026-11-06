@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { TabDef, TabId } from "../../gameChrome";
 import { Titlebar } from "./Titlebar";
 
 /**
@@ -18,6 +19,17 @@ export function LayoutShell({
   dock,
   overlays,
   children,
+  webActive,
+  aiActive,
+  onOpenWeb,
+  onOpenAi,
+  onOpenConsole,
+  hideTabs,
+  tabs,
+  currentTab,
+  modCount,
+  webOpen,
+  onSelectTab,
 }: {
   rightOpen: boolean;
   running: boolean;
@@ -27,15 +39,42 @@ export function LayoutShell({
   dock: ReactNode;
   /** Toasts, palette, modals — anything that floats above the frame. */
   overlays?: ReactNode;
-  /** The sheet's contents: the tab strip and the active page. */
+  /** The sheet's contents: the active page — the tab strip itself now lives
+   * in the title bar, not here. */
   children: ReactNode;
+  webActive: boolean;
+  aiActive: boolean;
+  onOpenWeb: () => void;
+  onOpenAi: () => void;
+  onOpenConsole: () => void;
+  /** Hides the title bar's tab strip — for a page not tied to any game tab
+   * (Réglages, Profil, Communauté), showing the previous game's tabs would
+   * be stale, not helpful. */
+  hideTabs?: boolean;
+  tabs: TabDef[];
+  currentTab: TabId;
+  modCount: number;
+  webOpen: boolean;
+  onSelectTab: (tab: TabId) => void;
 }) {
   return (
     <div className={`shell-root ${rightOpen ? "" : "no-right"} ${running ? "running" : ""}`}>
       {sidebar}
 
       <div className="shell-col">
-        <Titlebar />
+        <Titlebar
+          hideTabs={hideTabs}
+          tabs={tabs}
+          currentTab={currentTab}
+          modCount={modCount}
+          webOpen={webOpen}
+          onSelectTab={onSelectTab}
+          webActive={webActive}
+          aiActive={aiActive}
+          onOpenWeb={onOpenWeb}
+          onOpenAi={onOpenAi}
+          onOpenConsole={onOpenConsole}
+        />
 
         <div className="app">
           <div className="main">

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { Ico } from "../../Ico";
+import { TabStrip } from "../Features/Tabs/TabStrip";
+import type { TabDef, TabId } from "../../gameChrome";
 
 /** Same guard as `api.ts`: outside the Tauri shell there is no window to drive. */
 function isTauri(): boolean {
@@ -50,11 +52,38 @@ function useMaximized(): [boolean, () => void] {
 
 /**
  * The window's own title bar — Windows has none of its own
- * (`decorations: false`). Just the drag region and the three window
- * controls for now: no app menu (back in the sidebar, its original spot)
- * and no title/logo.
+ * (`decorations: false`). The page's own tab strip lives here too (so it
+ * never costs its own row), then the drag region, the shell-wide action
+ * buttons (browser, IA, console — moved here from the tab strip so they
+ * stay reachable no matter what page is open) and the three window
+ * controls: no app menu (back in the sidebar, its original spot) and no
+ * title/logo.
  */
-export function Titlebar() {
+export function Titlebar({
+  hideTabs,
+  tabs,
+  currentTab,
+  modCount,
+  webOpen,
+  onSelectTab,
+  webActive,
+  aiActive,
+  onOpenWeb,
+  onOpenAi,
+  onOpenConsole,
+}: {
+  hideTabs?: boolean;
+  tabs: TabDef[];
+  currentTab: TabId;
+  modCount: number;
+  webOpen: boolean;
+  onSelectTab: (tab: TabId) => void;
+  webActive: boolean;
+  aiActive: boolean;
+  onOpenWeb: () => void;
+  onOpenAi: () => void;
+  onOpenConsole: () => void;
+}) {
   const [maximized, toggleMaximize] = useMaximized();
 
   function minimize() {
@@ -69,11 +98,50 @@ export function Titlebar() {
 
   return (
     <header className="titlebar">
+      {hideTabs ? null : (
+        <TabStrip
+          tabs={tabs}
+          currentTab={currentTab}
+          modCount={modCount}
+          webOpen={webOpen}
+          onSelect={onSelectTab}
+        />
+      )}
+
       {/* Everything not interactive drags the window; the controls
           deliberately do not carry the attribute, so they stay clickable
           instead of starting a drag. Double-click is Tauri's own maximize
           toggle on a drag region. */}
       <div className="tb-drag" data-tauri-drag-region />
+
+      <div className="tb-actions">
+        <button
+          type="button"
+          className="ti"
+          title="Ouvrir le navigateur intégré"
+          aria-pressed={webActive}
+          onClick={onOpenWeb}
+        >
+          <Ico name="globe" />
+        </button>
+        <button
+          type="button"
+          className="ti claude"
+          aria-pressed={aiActive}
+          onClick={onOpenAi}
+        >
+          <Ico name="sparkle" />
+          <span className="n">IA</span>
+        </button>
+        <button
+          type="button"
+          className="ti"
+          title="Console"
+          onClick={onOpenConsole}
+        >
+          <Ico name="term" />
+        </button>
+      </div>
 
       <div className="tb-controls">
         <button

@@ -1,0 +1,57 @@
+# Règles de projet – Mod Manager Rust/Tauri
+
+## Généralités
+- Cline démarre en **mode Plan** (lecture seule). En mode Plan, l’agent peut analyser le code et proposer une stratégie, **sans modifier ni exécuter de commandes**.  
+- Passer en **mode Act** uniquement après validation du plan. Activer les checkpoints avant de coder pour pouvoir faire un rollback si besoin.  
+- Tout changement de code doit faire l’objet d’un **commit git** avec message clair (voir section Git). Utiliser des **branches** pour les nouvelles fonctionnalités (`feature/`) ou corrections (`fix/`).  
+- Interdire à Cline de naviguer ou éditer hors du workspace du projet (pas de modifications dans `.git/`, pas de commandes sudo).
+
+## Sécurité et frontières (Tauri)
+- Respecter le principe des **frontières de confiance** : le cœur en Rust peut tout faire, le frontend web via IPC contrôlé. Ne pas exposer de commandes système non filtrées côté UI.  
+- Toute donnée reçue du frontend doit être strictement validée avant usage (typage, taille, champs attendus). Ne pas passer de données brutes du DOM au backend sans vérification.  
+- Ne jamais désactiver les permissions Tauri de manière globale. Déclarer explicitement les commandes IPC autorisées dans `tauri.conf.json`.  
+- Pour les plugins *GameAdapter*, respecter les interfaces définies (ne pas inventer de nouvelles méthodes sans mise à jour coordonnée de l’architecture).
+
+## Planification (Plan mode)
+- Pendant la planification, nommer explicitement les fichiers/modules à modifier et décrire la solution étape par étape. Exiger de Cline qu’il liste les tests à exécuter et les cas à vérifier.  
+- Documenter tout changement d’architecture en commentaire (ex : création de nouveau module Rust, ajout de table SQLite).  
+- Si une information manque (format d’un fichier de sauvegarde, nom d’une fonction existante…), **demander** plutôt que spéculer.
+
+## Vérifications obligatoires
+- Avant tout commit de code Rust, exécuter : `cargo check && cargo test`. Les tests doivent réussir sans erreur.  
+- Avant tout commit de code frontend, exécuter : `npm install` (si nouvelles dépendances) puis `npm run build`. Corriger les erreurs de build ou lint.  
+- Interdire tout commit si `cargo check` ou `npm run build` échoue.  
+- Exécuter `cargo fmt -- --check` et `cargo clippy` dans le CI pour valider le style et la qualité du code.
+
+## Permissions et exécution
+- **Lecture de fichiers** : autorisée pour tous les fichiers du projet (Cline peut lire le code, les docs, etc.).  
+- **Écriture de fichiers** : toujours demander approbation. Cline ne doit modifier des fichiers que dans le workspace (`src-tauri/`, `src/frontend/`, fichiers de config).  
+- **Commandes Shell** : autorisées *uniquement* pour la compilation/tests (`cargo`, `npm run build`) et *toujours* après approbation explicite. Aucune commande Internet/`curl`/`pip`/`npm` sans confirmation.  
+- **Plans d’action** : exécuter systématiquement les tâches listées dans le plan (par exemple, exécuter les commandes identifiées comme TODO).
+
+## Gestion des dépendances
+- Ne pas ajouter de nouvelles dépendances sans qu’elles aient été validées. Exemple : pour SQLite, utiliser `rusqlite` avec l’option `bundled` afin d’inclure la bonne version de la bibliothèque SQLite.  
+- Tout changement dans `Cargo.toml` ou `package.json` doit déclencher un build complet (`cargo test`, `npm run build`). Pas de commit de dépendances obsolètes.
+
+## Conventions Git / Commits / PR
+- **Messages de commit** : utiliser le format *Conventional Commits*. Structure : `<type>(scope): description`. Par exemple :  
+  - `feat(profile): ajout gestion des profils utilisateur`  
+  - `fix(game-adapter): correction calcul du load-order`  
+  - `refactor(backend): remise en forme de la base de données`  
+- **Description de PR** : chaque PR doit avoir un titre clair (nom du module ou jeu modifié) et un corps listant les changements clés et les tests effectués. Ex :  
+
+
+
+
+- **Vérification post-merge** : une fois la PR mergée, les actions CI (build et tests) doivent passer avec succès sans changements manuels supplémentaires.
+
+## Actions interdites (Hallucinations)
+- **Ne JAMAIS** inventer d’API, de structures ou de fonctions inexistantes. Les ajouts de code doivent correspondre à des ressources ou des specs connues.  
+- **Ne JAMAIS** supprimer du code uniquement pour faire disparaître une erreur. (On préférera commenter/désactiver avec explication, ou utiliser `git revert` si inapproprié.)  
+- **NE PAS** exécuter de tâches de nettoyage globales (pas de `rm -rf /`).  
+- **Pas de désactivation des règles** : Cline doit préférer dire « Je ne sais pas » ou « À vérifier » plutôt que répondre de manière aléatoire.
+
+## Intégration MCP
+- L’architecture prévoie un serveur MCP (Model Context Protocol) pour permettre à l’IA de gérer l’installation de mods en accédant à des services externes (par ex. bases de données de mods, scripts d’installation).  
+- Rappeler dans les règles que Cline peut interroger ces services via MCP, mais qu’il doit garder la logique de haut niveau : *«Quelles données faut-il récupérer ?»* plutôt que *«Tape moi du code d’API»*.
+

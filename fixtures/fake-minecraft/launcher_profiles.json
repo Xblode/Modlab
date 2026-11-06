@@ -1,0 +1,4 @@
+{
+  "_comment": "Placeholder fixture — not a real launcher_profiles.json, just enough shape (this file existing at the instance root) for MinecraftAdapter::looks_like_minecraft to recognize it. See fixtures/README.md.",
+  "profiles": {}
+}

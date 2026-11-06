@@ -1,9 +1,9 @@
 import type { CSSProperties } from "react";
 import type { LoadoutDto } from "../../../api";
+import { CHANNEL_LETTER } from "../../../channel";
 import { initials } from "../../../gameChrome";
 import { Ico } from "../../../Ico";
-import { Avatar, FavoriteButton } from "../../ui";
-import { NOT_TRACKED } from "./placeholders";
+import { Avatar, ChannelBadge, FavoriteButton } from "../../ui";
 
 /**
  * The instance cards of a game's dashboard, plus the card that creates one.
@@ -51,10 +51,13 @@ export function InstanceGrid({
             <span className="ic-body">
               <span className="ic-top">
                 <span className="t fade">{l.name}</span>
+                <ChannelBadge channel={l.channel} className="xs">
+                  {l.channel}
+                </ChannelBadge>
               </span>
               <span className="ic-meta fade">
-                <span className="mono" title="Pas encore de révisions immuables">
-                  r.{NOT_TRACKED}
+                <span className="mono">
+                  {CHANNEL_LETTER[l.channel]}.{l.revision}
                 </span>
                 <span>{l.modCount} mods</span>
                 {cur ? <span className="on">● active</span> : null}

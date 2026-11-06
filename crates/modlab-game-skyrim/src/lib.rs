@@ -2,6 +2,9 @@
 //! `.esp` is, what SKSE is, what MO2's on-disk format looks like — none of
 //! that belongs in `modlab-core`. See docs/01-architecture-decidee.md §3.1.
 
+pub mod engine;
+pub mod fomod;
+pub mod graphics;
 pub mod installer;
 pub mod mo2;
 #[cfg(windows)]
@@ -77,6 +80,18 @@ impl GameAdapter for SkyrimAdapter {
                 kind: PathKind::File,
                 detected: find_usvfs_dll(),
             },
+            PathSlot {
+                id: "prefs_ini",
+                label: "SkyrimPrefs.ini",
+                kind: PathKind::File,
+                detected: find_prefs_ini(),
+            },
+            PathSlot {
+                id: "saves_dir",
+                label: "Dossier des sauvegardes",
+                kind: PathKind::Dir,
+                detected: find_saves_dir(),
+            },
         ]
     }
 }
@@ -144,6 +159,31 @@ pub fn find_usvfs_dll() -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
+/// `SkyrimPrefs.ini` — Bethesda writes it to the user's Documents folder,
+/// never next to the game's own `.exe`, so this is a separate lookup from
+/// `path_slots`' `root`. `USERPROFILE`-based rather than a real "known
+/// folder" API call: good enough for a walking skeleton (same standard this
+/// crate already applies to `find_special_edition`'s Steam-library scan),
+/// wrong only for a Documents folder someone has relocated by hand — that
+/// case just shows up as "introuvable" and a human overrides the path
+/// instead, same recovery every other slot already offers.
+pub fn find_prefs_ini() -> Option<PathBuf> {
+    let profile = std::env::var_os("USERPROFILE")?;
+    let path = PathBuf::from(profile)
+        .join(r"Documents\My Games\Skyrim Special Edition\SkyrimPrefs.ini");
+    path.is_file().then_some(path)
+}
+
+/// The `Saves` folder next to `SkyrimPrefs.ini` — same "good enough for a
+/// walking skeleton" `USERPROFILE` lookup, same recovery (a human override)
+/// if Documents was relocated.
+pub fn find_saves_dir() -> Option<PathBuf> {
+    let profile = std::env::var_os("USERPROFILE")?;
+    let path =
+        PathBuf::from(profile).join(r"Documents\My Games\Skyrim Special Edition\Saves");
+    path.is_dir().then_some(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,7 +217,10 @@ mod tests {
     fn path_slots_declare_the_expected_ids() {
         let slots = SkyrimAdapter.path_slots();
         let ids: Vec<&str> = slots.iter().map(|s| s.id).collect();
-        assert_eq!(ids, ["root", "exe", "data_dir", "usvfs_dll"]);
+        assert_eq!(
+            ids,
+            ["root", "exe", "data_dir", "usvfs_dll", "prefs_ini", "saves_dir"]
+        );
         // A file slot derived from a dir slot must never be reported detected
         // unless it actually exists on disk — `filter(.is_file())` above is
         // what this pins down.

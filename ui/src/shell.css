@@ -66,6 +66,41 @@
   .btn:hover{ background:var(--c5); }
   .btn.primary{ background:var(--green-btn); color:#fff; } .btn.primary:hover{ background:var(--green-btn-h); }
   .btn.accent{ background:var(--accent); color:#fff; } .btn.accent:hover{ filter:brightness(1.08); }
+  .btn.danger{ background:var(--danger); color:#fff; } .btn.danger:hover{ filter:brightness(1.08); }
+
+  /* A captured archive that has not been unpacked yet — deliberately not
+     styled like a conflict badge: it is a state, not a warning. */
+  .tag{ display:inline-flex; align-items:center; gap:4px; height:17px; padding:0 6px; border-radius:4px; font-size:10.5px; font-weight:500; }
+  .tag.archived{ background:color-mix(in srgb,var(--info) 16%,transparent); color:var(--info); }
+  .tag .ico{ width:11px; height:11px; }
+
+  /* FOMOD wizard */
+  .fomod-wizard{ width:520px; max-width:92vw; }
+  .fomod-steps{ display:flex; align-items:center; gap:5px; margin:10px 0 4px; }
+  .fomod-dot{ width:6px; height:6px; border-radius:50%; background:var(--line2); flex:none; }
+  .fomod-dot.cur{ background:var(--accent); width:16px; border-radius:3px; }
+  .fomod-dot.done{ background:var(--t3); }
+  .fomod-steps .muted{ margin-left:6px; }
+  .fomod-body{ max-height:360px; overflow:auto; margin:6px 0 4px; display:flex; flex-direction:column; gap:14px; }
+  .fomod-group-h{ font-size:12px; font-weight:600; color:var(--t1); margin-bottom:6px; }
+  .fomod-plugin{ display:flex; align-items:flex-start; gap:8px; padding:5px 2px; cursor:pointer; border-radius:6px; }
+  .fomod-plugin:hover{ background:var(--c3); }
+  .fomod-plugin .radio, .fomod-plugin .chk{ margin-top:2px; }
+  .fomod-plugin-body{ display:flex; flex-direction:column; gap:1px; min-width:0; }
+  .fomod-plugin-name{ font-size:12.5px; color:var(--t1); }
+  .fomod-plugin-desc{ font-size:11.5px; color:var(--t3); }
+  .fomod-included{ color:var(--green); margin-top:2px; }
+
+  /* Embedded browser. `.browser-hole` is deliberately empty: a native
+     WebView2 is positioned over it by the Rust side, so anything drawn
+     inside would be hidden behind the real page anyway. */
+  .browser{ display:flex; flex-direction:column; flex:1; min-height:0; }
+  .browser-bar{ display:flex; align-items:center; gap:4px; padding:6px 8px; border-bottom:1px solid var(--line); background:var(--c2); flex:none; }
+  .browser-url{ flex:1; display:flex; align-items:center; gap:6px; height:26px; padding:0 8px; border-radius:6px; background:var(--c1); border:1px solid var(--line2); min-width:0; }
+  .browser-url:focus-within{ border-color:var(--sel-line); }
+  .browser-url .ico{ color:var(--t3); flex:none; }
+  .browser-url input{ flex:1; background:none; border:none; outline:none; color:var(--t1); font-size:12px; min-width:0; }
+  .browser-hole{ flex:1; min-height:0; background:var(--c1); position:relative; }
   .btn.ghost{ background:none; color:var(--t2); } .btn.ghost:hover{ color:var(--t1); background:var(--c3); }
   .btn.claude{ color:var(--claude); background:color-mix(in srgb,var(--claude) 12%,transparent); } .btn.claude:hover{ background:color-mix(in srgb,var(--claude) 20%,transparent); }
   .btn.sm{ height:22px; padding:0 8px; font-size:11.5px; }
@@ -81,6 +116,8 @@
   .side-instance:empty{ display:none; }
   .side-profile{ flex:none; border-top:1px solid var(--line); display:flex; align-items:center; gap:8px; padding:8px 10px; }
   .side-profile:empty{ display:none; }
+  .profile-avatar-btn{ flex:1; min-width:0; display:flex; align-items:center; gap:8px; padding:2px; margin:-2px; border-radius:6px; text-align:left; }
+  .profile-avatar-btn:hover{ background:var(--c3); }
   .profile-avatar{ flex:none; width:26px; height:26px; border-radius:50%; background:var(--c4); color:var(--t2); display:grid; place-items:center; overflow:hidden; }
   .profile-avatar .ico{ width:14px; height:14px; }
   .profile-text{ flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
@@ -263,6 +300,10 @@
   .row .nm .tools .tb.cfg{ color:var(--accent); }
   .row .ver{ font-family:var(--font-mono); font-size:11.5px; color:var(--t2); }
   .row .cat{ color:var(--t2); font-size:12px; }
+  .cat-btn{ display:flex; align-items:center; gap:5px; color:inherit; font-size:12px; text-align:left; width:100%; height:100%; border-radius:4px; padding:0 4px; margin:0 -4px; }
+  .cat-btn .ico{ width:12px; height:12px; flex:none; color:var(--t3); }
+  .cat-btn:hover{ background:var(--c4); color:var(--t1); }
+  .cat-input{ width:100%; height:20px; padding:0 5px; border-radius:4px; border:1px solid var(--sel-line); background:var(--c1); color:var(--t1); font-size:12px; outline:none; }
   .row .src{ color:var(--t3); font-size:11.5px; gap:4px; }
   /* Virtualized table: rows cannot use display:contents */
   .virt-grid .row{ display:grid; }
@@ -272,6 +313,9 @@
   .chk{ width:14px; height:14px; border-radius:3px; border:1px solid var(--line2); display:grid; place-items:center; background:var(--c3); }
   .chk.on{ background:var(--accent); border-color:var(--accent); color:#fff; }
   .chk.on .ico{ stroke-width:3; }
+  .radio{ width:14px; height:14px; border-radius:50%; border:1px solid var(--line2); display:grid; place-items:center; background:var(--c3); flex:none; }
+  .radio.on{ border-color:var(--accent); }
+  .radio-dot{ width:7px; height:7px; border-radius:50%; background:var(--accent); }
   .flags{ gap:4px; }
   .badge{ display:inline-flex; align-items:center; gap:3px; height:18px; padding:0 6px; border-radius:9px; font-size:11px; font-variant-numeric:tabular-nums; border:1px solid transparent; line-height:1; }
   .badge.win{ color:var(--win); border-color:color-mix(in srgb,var(--win) 40%,transparent); background:color-mix(in srgb,var(--win) 9%,transparent); }
@@ -333,6 +377,43 @@
   .settings-row-control{ flex:none; padding-top:1px; display:flex; align-items:center; gap:6px; }
   .settings-row.indent{ padding-left:28px; }
   .settings-row.indent .settings-row-title{ font-size:12px; font-weight:500; color:var(--t2); }
+
+  /* Réglages — écrans "Communauté" expérimentaux (Profil complet, Atelier de
+     patchs, Boutique). Visuel uniquement, pas de données Core derrière. */
+  .prof-head{ display:flex; align-items:center; gap:12px; padding:2px 2px 18px; }
+  .prof-avatar{ width:52px; height:52px; border-radius:12px; flex:none; display:grid; place-items:center; background:linear-gradient(145deg,var(--accent),var(--gen)); color:#fff; font-weight:700; font-size:16px; letter-spacing:.04em; }
+  .prof-name{ font-size:15px; font-weight:600; color:var(--t1); }
+  .prof-stats{ display:flex; gap:8px; flex-wrap:wrap; }
+
+  .heatmap{ display:flex; gap:3px; overflow-x:auto; padding:4px 2px 8px; }
+  .heatmap-col{ display:flex; flex-direction:column; gap:3px; }
+  .heatmap-cell{ width:10px; height:10px; border-radius:2px; background:var(--c4); }
+  .heatmap-cell.level-1{ background:color-mix(in srgb,var(--accent) 30%,var(--c4)); }
+  .heatmap-cell.level-2{ background:color-mix(in srgb,var(--accent) 55%,var(--c4)); }
+  .heatmap-cell.level-3{ background:color-mix(in srgb,var(--accent) 78%,var(--c4)); }
+  .heatmap-cell.level-4{ background:var(--accent); }
+
+  .chip-row{ display:flex; gap:8px; flex-wrap:wrap; padding:2px 2px 4px; }
+  .trophy-chip{ display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 10px; border-radius:13px; background:var(--c3); border:1px solid var(--line2); font-size:11.5px; color:var(--t1); }
+  .trophy-chip .ico{ width:12px; height:12px; color:var(--accent); }
+  .trophy-chip.secret{ color:var(--t3); border-style:dashed; }
+  .trophy-chip.secret .ico{ color:var(--t3); }
+  .lineage-chip{ height:24px; }
+
+  .patch-card{ border-top:1px solid var(--line); padding:14px 2px; }
+  .settings-group > .patch-card:first-child{ border-top:none; }
+  .patch-card-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+  .patch-diff{ display:block; margin-top:10px; padding:8px 10px; border-radius:6px; background:var(--c3); font-family:var(--font-mono); font-size:11px; color:var(--t2); line-height:1.6; white-space:pre-wrap; }
+
+  .market-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px; padding:2px; }
+  .market-card{ display:flex; flex-direction:column; gap:4px; padding:10px; border-radius:8px; background:var(--c3); border:1px solid var(--line); }
+  .market-thumb{ height:64px; border-radius:6px; display:grid; place-items:center; color:#fff; margin-bottom:2px; }
+  .market-thumb.frame{ background:linear-gradient(145deg,var(--warn),var(--lose)); }
+  .market-thumb.theme{ background:linear-gradient(145deg,var(--accent),var(--gen)); }
+  .market-card-name{ font-size:12.5px; font-weight:600; color:var(--t1); }
+  .market-card-foot{ display:flex; align-items:center; justify-content:space-between; gap:6px; margin-top:6px; }
+  .market-price{ display:inline-flex; align-items:center; gap:4px; font-size:11.5px; color:var(--t2); font-family:var(--font-mono); }
+  .market-price .ico{ width:11px; height:11px; color:var(--warn); }
 
   /* Toggle switch — atome générique, pas seulement pour les Réglages */
   .switch{ position:relative; display:inline-flex; align-items:center; width:34px; height:20px; border-radius:99px; background:var(--c4); flex:none; }
@@ -406,7 +487,7 @@
   .dsel .dsel-btn .ico{ color:var(--t3); }
 
   /* Panneau droit flottant */
-  .right{ position:absolute; top:36px; right:8px; bottom:8px; width:340px; background:var(--c3); border:1px solid var(--line2); border-radius:var(--r); box-shadow:var(--sh-float); display:flex; flex-direction:column; overflow:hidden; z-index:6; }
+  .right{ position:absolute; top:0; right:8px; bottom:8px; width:340px; background:var(--c3); border:1px solid var(--line2); border-top:none; border-radius:var(--r); border-top-left-radius:0; border-top-right-radius:0; box-shadow:var(--sh-float); display:flex; flex-direction:column; overflow:hidden; z-index:6; }
   .no-right .right{ display:none; }
   .rhead{ display:flex; align-items:center; height:38px; padding:4px 6px 0 8px; gap:2px; }
   .rhead .tab{ border-radius:6px; padding:0 9px; height:28px; } .rhead .tab[aria-selected="true"]{ background:var(--c4); } .rhead .tab[aria-selected="true"]::after{ display:none; }
@@ -603,9 +684,14 @@
   :root[data-wireframe="on"] .tabs-r::before{ left:auto; right:1px; border-radius:0 0 0 3px; }
 /* ============ Barre de titre — chrome de fenêtre maison ============ */
   /* `decorations: false` côté Tauri : cette barre remplace celle de Windows. */
-  .titlebar{ flex:none; display:flex; align-items:stretch; height:34px; background:var(--c1); border-bottom:1px solid var(--line2); user-select:none; position:relative; z-index:60; }
+  .titlebar{ flex:none; display:flex; align-items:stretch; height:38px; background:var(--c2); border-bottom:1px solid var(--line2); user-select:none; position:relative; z-index:60; }
+  /* The page's own tab strip, merged into the title bar — full titlebar
+     height instead of its usual fixed one, no top padding (there's no
+     separate bar above it to breathe against any more). */
+  .titlebar .tabs{ height:auto; padding:0 4px; }
   /* Only this strip drags the window — the controls stay clickable. */
   .tb-drag{ flex:1; min-width:0; }
+  .tb-actions{ display:flex; align-items:center; gap:2px; flex:none; padding:0 6px; }
   .tb-controls{ display:flex; align-items:stretch; flex:none; }
   .tb-win{ display:inline-flex; align-items:center; justify-content:center; width:44px; color:var(--t2); }
   .tb-win:hover{ background:var(--c4); color:var(--t1); }
@@ -624,6 +710,8 @@
   .menu-item:hover{ background:var(--c4); color:var(--t1); }
   .menu-item.disabled{ color:var(--t4); cursor:default; }
   .menu-item.disabled:hover{ background:none; color:var(--t4); }
+  .menu-item.danger{ color:var(--danger); } .menu-item.danger .ico{ color:var(--danger); }
+  .menu-item.danger:hover{ background:color-mix(in srgb,var(--danger) 16%,transparent); color:var(--danger); }
   .menu-item .ico{ width:13px; height:13px; color:var(--t3); }
   .menu-item .menu-item-label{ flex:none; }
   .menu-item .menu-item-sub{ flex:1; min-width:0; overflow:hidden; white-space:nowrap; color:var(--t4); font-size:11px; padding-right:14px; -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 14px),transparent); mask-image:linear-gradient(90deg,#000 calc(100% - 14px),transparent); }

@@ -11,6 +11,7 @@ export function Accordion({
   count,
   action,
   variant,
+  defaultOpen = true,
   children,
 }: {
   title: string;
@@ -19,9 +20,12 @@ export function Accordion({
   action?: ReactNode;
   /** `rsec` is the right-hand inspector's compact variant (maquette's `.rsec`). */
   variant?: "rsec";
+  /** Sections like Catégories/Outils start collapsed — everything else keeps
+   * the historical "open by default" behavior. */
+  defaultOpen?: boolean;
   children: ReactNode;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <div className={`sec ${variant ?? ""} ${open ? "" : "closed"}`}>
       <div className="sec-h">

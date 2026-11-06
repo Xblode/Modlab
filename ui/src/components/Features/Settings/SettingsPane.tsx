@@ -1,9 +1,13 @@
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import {
+  clearDownloadsDirOverride,
   clearGamePathOverride,
+  downloadsDirSetting,
   getGamePathSlots,
+  setDownloadsDirOverride,
   setGamePathOverride,
   type DetectedGame,
+  type DownloadsDirSetting,
   type GamePathSlot,
 } from "../../../api";
 import { Ico } from "../../../Ico";
@@ -11,7 +15,6 @@ import { Badge, IconButton, Input, Panel, Switch } from "../../ui";
 
 export type SettingsMenu =
   | "general"
-  | "profile"
   | "appearance"
   | "notifications"
   | "games"
@@ -172,6 +175,104 @@ function GamePathList({
   );
 }
 
+/**
+ * The one global downloads-folder setting — same edit-in-place shape as a
+ * `GamePathList` row (pencil → input → save/cancel, reset button once
+ * overridden), just for a single path rather than a per-game list.
+ */
+function DownloadsDirRow({ onUnwired }: { onUnwired: (label: string) => void }) {
+  const [setting, setSetting] = useState<DownloadsDirSetting | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    downloadsDirSetting()
+      .then((s) => {
+        if (!cancelled) setSetting(s);
+      })
+      .catch((e: unknown) => onUnwired(e instanceof Error ? e.message : String(e)));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function save() {
+    const value = draft.trim();
+    if (!value) {
+      setEditing(false);
+      return;
+    }
+    try {
+      setSetting(await setDownloadsDirOverride(value));
+      setEditing(false);
+    } catch (e) {
+      onUnwired(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function reset() {
+    try {
+      setSetting(await clearDownloadsDirOverride());
+    } catch (e) {
+      onUnwired(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  return (
+    <div className="settings-row">
+      <div className="settings-row-text">
+        <div className="settings-row-title">Dossier de téléchargement</div>
+        {editing ? (
+          <Input
+            variant="field"
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void save();
+              if (e.key === "Escape") setEditing(false);
+            }}
+            onBlur={() => void save()}
+            style={{ marginTop: 4, height: 28, fontFamily: "var(--font-mono)", fontSize: 11.5 }}
+          />
+        ) : (
+          <div
+            className="settings-row-desc"
+            style={{ fontFamily: "var(--font-mono)", maxWidth: "none", wordBreak: "break-all" }}
+          >
+            {setting ? setting.effective : "Détection en cours…"} — les archives y sont rangées
+            par jeu.
+          </div>
+        )}
+      </div>
+      {editing || !setting ? null : (
+        <div className="settings-row-control">
+          <Badge tone={setting.overridePath ? "root" : "root"}>
+            {setting.overridePath ? "personnalisé" : "défaut"}
+          </Badge>
+          <IconButton
+            name="edit"
+            title="Modifier le dossier"
+            onClick={() => {
+              setEditing(true);
+              setDraft(setting.effective);
+            }}
+          />
+          {setting.overridePath ? (
+            <IconButton
+              name="refresh"
+              title="Revenir au dossier par défaut"
+              onClick={() => void reset()}
+            />
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Page({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="content">
@@ -197,6 +298,8 @@ export function SettingsPane({
   llmModels,
   dataRoot,
   onSelectModel,
+  communityUpdate,
+  onToggleCommunityUpdate,
   onUnwired,
 }: {
   menu: SettingsMenu;
@@ -205,22 +308,13 @@ export function SettingsPane({
   llmModels: readonly (readonly [string, string, string])[];
   dataRoot: string | undefined;
   onSelectModel: (id: string, name: string) => void;
+  /** Whether the experimental "Profil / Communauté / Économie" preview
+   * (`docs/deep-research-report.md`) is switched on — the actual toggle
+   * lives in the `"general"` branch below. */
+  communityUpdate: boolean;
+  onToggleCommunityUpdate: () => void;
   onUnwired: (label: string) => void;
 }) {
-  if (menu === "profile") {
-    return (
-      <Page title="Profil">
-        <SettingsGroup>
-          <SettingsRow
-            title="Compte"
-            desc="ModLab est local et personnel : pas de compte, pas de synchronisation cloud. Ta modlist ne quitte cette machine que lorsque tu déclenches toi-même un appel à un Provider (Nexus, CurseForge)."
-            control={<Badge tone="root">local</Badge>}
-          />
-        </SettingsGroup>
-      </Page>
-    );
-  }
-
   if (menu === "appearance") {
     return (
       <Page title="Apparence">
@@ -395,6 +489,14 @@ export function SettingsPane({
           title="Racine des données"
           desc="Le dossier où ModLab range archives, mods déployés et la base SQLite."
           control={<code className="muted" style={{ fontSize: 12 }}>{dataRoot ?? "—"}</code>}
+        />
+        <DownloadsDirRow onUnwired={onUnwired} />
+      </SettingsGroup>
+      <SettingsGroup title="Communauté">
+        <SettingsRow
+          title="Mises à jour communautaires"
+          desc="Active les écrans expérimentaux Profil, Atelier de patchs et Boutique (voir docs/deep-research-report.md) : profil social, stats, titres, patchs partagés et cosmétiques. Aperçu visuel seulement — aucune économie ni synchronisation réelle pour l'instant."
+          control={<Switch checked={communityUpdate} onToggle={onToggleCommunityUpdate} />}
         />
       </SettingsGroup>
     </Page>

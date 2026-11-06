@@ -1,4 +1,11 @@
-import { CONFLICT_PRIORITY_CAVEAT, type ModConflicts, type ModRow } from "../../../api";
+import { useEffect, useState } from "react";
+import {
+  CONFLICT_PRIORITY_CAVEAT,
+  getModDependencies,
+  type ModConflicts,
+  type ModDependency,
+  type ModRow,
+} from "../../../api";
 import { Ico } from "../../../Ico";
 import { Accordion, Badge } from "../../ui";
 
@@ -12,10 +19,32 @@ import { Accordion, Badge } from "../../ui";
 export function ModInspector({
   mod,
   conflicts,
+  loadoutId,
 }: {
   mod: ModRow | null;
   conflicts: ModConflicts | undefined;
+  loadoutId: number | null;
 }) {
+  const [deps, setDeps] = useState<ModDependency[]>([]);
+
+  useEffect(() => {
+    if (!mod || loadoutId == null) {
+      setDeps([]);
+      return;
+    }
+    let cancelled = false;
+    getModDependencies(loadoutId, mod.modId)
+      .then((d) => {
+        if (!cancelled) setDeps(d);
+      })
+      .catch(() => {
+        if (!cancelled) setDeps([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mod, loadoutId]);
+
   if (!mod) {
     return (
       <div className="rtitle">
@@ -39,8 +68,40 @@ export function ModInspector({
           <dd>{mod.sourcePath}</dd>
           <dt>Priorité</dt>
           <dd>{mod.position}</dd>
+          <dt>Version</dt>
+          <dd title={mod.version ?? "Version non déclarée par la source"}>
+            {mod.version ?? "—"}
+          </dd>
+          <dt>Version de jeu compatible</dt>
+          <dd title="Pas encore de source pour cette info — aucun Provider (Nexus, CurseForge) branché">
+            —
+          </dd>
         </dl>
       </div>
+      {deps.length > 0 ? (
+        <Accordion variant="rsec" title="Dépendances" count={deps.length}>
+          <div style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+            {deps.map((d) => (
+              <div key={d.name} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <Badge
+                  tone={d.satisfied ? "win" : "bad"}
+                  title={
+                    d.satisfied
+                      ? `${d.name} est activé dans cette instance`
+                      : `${d.name} n'est pas activé dans cette instance`
+                  }
+                >
+                  <Ico name={d.satisfied ? "check" : "alert"} />
+                  {d.name}
+                </Badge>
+                <span className="muted">
+                  {d.satisfied ? "détecté" : "manquant"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Accordion>
+      ) : null}
       {conflicts ? (
         <Accordion
           variant="rsec"

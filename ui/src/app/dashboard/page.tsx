@@ -5,6 +5,7 @@ import {
   GameDashboardHeader,
   type HeaderAction,
 } from "../../components/Features/Dashboard/GameDashboardHeader";
+import { GraphicsSettingsDialog } from "../../components/Features/Dashboard/GraphicsSettingsDialog";
 import { InstanceGrid } from "../../components/Features/Dashboard/InstanceGrid";
 import {
   NOT_TRACKED,
@@ -22,6 +23,10 @@ import { Pop } from "../../Pop";
  */
 const IMPORT_SOURCES: Record<string, { label: string; icon: string }> = {
   mo2: { label: "Importer depuis MO2", icon: "db" },
+  "minecraft-instance": {
+    label: "Importer l’instance détectée",
+    icon: "download",
+  },
 };
 
 type InstSort = "core" | "name";
@@ -62,6 +67,7 @@ export default function DashboardPage({
   const [sort, setSort] = useState<InstSort>("core");
   const [sortOpen, setSortOpen] = useState(false);
   const sortRef = useRef<HTMLButtonElement>(null);
+  const [graphicsOpen, setGraphicsOpen] = useState(false);
   const hasSante = game.capabilities.sections.includes("health");
   const openHealth = () => hasSante
     ? onGoToTab("sante")
@@ -71,6 +77,17 @@ export default function DashboardPage({
     { id: "updates", label: "Vérifier les mises à jour", icon: "up", onClick: () => onUnwired("Vérifier les mises à jour") },
     { id: "cleanup", label: "Nettoyer les téléchargements", icon: "history", onClick: () => onUnwired("Nettoyer les téléchargements") },
   ];
+  // SkyrimPrefs.ini editing is Skyrim-specific — `game.id` rather than a
+  // capability flag, same stopgap every other Skyrim-only frontend check in
+  // this codebase uses until a real per-game feature registry exists.
+  if (game.id === "skyrimse") {
+    headerActions.push({
+      id: "graphics",
+      label: "Graphismes",
+      icon: "sliders",
+      onClick: () => setGraphicsOpen(true),
+    });
+  }
   if (game.capabilities.loadOrderTool) {
     const tool = game.capabilities.loadOrderTool;
     headerActions.push({
@@ -225,14 +242,14 @@ export default function DashboardPage({
               Temps de jeu, dernière session, crashs et santé n’ont <b>aucune source</b>{" "}
               dans le Core aujourd’hui : il n’existe ni journal de sessions ni métriques.
               Les tuiles gardent leur place mais affichent « — » plutôt qu’un chiffre
-              inventé. Même chose pour la révision d’une instance — le cycle snapshot
-              n’est pas encore là — et pour le registre d’outils. Les favoris, eux, sont
+              inventé. Même chose pour le registre d’outils. Les favoris, eux, sont
               stockés <b>dans ce navigateur uniquement</b> : le Core n’a pas encore de
               champ « favori ».
             </Panel>
           </div>
         </div>
       </div>
+      {graphicsOpen ? <GraphicsSettingsDialog onClose={() => setGraphicsOpen(false)} /> : null}
     </>
   );
 }

@@ -1,6 +1,7 @@
 import { KIND_LABELS, type Transaction } from "../../../api";
 import { Ico } from "../../../Ico";
 import { Button, IconButton } from "../../ui";
+import type { BottomTab } from "./BottomTab";
 
 /**
  * The bottom panel (Ctrl+J): the Core's transaction journal, newest first.
@@ -13,12 +14,17 @@ export function TransactionsPanel({
   onSnapshot,
   onRollback,
   onClose,
+  downloadsCount,
+  onBottomTabChange,
 }: {
   txs: Transaction[] | null;
   canSnapshot: boolean;
   onSnapshot: () => void;
   onRollback: () => void;
   onClose: () => void;
+  /** Shown on the "Téléchargements" tab's own counter. */
+  downloadsCount: number;
+  onBottomTabChange: (tab: BottomTab) => void;
 }) {
   return (
     <div className="tpanel open" role="dialog" aria-label="Panneau du bas">
@@ -27,6 +33,16 @@ export function TransactionsPanel({
           <Ico name="history" className="sm" />
           <span>Transactions</span>
           <span className="cnt">{txs?.length ?? 0}</span>
+        </button>
+        <button
+          className="tab"
+          type="button"
+          aria-selected="false"
+          onClick={() => onBottomTabChange("downloads")}
+        >
+          <Ico name="download" className="sm" />
+          <span>Téléchargements</span>
+          <span className="cnt">{downloadsCount}</span>
         </button>
         <span className="spacer" />
         <Button variant="sm-ghost" disabled={!canSnapshot} onClick={onSnapshot}>

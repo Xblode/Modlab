@@ -10,17 +10,17 @@ export function TabStrip({
   tabs,
   currentTab,
   modCount,
-  aiActive,
+  webOpen,
   onSelect,
-  onOpenAi,
 }: {
   tabs: TabDef[];
   currentTab: TabId;
   /** Shown as the Mods tab's counter. */
   modCount: number;
-  aiActive: boolean;
+  /** The embedded browser is a shell tab, not a game capability: it is
+   * appended after the adapter's own tabs and only once opened. */
+  webOpen: boolean;
   onSelect: (tab: TabId) => void;
-  onOpenAi: () => void;
 }) {
   return (
     <div className="tabs" role="tablist">
@@ -39,17 +39,18 @@ export function TabStrip({
             {t.id === "mods" ? <span className="cnt">{modCount}</span> : null}
           </button>
         ))}
-      </div>
-      <div className="tabs-r">
-        <button
-          className="ti claude"
-          type="button"
-          aria-pressed={aiActive}
-          onClick={onOpenAi}
-        >
-          <Ico name="sparkle" />
-          <span className="n">IA</span>
-        </button>
+        {webOpen ? (
+          <button
+            className="tab"
+            type="button"
+            role="tab"
+            aria-selected={currentTab === "web"}
+            onClick={() => onSelect("web")}
+          >
+            <Ico name="globe" className="sm" />
+            <span>Navigateur</span>
+          </button>
+        ) : null}
       </div>
     </div>
   );

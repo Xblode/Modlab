@@ -11,8 +11,8 @@
 
 use clap::{Parser, Subcommand};
 use modlab_core::game_adapter::GameAdapter;
-use modlab_core::{archive, conflicts, loadout, store::Store, Core};
-use modlab_game_minecraft::MinecraftAdapter;
+use modlab_core::{archive, conflicts, loadout, store::Store, transaction, Core};
+use modlab_game_minecraft::{instance as mc_instance, MinecraftAdapter};
 use modlab_game_skyrim::{installer, mo2, usvfs, SkyrimAdapter};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -63,6 +63,32 @@ enum Commands {
         mods_dir: PathBuf,
         /// Name for the new ModLab loadout.
         loadout_name: String,
+    },
+    /// List a Minecraft instance's `mods/` folder: each jar, the version its
+    /// own manifest declares, and the loader they agree on. Read-only.
+    McScan {
+        /// Path to the instance root (the folder holding `mods/`).
+        instance_root: PathBuf,
+    },
+    /// Import a Minecraft instance's `mods/` folder into a new loadout.
+    /// Read-only on the game's side — not a jar is moved or renamed.
+    McImport {
+        /// Path to the instance root (the folder holding `mods/`).
+        instance_root: PathBuf,
+        /// Name for the new ModLab loadout.
+        loadout_name: String,
+    },
+    /// Copy a downloaded `.jar` into an instance's `mods/` folder and add it
+    /// to a loadout. A real write into the game folder: the copy is staged
+    /// then renamed, and an existing jar of the same name is never
+    /// overwritten.
+    McInstall {
+        /// Loadout to add the mod to.
+        loadout_id: i64,
+        /// Path to the `.jar` to install.
+        jar: PathBuf,
+        /// Path to the instance root (the folder holding `mods/`).
+        instance_root: PathBuf,
     },
     /// Extract an archive to a staging area and report what shape it is
     /// (bare Data content, wrapped Data/ folder, FOMOD, unrecognized).
@@ -179,6 +205,50 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 mods_dir.display()
             );
         }
+        Commands::McScan { instance_root } => {
+            let scanned = mc_instance::scan_dir(&mc_instance::mods_dir(&instance_root))?;
+            println!(
+                "Loader : {} — {} mod(s) dans {}",
+                scanned.loader.id(),
+                scanned.mods.len(),
+                mc_instance::mods_dir(&instance_root).display()
+            );
+            for m in &scanned.mods {
+                println!(
+                    "  [{}] {} {} ({})",
+                    if m.enabled { "x" } else { " " },
+                    m.name,
+                    m.version.as_deref().unwrap_or("version inconnue"),
+                    m.loader.id()
+                );
+            }
+        }
+        Commands::McImport {
+            instance_root,
+            loadout_name,
+        } => {
+            let (created, imported) =
+                mc_instance::import_instance(&core, &instance_root, &loadout_name)?;
+            println!(
+                "Loadout '{}' (id {}) créé avec {imported} mod(s) importé(s) depuis {}",
+                created.name,
+                created.id,
+                mc_instance::mods_dir(&instance_root).display()
+            );
+        }
+        Commands::McInstall {
+            loadout_id,
+            jar,
+            instance_root,
+        } => {
+            let installed = mc_instance::install_jar(&core, loadout_id, &jar, &instance_root)?;
+            println!(
+                "'{}' {} installé dans {}",
+                installed.name,
+                installed.version.as_deref().unwrap_or("(version inconnue)"),
+                installed.jar_path.display()
+            );
+        }
         Commands::ArchiveInspect { path } => {
             let staging = cli
                 .data_root
@@ -203,7 +273,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let data_dir = install.root.join("Data");
             let rows = loadout::entries(&core, loadout_id)?;
 
-            let vfs = usvfs::Vfs::create(&usvfs_dll, "modlab")?;
+            let vfs_instance_name = usvfs::instance_name("skyrim", loadout_id);
+            let mut vfs = usvfs::Vfs::create(&usvfs_dll, &vfs_instance_name)?;
             let linked = usvfs::deploy_enabled_mods(&vfs, &rows, &data_dir)?;
 
             let staging = cli.data_root.join("staging");
@@ -229,6 +300,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             for line in listing.lines().take(20) {
                 println!("  {line}");
             }
+
+            vfs.disconnect()?;
         }
         Commands::SkseLaunch {
             usvfs_dll,
@@ -248,7 +321,15 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
             let rows = loadout::entries(&core, loadout_id)?;
 
-            let vfs = usvfs::Vfs::create(&usvfs_dll, "modlab")?;
+            // Deterministic per-loadout name — never the shared "modlab"
+            // literal — so two loadouts launched independently can't
+            // reconnect to the same VFS session (see
+            // usvfs::instance_name's doc).
+            let vfs_instance_name = usvfs::instance_name("skyrim", loadout_id);
+            let mut vfs = usvfs::Vfs::create(&usvfs_dll, &vfs_instance_name)?;
+            let mut tx = transaction::Transaction::new(&core, "skyrim.usvfs");
+            tx.step(format!("usvfs instance '{vfs_instance_name}' connected"));
+            tx.commit()?;
             let linked = usvfs::deploy_enabled_mods(&vfs, &rows, &data_dir)?;
             println!(
                 "{linked} mod(s) déployé(s) virtuellement sur {}.",
@@ -263,6 +344,20 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 "Jeu lancé. En attente de la fin de la session (ferme Skyrim pour terminer)..."
             );
             vfs.wait_for_session_end(Duration::from_secs(2), Duration::from_secs(60))?;
+
+            // Explicit, verified disconnect rather than leaving it to
+            // `Drop`: a silently failed teardown here would leave a stale
+            // session for the next launch of this same loadout to collide
+            // with.
+            let disconnect_result = vfs.disconnect();
+            let step = match &disconnect_result {
+                Ok(()) => format!("usvfs instance '{vfs_instance_name}' disconnected (confirmed)"),
+                Err(e) => format!("usvfs instance '{vfs_instance_name}' disconnect FAILED: {e}"),
+            };
+            let mut tx = transaction::Transaction::new(&core, "skyrim.usvfs");
+            tx.step(step);
+            tx.commit()?;
+            disconnect_result?;
             println!("Session terminée, VFS déconnectée.");
         }
         Commands::LoadoutConflicts { loadout_id } => {

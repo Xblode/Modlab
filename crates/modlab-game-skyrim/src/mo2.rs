@@ -91,6 +91,8 @@ impl Mo2Profile {
                         name: name.clone(),
                         source_path: mods_dir.join(name),
                         enabled: *enabled,
+                        // MO2's modlist.txt carries no version metadata.
+                        version: None,
                     })
                 }
                 ModlistEntry::Informational { .. } => None,
@@ -472,11 +474,13 @@ mod tests {
                     name: "SkyUI".into(),
                     source_path: mods_dir.join("SkyUI"),
                     enabled: true,
+                    version: None,
                 },
                 modlab_core::loadout::ImportEntry {
                     name: "Disabled Mod".into(),
                     source_path: mods_dir.join("Disabled Mod"),
                     enabled: false,
+                    version: None,
                 },
             ],
             "DLC entry must not appear — it was never a mods/ folder"

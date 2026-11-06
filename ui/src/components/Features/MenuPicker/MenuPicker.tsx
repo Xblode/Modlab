@@ -8,12 +8,22 @@ export type MenuItem = {
   sub?: string;
   icon?: string;
   disabled?: boolean;
+  /** Styled as a destructive action (red), e.g. "Supprimer". */
+  danger?: boolean;
   /** A nested submenu. Any depth: the renderer recurses. */
   children?: MenuItem[];
 };
 
 export type MenuPickerProps = {
-  anchorRef: RefObject<HTMLElement | null>;
+  /** The tree to render. Defaults to the app's own `MENU_TREE` — every
+   * caller that isn't the hamburger menu passes its own, e.g. a right-click
+   * context menu's rename/channel/delete items. */
+  items?: MenuItem[];
+  /** A dropdown anchored under an element (the hamburger trigger, a "…"
+   * button). Ignored when `anchorPoint` is given. */
+  anchorRef?: RefObject<HTMLElement | null>;
+  /** A context menu anchored at a raw point — where a right-click landed. */
+  anchorPoint?: { x: number; y: number };
   onClose: () => void;
   onItemSelect?: (item: MenuItem) => void;
   open?: boolean;
@@ -174,7 +184,7 @@ function MenuLevel({
                 ref={(el) => {
                   rowRefs.current.set(item.id, el);
                 }}
-                className={`menu-item ${disabled ? "disabled" : ""} ${isOpen ? "open" : ""}`}
+                className={`menu-item ${disabled ? "disabled" : ""} ${isOpen ? "open" : ""} ${item.danger ? "danger" : ""}`}
                 disabled={disabled}
                 title={item.sub ?? item.label}
                 role="menuitem"
@@ -236,16 +246,22 @@ function MenuLevel({
 }
 
 /**
- * The application menu: one hamburger trigger, a tree of flyouts. Categories
- * live at the top level and open their items to the right on hover, which
- * themselves may open their own submenu — the renderer recurses, so adding a
- * level means adding `children` in `MENU_TREE`, nothing else.
+ * A tree of flyouts, anchored either under an element (`anchorRef` — the
+ * hamburger trigger) or at a raw point (`anchorPoint` — a right-click).
+ * Defaults to the application's own `MENU_TREE`, but any caller can pass
+ * `items` instead — this is also ModLab's context-menu primitive, used for
+ * right-clicking a game or an instance in the sidebar. Items open their
+ * children to the right on hover, which themselves may open their own
+ * submenu — the renderer recurses, so adding a level means adding
+ * `children`, nothing else.
  *
  * Selecting anything at any depth closes the whole tree, and so do Escape and
  * a click outside.
  */
 export function MenuPicker({
+  items = MENU_TREE,
   anchorRef,
+  anchorPoint,
   onClose,
   onItemSelect,
   open = true,
@@ -273,11 +289,19 @@ export function MenuPicker({
   useEffect(() => cancel, []);
 
   useLayoutEffect(() => {
-    const anchor = anchorRef.current;
-    if (!anchor || !open) return;
+    if (!open) return;
+    if (anchorPoint) {
+      setPos({
+        x: Math.max(6, Math.min(anchorPoint.x, window.innerWidth - 330)),
+        y: Math.max(6, Math.min(anchorPoint.y, window.innerHeight - 6)),
+      });
+      return;
+    }
+    const anchor = anchorRef?.current;
+    if (!anchor) return;
     const r = anchor.getBoundingClientRect();
     setPos({ x: Math.max(6, Math.min(r.left, window.innerWidth - 330)), y: r.bottom + 6 });
-  }, [anchorRef, open]);
+  }, [anchorRef, anchorPoint, open]);
 
   // Reopening starts from a collapsed tree, like any native menu.
   useEffect(() => {
@@ -290,7 +314,7 @@ export function MenuPicker({
       // Submenus are DOM children of their parent panel, so this one
       // containment check covers every open level.
       if (ref.current?.contains(t)) return;
-      if (anchorRef.current?.contains(t)) return;
+      if (anchorRef?.current?.contains(t)) return;
       onClose();
     }
     function onKey(e: KeyboardEvent) {
@@ -314,7 +338,7 @@ export function MenuPicker({
       onMouseLeave={() => schedule(() => setOpenPath([]), CLOSE_DELAY_MS)}
     >
       <MenuLevel
-        items={MENU_TREE}
+        items={items}
         pos={pos}
         depth={0}
         openPath={openPath}
