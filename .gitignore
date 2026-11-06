@@ -50,3 +50,6 @@ Thumbs.db
 brain/registry/_capture.lock
 brain/registry/_capture-staging/
 brain/registry/_capture-history/
+
+# Python bytecode
+__pycache__/
