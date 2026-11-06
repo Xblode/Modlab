@@ -42,3 +42,11 @@ Thumbs.db
 
 # Unexplained external sync artifact, not ModLab source — see project memory
 /shared/
+
+# Local files kept out of the repository
+/tauri-dev.log
+/img/*
+!/img/header_skyrim.jpg
+brain/registry/_capture.lock
+brain/registry/_capture-staging/
+brain/registry/_capture-history/
