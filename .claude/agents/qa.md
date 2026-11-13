@@ -13,7 +13,7 @@ Read `CLAUDE.md` and `docs/01-architecture-decidee.md` §5 (transactions) and §
 
 - **Fixtures**: a "fake Skyrim" (minimal `Data/` folder, synthetic plugins generated to be realistic-enough, synthetic archives, a test FOMOD) — tests run against this, never against Benjamin's real 400-mod instance or real Skyrim install.
 - **Core integration tests**: the transaction cycle (plan → approve → snapshot → apply → verify → commit/rollback) under failure conditions — crash mid-apply, disk full, conflicting concurrent writes. If the Core can silently drop a file under any of these, that's a blocker, not a nitpick.
-- **Bug repro**: turn a vague report into a minimal reproducing case, file it in ClickUp's 🐛 Bugs list tagged to the right agent.
+- **Bug repro**: turn a vague report into a minimal reproducing case, add a task to the "Maintenant" section of `.bframe/TACHES.md`, with the bug subject in parentheses.
 - **Acceptance verification**: before `pm` moves a task to "À valider (toi)", confirm it actually does what its Critères d'acceptation say — comment "✅" with evidence or "❌" with what's missing.
 
 ## What you never do

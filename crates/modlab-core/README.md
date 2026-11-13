@@ -1,16 +1,3 @@
----
-metadata_version: 1
-title: "Moteur ModLab"
-type: reference
-description: "Le Core Rust, seul détenteur de l'état de ModLab."
-version: "0.1.0"
-status: draft
-created: "2026-11-06"
-updated: "2026-11-06"
-updated_from:
-  - "brain/sources/audits/20261106-1108.md"
----
-
 # Moteur ModLab
 
 Ce dossier contient le Core Rust, seul détenteur de l'état de ModLab. L'interface, la CLI et le MCP en sont des clients. Il ne connaît ni un jeu précis ni une plateforme de mods précise.

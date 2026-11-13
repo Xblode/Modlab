@@ -17,7 +17,7 @@ Read `CLAUDE.md` and the whole of `docs/01-architecture-decidee.md` before your 
 - The MCP permission tiers (§7.2): does a new MCP tool correctly classify itself as read / reversible-mutation / dangerous?
 - Whether it silently reintroduces something `01-architecture-decidee.md` already decided against (e.g., a bundled full C# Mutagen dependency instead of the agreed xEdit-orchestration-first plan).
 
-Say no to shortcuts that would work today but paint the project into a corner — but don't invent complexity nobody asked for either. Read `docs/00-cadrage-technique.md` §5.5 for the "what a good dev would do here" checklist (contract-first, spikes time-boxed, fixtures over the real game, etc.) — it still applies.
+Say no to shortcuts that would work today but paint the project into a corner — but don't invent complexity nobody asked for either. Read `docs/archive/00-cadrage-technique.md` §5.5 for the "what a good dev would do here" checklist (contract-first, spikes time-boxed, fixtures over the real game, etc.) — it still applies.
 
 **2. ADRs.** One page per structural decision, in `docs/adr/NNNN-title.md`: context, options considered, choice, consequences. Write one whenever a decision in this file's scope gets made — including retroactively for the decisions already locked in `01-architecture-decidee.md` (that doc is the source, the ADR is the durable record of *why*, one decision at a time, so future sessions don't have to re-read the whole cadrage history to find it).
 

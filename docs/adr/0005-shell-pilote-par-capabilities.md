@@ -1,7 +1,7 @@
 # ADR 0005 — Le shell React est piloté par les capabilities déclarées des GameAdapters
 
 - **Statut :** accepté (rétroactif — décision prise en Phase 2, commits `4eba8a1` → `148f3a6`, 16–17 septembre 2026)
-- **Portée :** `crates/modlab-core/src/game_adapter.rs` (`GameCapabilities`), `crates/modlab-ui/src/lib.rs`, `ui/src/gameChrome.ts`, `ui/src/App.tsx`, `ui/src/Dashboard.tsx`
+- **Portée :** `crates/modlab-core/src/game_adapter.rs` (`GameCapabilities`), `crates/modlab-ui/src/lib.rs`, `ui/src/gameChrome.ts`, `ui/src/App.tsx`, `ui/src/app/dashboard/page.tsx`
 - **Références :** `docs/01-architecture-decidee.md` §3 (le Core ne connaît aucun jeu), §13 (Phase 2 : « Minecraft prouve la généralité de l'Adapter »), `CLAUDE.md` (contract-first multi-jeux)
 
 ---

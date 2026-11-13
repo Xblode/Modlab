@@ -1,16 +1,3 @@
----
-metadata_version: 1
-title: "Interface React"
-type: reference
-description: "Interface de ModLab, en React, TypeScript et Vite."
-version: "0.1.0"
-status: draft
-created: "2026-11-06"
-updated: "2026-11-06"
-updated_from:
-  - "brain/sources/audits/20261106-1108.md"
----
-
 # Interface React
 
 Ce dossier contient l'interface de ModLab, en React, TypeScript et Vite.

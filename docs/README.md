@@ -1,20 +1,4 @@
----
-metadata_version: 1
-title: "Documentation du projet"
-type: index
-description: "Ce que contient docs/ et quel document fait foi."
-version: "0.1.0"
-status: draft
-created: "2026-11-06"
-updated: "2026-11-06"
-updated_from:
-  - "brain/sources/audits/20261106-1108.md"
-  - "CLAUDE.md"
----
-
 # Documentation du projet
-
-Ce dossier réunit la documentation de ModLab.
 
 ## Ce qui fait foi
 
@@ -23,20 +7,23 @@ Ce dossier réunit la documentation de ModLab.
 
 ## Décisions
 
-- `adr/` : les 5 décisions d'architecture (ADR 0001 à 0005).
+- `adr/` : les décisions d'architecture (ADR 0001 à 0005).
 
-## Travail en cours
+## Design
 
-- `idees.md` : notes de faisabilité et idées non planifiées.
-- `design/plan-shell-v2.md` : plan du shell.
+- `design/` : maquette du shell, `plan-shell-v2.md`, `design-system.md` (tokens, composants), maquettes `.h2d` (dashboard, mods, réglages) et `img/`.
 
-## Contexte dépassé
+## Détail vivant
 
-À ne jamais mettre en œuvre tels quels :
+- `faisabilite.md` : notes de faisabilité (indicateurs SKSE/ENB/FG, LOOT, installation manuelle).
+- `superpouvoirs.md` : superpouvoirs privés (IA locale, chargement à la demande).
 
-- `00-cadrage-technique.md`
-- `Modlab — Document de cadrage & architecture.md`
+## Pas encore cadré
 
-## Non décrits
+- `communaute/` : direction communauté / profils / économie, à ne pas implémenter avant cadrage.
 
-Le rôle de ces fichiers reste à préciser, car l'audit ne les a pas lus : `deep-research-report.md`, `.clinerules.txt`, `ModLab_Cahier_des_Charges.docx`.
+## Archive
+
+- `archive/` : documents dépassés, conservés pour l'historique. Ne jamais les mettre en œuvre tels quels (voir `archive/README.md`).
+
+Pilotage du projet (état, décisions, idées, tâches) : `.bframe/`

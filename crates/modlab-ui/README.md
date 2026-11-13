@@ -1,16 +1,3 @@
----
-metadata_version: 1
-title: "Hôte Tauri de l'interface"
-type: reference
-description: "Fait tourner l'interface React dans une application de bureau."
-version: "0.1.0"
-status: draft
-created: "2026-11-06"
-updated: "2026-11-06"
-updated_from:
-  - "brain/sources/audits/20261106-1108.md"
----
-
 # Hôte Tauri de l'interface
 
 Ce dossier fait tourner l'interface React (`ui/`) dans une application de bureau Tauri 2.

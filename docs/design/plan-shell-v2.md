@@ -1,7 +1,7 @@
 # Plan — Shell v2 (maquette)
 
 > Créé le 14 septembre 2026 à partir de ta liste de demandes. Chaque lot est indépendant et validable dans la maquette avant d'attaquer le suivant. Les lots sont ordonnés par dépendance : le **Lot 1 (squelette)** change la structure, tout le reste se pose dessus.
-> État (14 sept., v2.0) : **Lots 0 → 7 et 10 livrés dans la maquette** · Lot 11 livré le 18 sept. (§6.6 du cadrage + popover Tokens) · notes 8–9 dans `docs/idees.md`. Le shell React réel (`ui/`) suit ce plan — lots déjà portés : squelette 2 colonnes, header unifié, réglages en sidebar, table virtualisée (voir cadrage §6.6 pour l'état détaillé).
+> État (14 sept., v2.0) : **Lots 0 → 7 et 10 livrés dans la maquette** · Lot 11 livré le 18 sept. (§6.6 de `docs/design/design-system.md` + popover Tokens) · notes 8–9 dans `docs/faisabilite.md`. Le shell React réel (`ui/`) suit ce plan — lots déjà portés : squelette 2 colonnes, header unifié, réglages en sidebar, table virtualisée (voir `docs/design/design-system.md` §6.6 pour l'état détaillé).
 > Décision prise : le groupe `[r.142 ▾] [Enregistrer] / [▶ Jouer]` vit dans le bloc branche du panneau gauche (Jouer pleine largeur en dessous). « Commit » est devenu **Enregistrer** ; l'état non enregistré se voit sur le sélecteur de révision (`+2 −1` ambre) et par un point sur Jouer.
 > Maquette : https://claude.ai/code/artifact/102c90d8-0fb5-438f-a8fd-d08b4e16a928 · source `docs/design/shell-maquette.html`
 
@@ -54,7 +54,7 @@
 ## Lot 6 — Indicateurs Skyrim : SKSE · ENB · ReShade · FG / DLSS / FSR / XeSS
 
 - Pastilles dans la barre d'onglets (droite) ou sous le bloc Loadout : `SKSE 2.2.6 ✓` · `ENB Rudy ✓` · `ReShade ✗` · `DLSS 3 FG (PureDark) ✓` · `Community Shaders ✗`. **Rien n'est affiché si rien n'est détecté.**
-- Détails de faisabilité et méthode de détection : voir `docs/idees.md` § « Indicateurs SKSE / ENB / FG ».
+- Détails de faisabilité et méthode de détection : voir `docs/faisabilite.md` § « Indicateurs SKSE / ENB / FG ».
 
 ## Lot 7 — Contenu réaliste : mods et outils Skyrim SE, Minecraft, presets
 
@@ -65,11 +65,11 @@
 
 ## Lot 8 — LOOT intégré (note de faisabilité)
 
-- Ton install : `F:\_Modding\Skyrim Modding\Loot` contient `LOOT.exe` + `libloot.dll` (Qt 6). Trois niveaux d'intégration possibles, détaillés dans `docs/idees.md`. Recommandation : lancement piloté (`--auto-sort`) en phase 1, `libloot` en process en phase 4.
+- Ton install : `F:\_Modding\Skyrim Modding\Loot` contient `LOOT.exe` + `libloot.dll` (Qt 6). Trois niveaux d'intégration possibles, détaillés dans `docs/faisabilite.md`. Recommandation : lancement piloté (`--auto-sort`) en phase 1, `libloot` en process en phase 4.
 
 ## Lot 9 — Installation manuelle intelligente (archive → bon endroit)
 
-- Glisser une archive (ex. `skse64_2_02_06.7z`) : ModLab analyse la structure, propose un **plan de placement visuel** (`skse64_loader.exe`, `skse64_*.dll` → racine du jeu ; `Data/Scripts` → Data), l'utilisateur voit exactement ce qui va où, applique, et tout reste désinstallable (fichiers racine tracés par le backend « racine »). Pourquoi ce n'est pas déjà standard : voir `docs/idees.md`.
+- Glisser une archive (ex. `skse64_2_02_06.7z`) : ModLab analyse la structure, propose un **plan de placement visuel** (`skse64_loader.exe`, `skse64_*.dll` → racine du jeu ; `Data/Scripts` → Data), l'utilisateur voit exactement ce qui va où, applique, et tout reste désinstallable (fichiers racine tracés par le backend « racine »). Pourquoi ce n'est pas déjà standard : voir `docs/faisabilite.md`.
 
 ## Lot 10 — Panneau droit fermé par défaut, plus de toggles de panneaux
 
@@ -77,7 +77,7 @@
 
 ## Lot 11 — Documentation
 
-- Mettre à jour `docs/00-cadrage-technique.md` §6 (shell v2, tokens, composants) et le popover Tokens de la maquette.
+- Mettre à jour `docs/design/design-system.md` (ex-§6 du cadrage) (shell v2, tokens, composants) et le popover Tokens de la maquette.
 - Reporter les idées retenues dans ClickUp (liste « Idées ») quand l'espace sera créé.
 
 ## Ordre proposé et estimation (sessions de travail)
@@ -91,6 +91,6 @@
 | 5 | Table : icônes au survol, colonne, réglages de mod | — | 1 |
 | 6 | Indicateurs SKSE/ENB/FG | 2 | ½ |
 | 7 | Données : mods, outils, Minecraft, presets | — | 1 |
-| 8–9 | Notes LOOT / installation manuelle | — | fait (idees.md) |
+| 8–9 | Notes LOOT / installation manuelle | — | fait (faisabilite.md) |
 | 10 | Panneau droit fermé par défaut, toggles retirés | 1 | ¼ |
 | 11 | Doc §6 + tokens | 1–10 | ½ |

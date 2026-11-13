@@ -1,10 +1,18 @@
 # ModLab — Architecture décidée
 
+> **Écarts depuis le verrouillage (2026-11-13)**
+>
+> - Remote GitHub (`origin`) voulu : pas de push sans demande explicite (§2 n°7).
+> - ClickUp arrêté : les tâches vivent dans `.bframe/TACHES.md` (§2 n°5, §12).
+> - L'état d'avancement des phases est suivi dans `.bframe/ETAT.md`.
+> - IA locale : en réel, diagnostic par règles + LLM optionnel désactivé par défaut (voir `crates/modlab-ai/README.md`) (§6).
+> - Décisions postérieures : `docs/adr/` et `.bframe/DECISIONS.md`.
+
 > **Statut : verrouillé le 15 septembre 2026.** Ce document est la référence unique pour démarrer l'implémentation.
 >
-> **Ce qu'il remplace :** `00-cadrage-technique.md` et `Modlab — Document de cadrage & architecture.md` sur toute décision structurante (stack, architecture, permissions, roadmap). Les deux restent dans `docs/` comme historique de la réflexion — ce document-ci synthétise et tranche, il ne les répète pas en entier.
+> **Ce qu'il remplace :** `docs/archive/00-cadrage-technique.md` et `docs/archive/Modlab — Document de cadrage & architecture.md` sur toute décision structurante (stack, architecture, permissions, roadmap). Les deux restent dans `docs/archive/` comme historique de la réflexion — ce document-ci synthétise et tranche, il ne les répète pas en entier.
 >
-> **Ce qui ne change pas :** `docs/idees.md` (parking d'idées), `docs/design/shell-maquette.html` (la maquette — **source de vérité visuelle**, activement itérée en parallèle de ce document).
+> **Ce qui ne change pas :** `.bframe/IDEES.md` (parking d'idées) et `docs/faisabilite.md` (notes de faisabilité), `docs/design/shell-maquette.html` (la maquette — **source de vérité visuelle**, activement itérée en parallèle de ce document).
 >
 > **Légende :** ✅ décidé · ⚠️ risque connu, avec plan · 🔬 à valider par spike Phase 0 · 💬 encore ouvert
 
@@ -25,7 +33,7 @@ Pas un MO2 plus joli, pas un Vortex plus ouvert : un **environnement de travail*
 
 Trois niveaux d'usage cohabitent dans la même app : **Débutant** (Installer / Mettre à jour / Lancer / Réparer, rien d'autre à comprendre), **Avancé** (conflits, dépendances, load order, logs), **Expert** (filesystem, graphe de dépendances/conflits, console, API, MCP, commandes avancées). L'automatisation ne doit **jamais devenir une boîte noire** : chaque action explique quoi, pourquoi, quels fichiers, et comment revenir en arrière.
 
-Les 10 lignes conductrices du cadrage d'origine (personnel d'abord, MO2 = référence de maîtrise, GitHub/Claude Code/Cursor = référence d'interface, réversibilité totale, vérité par les faits, le créatif tient le volant…) restent valables telles quelles — voir `00-cadrage-technique.md` §1.2 pour le détail.
+Les 10 lignes conductrices du cadrage d'origine (personnel d'abord, MO2 = référence de maîtrise, GitHub/Claude Code/Cursor = référence d'interface, réversibilité totale, vérité par les faits, le créatif tient le volant…) restent valables telles quelles — voir `docs/archive/00-cadrage-technique.md` §1.2 pour le détail.
 
 ---
 
@@ -127,7 +135,7 @@ Identification (détecter le jeu, l'édition, la version) · Structure (où sont
 
 ## 5. Modèle de données & transactions
 
-*(Conceptuellement inchangé depuis `00-cadrage-technique.md` §4.3/§4.6 — juste porté en Rust : SQLite reste la base, un seul processus Rust en est le seul écrivain.)*
+*(Conceptuellement inchangé depuis `docs/archive/00-cadrage-technique.md` §4.3/§4.6 — juste porté en Rust : SQLite reste la base, un seul processus Rust en est le seul écrivain.)*
 
 **Sur disque**, racine `F:\ModLab\` :
 
@@ -265,7 +273,7 @@ Optionnels plus tard : `devops`, `scribe`. Budget modèles confirmé : **gros bl
 
 ## 12. Suivi de projet : ClickUp (confirmé)
 
-Plan gratuit, compte déjà existant, connecté. Distinction par **tags** (`pm`, `arch`, `core`, `game`, `mcp`, `design`, `front`, `qa`), pas par champ personnalisé (limite 60 utilisations du plan gratuit). Granularité : **tâches "features" grosses + quelques sous-tâches + jalons**, point hebdo écrit par `pm`. Structure ClickUp inchangée depuis `00-cadrage-technique.md` §10.3 (Décisions & jalons, Roadmap, Phases, Bugs, Idées).
+Plan gratuit, compte déjà existant, connecté. Distinction par **tags** (`pm`, `arch`, `core`, `game`, `mcp`, `design`, `front`, `qa`), pas par champ personnalisé (limite 60 utilisations du plan gratuit). Granularité : **tâches "features" grosses + quelques sous-tâches + jalons**, point hebdo écrit par `pm`. Structure ClickUp inchangée depuis `docs/archive/00-cadrage-technique.md` §10.3 (Décisions & jalons, Roadmap, Phases, Bugs, Idées).
 
 ---
 
@@ -278,7 +286,7 @@ Plan gratuit, compte déjà existant, connecté. Distinction par **tags** (`pm`,
 | **Phase 2 — UI façon IDE + Minecraft** (en parallèle) | Shell React/Tauri, table de mods virtualisée, panneau IA locale, Adaptateur Minecraft (Fabric/Forge, CurseForge Provider) | **"Je n'ouvre plus MO2"** + Minecraft prouve la généralité de l'Adapter |
 | **Phase 3 — MCP + CLI parité** | Tools/permissions 3-niveaux, `.mcp.json`, panneau Claude dans l'UI | **"Claude installe un mod et m'explique un conflit"** |
 | **Phase 4 — Expert Skyrim** | Conflits de records (évaluer Rust maison vs sidecar, §4), Nexus API complète, diagnostics avancés | **"ModLab voit plus de choses que MO2 + LOOT + xEdit réunis"** |
-| **Phase 5 — Superpouvoirs** | Bisect, recettes, KB, session recorder — voir `00-cadrage-technique.md` §8 (inchangé) | **"Je résous un crash sans ouvrir un log à la main"** |
+| **Phase 5 — Superpouvoirs** | Bisect, recettes, KB, session recorder — voir `docs/superpouvoirs.md` (inchangé) | **"Je résous un crash sans ouvrir un log à la main"** |
 | **Phase 6 — Witcher 3 / autres** | Valide la généralité au-delà de la famille Bethesda | **"Ajouter un jeu n'a rien changé au noyau"** |
 
 ---
@@ -333,7 +341,7 @@ Plan gratuit, compte déjà existant, connecté. Distinction par **tags** (`pm`,
 
 ## Annexe B — Glossaire
 
-Voir `00-cadrage-technique.md` Annexe A pour les termes déjà définis (ESP/ESM/ESL, Master, Load order, Record, BSA/BA2, FOMOD, VFS/USVFS, CAS, Loadout, Révision, Transaction…) et pour GGUF/Quantization/VRAM/GBNF (ajoutés le 15 septembre). Nouveaux termes :
+Voir `docs/archive/00-cadrage-technique.md` Annexe A pour les termes déjà définis (ESP/ESM/ESL, Master, Load order, Record, BSA/BA2, FOMOD, VFS/USVFS, CAS, Loadout, Révision, Transaction…) et pour GGUF/Quantization/VRAM/GBNF (ajoutés le 15 septembre). Nouveaux termes :
 
 | Terme | Définition |
 |---|---|
@@ -346,9 +354,9 @@ Voir `00-cadrage-technique.md` Annexe A pour les termes déjà définis (ESP/ESM
 
 ## Annexe C — Sources
 
-Cumul de `00-cadrage-technique.md` Annexe B et des sources IA locale ajoutées le 15 septembre 2026, plus :
+Cumul de `docs/archive/00-cadrage-technique.md` Annexe B et des sources IA locale ajoutées le 15 septembre 2026, plus :
 
-- `Modlab — Document de cadrage & architecture.md` (document de réflexion, 15 septembre 2026)
+- `docs/archive/Modlab — Document de cadrage & architecture.md` (document de réflexion, 15 septembre 2026)
 - esplugin (Rust, lecture de plugins Bethesda) : https://github.com/loot/esplugin
 - libloot réécrit en Rust (2025) : https://blog.ortham.net/posts/2025-04-24-porting-libloot-to-rust/
 - sevenz-rust : https://github.com/dyz1990/sevenz-rust
