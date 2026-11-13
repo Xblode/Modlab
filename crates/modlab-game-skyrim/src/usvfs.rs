@@ -663,7 +663,11 @@ mod tests {
         );
     }
 
-    fn entry(name: &str, source_path: PathBuf, position: i64) -> modlab_core::loadout::LoadoutEntryRow {
+    fn entry(
+        name: &str,
+        source_path: PathBuf,
+        position: i64,
+    ) -> modlab_core::loadout::LoadoutEntryRow {
         modlab_core::loadout::LoadoutEntryRow {
             mod_id: position,
             name: name.to_string(),
@@ -701,7 +705,9 @@ mod tests {
             vfs_a
                 .link_directory_recursive(skse_mod.path(), dest_a.path())
                 .expect("linking SKSE into loadout 1 should succeed");
-            vfs_a.disconnect().expect("loadout 1 should disconnect cleanly");
+            vfs_a
+                .disconnect()
+                .expect("loadout 1 should disconnect cleanly");
         }
 
         // Loadout 2: a brand new, empty destination — must stay vanilla.
@@ -764,7 +770,12 @@ mod tests {
         }
 
         let dest = tempfile::tempdir().unwrap();
-        for base_file in ["Skyrim.esm", "Update.esm", "Dawnguard.esm", "Dragonborn.esm"] {
+        for base_file in [
+            "Skyrim.esm",
+            "Update.esm",
+            "Dawnguard.esm",
+            "Dragonborn.esm",
+        ] {
             fs::write(dest.path().join(base_file), b"base game placeholder").unwrap();
         }
 
@@ -788,7 +799,13 @@ mod tests {
         vfs.run_hooked(&list_cmd, Duration::from_secs(10))
             .expect("hooked dir should run");
         let listing = fs::read_to_string(&listing_file).unwrap();
-        for expected in ["Skyrim.esm", "Update.esm", "Dawnguard.esm", "Dragonborn.esm", "SkyUI.esp"] {
+        for expected in [
+            "Skyrim.esm",
+            "Update.esm",
+            "Dawnguard.esm",
+            "Dragonborn.esm",
+            "SkyUI.esp",
+        ] {
             assert!(
                 listing.contains(expected),
                 "merged view is missing {expected}: got {listing:?}"

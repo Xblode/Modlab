@@ -161,8 +161,10 @@ impl Core {
             // `table`/`column`/`decl_type` are compile-time literals from
             // this module, never user input — an identifier cannot be bound
             // as a parameter in SQLite, hence the format!.
-            self.db
-                .execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl_type}"), [])?;
+            self.db.execute(
+                &format!("ALTER TABLE {table} ADD COLUMN {column} {decl_type}"),
+                [],
+            )?;
         }
         Ok(())
     }
@@ -579,8 +581,10 @@ impl Core {
 
     /// Undo `soft_delete_loadout`.
     pub(crate) fn restore_loadout(&self, loadout_id: i64) -> Result<()> {
-        self.db
-            .execute("UPDATE loadout SET deleted_at = NULL WHERE id = ?1", [loadout_id])?;
+        self.db.execute(
+            "UPDATE loadout SET deleted_at = NULL WHERE id = ?1",
+            [loadout_id],
+        )?;
         Ok(())
     }
 
@@ -850,7 +854,10 @@ mod tests {
             .db
             .query_row("SELECT deleted_at FROM loadout", [], |row| row.get(0))
             .expect("the pre-existing row survives the migration");
-        assert_eq!(deleted_at, None, "an existing row is never backfilled as deleted");
+        assert_eq!(
+            deleted_at, None,
+            "an existing row is never backfilled as deleted"
+        );
 
         // Reopening the already-migrated database must not error either.
         Core::open(&db_path).expect("reopening an already-migrated database must be idempotent");

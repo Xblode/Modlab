@@ -433,7 +433,10 @@ mod tests {
             .find(|f| f.relative_path == PathBuf::from("only/lux.nif"))
             .unwrap();
         assert_eq!(solo.winner_mod_id, 1);
-        assert_eq!(solo.contributor_count, 1, "an uncontested path is still reported");
+        assert_eq!(
+            solo.contributor_count, 1,
+            "an uncontested path is still reported"
+        );
     }
 
     fn row(

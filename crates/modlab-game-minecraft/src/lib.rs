@@ -63,10 +63,7 @@ impl GameAdapter for MinecraftAdapter {
                 id: "mods_dir",
                 label: "Dossier mods/",
                 kind: PathKind::Dir,
-                detected: root
-                    .as_ref()
-                    .map(|r| r.join("mods"))
-                    .filter(|p| p.is_dir()),
+                detected: root.as_ref().map(|r| r.join("mods")).filter(|p| p.is_dir()),
             },
         ]
     }
@@ -145,7 +142,11 @@ mod tests {
         assert_eq!(ids, ["root", "mods_dir"]);
         for slot in &slots {
             if let Some(p) = &slot.detected {
-                assert!(p.exists(), "{} claims a path that doesn't exist: {p:?}", slot.id);
+                assert!(
+                    p.exists(),
+                    "{} claims a path that doesn't exist: {p:?}",
+                    slot.id
+                );
             }
         }
     }

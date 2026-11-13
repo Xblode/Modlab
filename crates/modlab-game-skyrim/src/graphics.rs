@@ -89,8 +89,12 @@ fn render_key(key: &str, s: &GraphicsSettings) -> Option<String> {
     match key {
         "iSize W" => s.width.map(|v| format!("iSize W={v}")),
         "iSize H" => s.height.map(|v| format!("iSize H={v}")),
-        "bFull Screen" => s.fullscreen.map(|v| format!("bFull Screen={}", render_bool(v))),
-        "iPresentInterval" => s.vsync.map(|v| format!("iPresentInterval={}", render_bool(v))),
+        "bFull Screen" => s
+            .fullscreen
+            .map(|v| format!("bFull Screen={}", render_bool(v))),
+        "iPresentInterval" => s
+            .vsync
+            .map(|v| format!("iPresentInterval={}", render_bool(v))),
         "iMultiSample" => s.antialiasing.map(|v| format!("iMultiSample={v}")),
         "bFXAAEnabled" => s.fxaa.map(|v| format!("bFXAAEnabled={}", render_bool(v))),
         _ => None,
@@ -230,7 +234,11 @@ mod tests {
 
         let read_back = read(&path).unwrap();
         assert_eq!(read_back.width, Some(2560));
-        assert_eq!(read_back.fullscreen, Some(true), "untouched value read back correctly");
+        assert_eq!(
+            read_back.fullscreen,
+            Some(true),
+            "untouched value read back correctly"
+        );
     }
 
     #[test]

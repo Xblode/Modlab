@@ -99,7 +99,9 @@ mod tests {
         fs::write(source.path().join("skse64_loader.exe"), b"fake loader").unwrap();
         fs::create_dir_all(source.path().join("Data/SKSE/Plugins")).unwrap();
         fs::write(
-            source.path().join("Data/SKSE/Plugins/skse64_steam_loader.dll"),
+            source
+                .path()
+                .join("Data/SKSE/Plugins/skse64_steam_loader.dll"),
             b"fake dll",
         )
         .unwrap();

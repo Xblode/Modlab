@@ -170,7 +170,10 @@ pub fn on_finished(webview: &Webview, url: &str, path: Option<PathBuf>, success:
     // existing one instead, so the shell shows one entry, not two.
     let (download_id, reported_path) = match outcome {
         download::CaptureOutcome::New(id) => (id, path),
-        download::CaptureOutcome::Deduped { existing_id, existing_path } => {
+        download::CaptureOutcome::Deduped {
+            existing_id,
+            existing_path,
+        } => {
             if existing_path != path {
                 let _ = std::fs::remove_file(&path);
             }

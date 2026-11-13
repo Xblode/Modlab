@@ -410,7 +410,11 @@ mod tests {
 
         rename(&core, lo.id, "  Modlist définitive  ").unwrap();
 
-        assert_eq!(list(&core).unwrap()[0].name, "Modlist définitive", "trimmed");
+        assert_eq!(
+            list(&core).unwrap()[0].name,
+            "Modlist définitive",
+            "trimmed"
+        );
         assert_eq!(core.event_count().unwrap(), before + 1);
     }
 
@@ -486,7 +490,11 @@ mod tests {
         assert_eq!(trash[0].name, "Main 2026");
 
         restore(&core, a.id).unwrap();
-        assert_eq!(list_trash(&core).unwrap().len(), 0, "restored, so no longer in the trash");
+        assert_eq!(
+            list_trash(&core).unwrap().len(),
+            0,
+            "restored, so no longer in the trash"
+        );
         assert_eq!(list(&core).unwrap().len(), 2, "and back in the live list");
     }
 

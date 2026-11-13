@@ -242,8 +242,8 @@ pub fn scan_dir(mods_dir: &Path) -> io::Result<InstanceMods> {
             // human can see ModLab found it and decide, instead of the scan
             // quietly pretending the file isn't there.
             let found = read_jar(&path).ok().flatten();
-            let (loader, name, version) = found
-                .unwrap_or_else(|| (ModLoader::Unknown, jar_stem(&path), None));
+            let (loader, name, version) =
+                found.unwrap_or_else(|| (ModLoader::Unknown, jar_stem(&path), None));
             mods.push(InstalledMod {
                 name,
                 version,
@@ -322,10 +322,7 @@ pub fn install_jar(
     instance_root: &Path,
 ) -> Result<InstalledMod, String> {
     if jar_state(source_jar) != Some(true) {
-        return Err(format!(
-            "ce n'est pas un .jar : {}",
-            source_jar.display()
-        ));
+        return Err(format!("ce n'est pas un .jar : {}", source_jar.display()));
     }
     if !source_jar.is_file() {
         return Err(format!("fichier introuvable : {}", source_jar.display()));
@@ -509,7 +506,13 @@ mod tests {
         let mods = dir.path().join("mods");
         fs::create_dir_all(&mods).unwrap();
         fabric_jar(&mods, "sodium.jar", "sodium", "Sodium", "0.5.8");
-        fabric_jar(&mods, "lithium.jar.disabled", "lithium", "Lithium", "0.11.2");
+        fabric_jar(
+            &mods,
+            "lithium.jar.disabled",
+            "lithium",
+            "Lithium",
+            "0.11.2",
+        );
         fs::write(mods.join("notes.txt"), b"not a mod").unwrap();
 
         let scanned = scan_dir(&mods).unwrap();
@@ -537,7 +540,13 @@ mod tests {
         let mods = mods_dir(dir.path());
         fs::create_dir_all(&mods).unwrap();
         fabric_jar(&mods, "sodium.jar", "sodium", "Sodium", "0.5.8");
-        fabric_jar(&mods, "lithium.jar.disabled", "lithium", "Lithium", "0.11.2");
+        fabric_jar(
+            &mods,
+            "lithium.jar.disabled",
+            "lithium",
+            "Lithium",
+            "0.11.2",
+        );
 
         let (created, imported) = import_instance(&core, dir.path(), "Survie Fabric").unwrap();
 

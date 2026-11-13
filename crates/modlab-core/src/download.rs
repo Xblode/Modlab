@@ -35,14 +35,20 @@ pub struct Download {
 /// now a redundant duplicate of `existing_path` and should be cleaned up.
 pub enum CaptureOutcome {
     New(i64),
-    Deduped { existing_id: i64, existing_path: PathBuf },
+    Deduped {
+        existing_id: i64,
+        existing_path: PathBuf,
+    },
 }
 
 impl CaptureOutcome {
     #[must_use]
     pub fn id(&self) -> i64 {
         match self {
-            Self::New(id) | Self::Deduped { existing_id: id, .. } => *id,
+            Self::New(id)
+            | Self::Deduped {
+                existing_id: id, ..
+            } => *id,
         }
     }
 }
@@ -309,18 +315,34 @@ mod tests {
         let first_path = dir.path().join("lux.7z");
         std::fs::write(&first_path, b"seven-bytes").unwrap();
 
-        let first = capture(&core, "https://example.test/x", "lux.7z", &first_path, Some(11)).unwrap();
+        let first = capture(
+            &core,
+            "https://example.test/x",
+            "lux.7z",
+            &first_path,
+            Some(11),
+        )
+        .unwrap();
         assert!(matches!(first, CaptureOutcome::New(_)));
 
         // A second instance's browser downloads the same file again, to a
         // different path.
         let second_path = dir.path().join("lux (2).7z");
         std::fs::write(&second_path, b"seven-bytes").unwrap();
-        let second =
-            capture(&core, "https://example.test/x", "lux.7z", &second_path, Some(11)).unwrap();
+        let second = capture(
+            &core,
+            "https://example.test/x",
+            "lux.7z",
+            &second_path,
+            Some(11),
+        )
+        .unwrap();
 
         match second {
-            CaptureOutcome::Deduped { existing_id, existing_path } => {
+            CaptureOutcome::Deduped {
+                existing_id,
+                existing_path,
+            } => {
                 assert_eq!(existing_id, first.id());
                 assert_eq!(existing_path, first_path);
             }
@@ -335,13 +357,26 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let first_path = dir.path().join("lux.7z");
         std::fs::write(&first_path, b"seven-bytes").unwrap();
-        capture(&core, "https://example.test/x", "lux.7z", &first_path, Some(11)).unwrap();
+        capture(
+            &core,
+            "https://example.test/x",
+            "lux.7z",
+            &first_path,
+            Some(11),
+        )
+        .unwrap();
         std::fs::remove_file(&first_path).unwrap();
 
         let second_path = dir.path().join("lux (2).7z");
         std::fs::write(&second_path, b"seven-bytes").unwrap();
-        let second =
-            capture(&core, "https://example.test/x", "lux.7z", &second_path, Some(11)).unwrap();
+        let second = capture(
+            &core,
+            "https://example.test/x",
+            "lux.7z",
+            &second_path,
+            Some(11),
+        )
+        .unwrap();
 
         assert!(
             matches!(second, CaptureOutcome::New(_)),
@@ -409,7 +444,10 @@ mod tests {
         let mod_id = attach_to_loadout(&core, dl, lo.id, None).unwrap();
 
         let pending = archived_mod(&core, mod_id).unwrap();
-        assert_eq!(pending.archive_path, PathBuf::from("F:/ModLab/downloads/lux.7z"));
+        assert_eq!(
+            pending.archive_path,
+            PathBuf::from("F:/ModLab/downloads/lux.7z")
+        );
 
         mark_installed(&core, mod_id, Path::new("F:/ModLab/mods/lux")).unwrap();
 
@@ -444,12 +482,24 @@ mod tests {
         let core = Core::open_in_memory().unwrap();
         let a = loadout::create(&core, "skyrimse", "A").unwrap();
         let b = loadout::create(&core, "skyrimse", "B").unwrap();
-        let dl = capture(&core, "https://example.test/x", "lux.7z", Path::new("lux.7z"), None).unwrap().id();
+        let dl = capture(
+            &core,
+            "https://example.test/x",
+            "lux.7z",
+            Path::new("lux.7z"),
+            None,
+        )
+        .unwrap()
+        .id();
         let mod_id = attach_to_loadout(&core, dl, a.id, None).unwrap();
 
         reassign(&core, mod_id, a.id, b.id).unwrap();
 
-        assert_eq!(loadout::entries(&core, a.id).unwrap().len(), 0, "gone from A");
+        assert_eq!(
+            loadout::entries(&core, a.id).unwrap().len(),
+            0,
+            "gone from A"
+        );
         let in_b = loadout::entries(&core, b.id).unwrap();
         assert_eq!(in_b.len(), 1, "landed in B");
         assert_eq!(in_b[0].mod_id, mod_id);
@@ -461,7 +511,15 @@ mod tests {
         let core = Core::open_in_memory().unwrap();
         let a = loadout::create(&core, "skyrimse", "A").unwrap();
         let b = loadout::create(&core, "skyrimse", "B").unwrap();
-        let dl = capture(&core, "https://example.test/x", "lux.7z", Path::new("lux.7z"), None).unwrap().id();
+        let dl = capture(
+            &core,
+            "https://example.test/x",
+            "lux.7z",
+            Path::new("lux.7z"),
+            None,
+        )
+        .unwrap()
+        .id();
         let mod_id = attach_to_loadout(&core, dl, a.id, None).unwrap();
         mark_installed(&core, mod_id, Path::new("F:/ModLab/mods/lux")).unwrap();
 
@@ -475,7 +533,15 @@ mod tests {
     fn renaming_a_mod_updates_its_entry() {
         let core = Core::open_in_memory().unwrap();
         let lo = loadout::create(&core, "skyrimse", "Main").unwrap();
-        let dl = capture(&core, "https://example.test/x", "lux.7z", Path::new("lux.7z"), None).unwrap().id();
+        let dl = capture(
+            &core,
+            "https://example.test/x",
+            "lux.7z",
+            Path::new("lux.7z"),
+            None,
+        )
+        .unwrap()
+        .id();
         let mod_id = attach_to_loadout(&core, dl, lo.id, None).unwrap();
 
         rename(&core, mod_id, "  Lux Orbis  ").unwrap();
@@ -487,7 +553,15 @@ mod tests {
     fn renaming_to_an_empty_name_is_refused() {
         let core = Core::open_in_memory().unwrap();
         let lo = loadout::create(&core, "skyrimse", "Main").unwrap();
-        let dl = capture(&core, "https://example.test/x", "lux.7z", Path::new("lux.7z"), None).unwrap().id();
+        let dl = capture(
+            &core,
+            "https://example.test/x",
+            "lux.7z",
+            Path::new("lux.7z"),
+            None,
+        )
+        .unwrap()
+        .id();
         let mod_id = attach_to_loadout(&core, dl, lo.id, None).unwrap();
 
         let err = rename(&core, mod_id, "   ").unwrap_err();
@@ -500,15 +574,30 @@ mod tests {
     fn removing_a_mod_hides_it_but_keeps_its_row() {
         let core = Core::open_in_memory().unwrap();
         let lo = loadout::create(&core, "skyrimse", "Main").unwrap();
-        let dl = capture(&core, "https://example.test/x", "lux.7z", Path::new("lux.7z"), None).unwrap().id();
+        let dl = capture(
+            &core,
+            "https://example.test/x",
+            "lux.7z",
+            Path::new("lux.7z"),
+            None,
+        )
+        .unwrap()
+        .id();
         let mod_id = attach_to_loadout(&core, dl, lo.id, None).unwrap();
 
         remove(&core, mod_id).unwrap();
 
-        assert_eq!(loadout::entries(&core, lo.id).unwrap().len(), 0, "hidden from the table");
+        assert_eq!(
+            loadout::entries(&core, lo.id).unwrap().len(),
+            0,
+            "hidden from the table"
+        );
         // Not actually gone: the archive lookup (which ignores deleted_at)
         // still finds the row.
-        assert!(core.select_mod_archive(mod_id).unwrap().is_some(), "row still exists");
+        assert!(
+            core.select_mod_archive(mod_id).unwrap().is_some(),
+            "row still exists"
+        );
     }
 
     #[test]
@@ -531,14 +620,25 @@ mod tests {
 
         let rows = loadout::entries(&core, lo.id).unwrap();
         assert_eq!(rows[0].status, loadout::STATUS_ARCHIVED);
-        assert_eq!(rows[0].source_path, PathBuf::from("F:/ModLab/downloads/lux.7z"));
+        assert_eq!(
+            rows[0].source_path,
+            PathBuf::from("F:/ModLab/downloads/lux.7z")
+        );
     }
 
     #[test]
     fn uninstalling_an_archived_mod_is_refused() {
         let core = Core::open_in_memory().unwrap();
         let lo = loadout::create(&core, "skyrimse", "Main").unwrap();
-        let dl = capture(&core, "https://example.test/x", "lux.7z", Path::new("lux.7z"), None).unwrap().id();
+        let dl = capture(
+            &core,
+            "https://example.test/x",
+            "lux.7z",
+            Path::new("lux.7z"),
+            None,
+        )
+        .unwrap()
+        .id();
         let mod_id = attach_to_loadout(&core, dl, lo.id, None).unwrap();
 
         let err = uninstall(&core, mod_id).unwrap_err();
@@ -557,7 +657,9 @@ mod tests {
             ("c.7z", sky.id, Some("Gameplay")),
             ("d.7z", sky.id, None),
         ] {
-            let dl = capture(&core, "https://example.test/x", name, Path::new(name), None).unwrap().id();
+            let dl = capture(&core, "https://example.test/x", name, Path::new(name), None)
+                .unwrap()
+                .id();
             attach_to_loadout(&core, dl, lo, cat).unwrap();
         }
 

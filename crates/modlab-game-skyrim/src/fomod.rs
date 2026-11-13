@@ -148,8 +148,7 @@ fn decode_utf16(bytes: &[u8], little_endian: bool) -> String {
 /// `<description>`, no `<requiredInstallFiles>`) is not an error.
 pub fn parse(xml: &str) -> Result<Module, String> {
     let doc = Document::parse(xml).map_err(|e| format!("ModuleConfig.xml invalide : {e}"))?;
-    let config = doc
-        .root_element();
+    let config = doc.root_element();
     if config.tag_name().name() != "config" {
         return Err("ModuleConfig.xml : élément racine <config> introuvable".to_string());
     }
@@ -175,9 +174,8 @@ pub fn parse(xml: &str) -> Result<Module, String> {
                     let group_id = format!("{step_id}-g{gi}");
                     let group_name =
                         attr(group_node, "name").unwrap_or_else(|| format!("Groupe {}", gi + 1));
-                    let group_type = GroupType::parse(
-                        attr(group_node, "type").as_deref().unwrap_or(""),
-                    );
+                    let group_type =
+                        GroupType::parse(attr(group_node, "type").as_deref().unwrap_or(""));
                     let mut plugins = Vec::new();
 
                     if let Some(plugins_node) = child(group_node, "plugins") {
@@ -254,7 +252,9 @@ pub fn find_module_config(content_root: &Path) -> Option<PathBuf> {
         .filter_map(|e| e.ok())
         .find(|e| {
             e.file_type().map(|t| t.is_dir()).unwrap_or(false)
-                && e.file_name().to_string_lossy().eq_ignore_ascii_case("fomod")
+                && e.file_name()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case("fomod")
         })?
         .path();
     std::fs::read_dir(&fomod_dir)
@@ -269,7 +269,8 @@ pub fn find_module_config(content_root: &Path) -> Option<PathBuf> {
 }
 
 fn child<'a, 'input>(node: Node<'a, 'input>, tag: &str) -> Option<Node<'a, 'input>> {
-    node.children().find(|n| n.is_element() && n.has_tag_name(tag))
+    node.children()
+        .find(|n| n.is_element() && n.has_tag_name(tag))
 }
 
 fn attr(node: Node, name: &str) -> Option<String> {
@@ -396,7 +397,11 @@ mod tests {
         let module = parse(SIMPLE).unwrap();
         let files = resolve(&module, &["s0-g0-p1".to_string()]);
 
-        assert_eq!(files.len(), 2, "the required folder plus the picked plugin's");
+        assert_eq!(
+            files.len(),
+            2,
+            "the required folder plus the picked plugin's"
+        );
         assert!(files.iter().any(|f| f.source == PathBuf::from("Core")));
         assert!(files.iter().any(|f| f.source == PathBuf::from("Sombre")));
         assert!(!files.iter().any(|f| f.source == PathBuf::from("Standard")));
@@ -432,7 +437,10 @@ mod tests {
 
     #[test]
     fn unknown_group_type_falls_back_to_the_strictest_real_option() {
-        assert_eq!(GroupType::parse("SomethingNewInTheSpec"), GroupType::SelectExactlyOne);
+        assert_eq!(
+            GroupType::parse("SomethingNewInTheSpec"),
+            GroupType::SelectExactlyOne
+        );
     }
 
     #[test]
@@ -443,7 +451,10 @@ mod tests {
           </requiredInstallFiles>
         </config>"#;
         let module = parse(xml).unwrap();
-        assert_eq!(module.required_files[0].destination, PathBuf::from("readme.txt"));
+        assert_eq!(
+            module.required_files[0].destination,
+            PathBuf::from("readme.txt")
+        );
     }
 
     #[test]

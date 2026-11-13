@@ -1,5 +1,5 @@
 //! Given an already-extracted archive, work out where its files belong —
-//! see `docs/idees.md` §A3 and `docs/01-architecture-decidee.md` §9 for the
+//! see `docs/faisabilite.md` A3 and `docs/01-architecture-decidee.md` §9 for the
 //! reasoning. This only *classifies*; it doesn't move or copy a single
 //! file. Placement (actually deploying into a mod's folder) is a later,
 //! separate step, same "read/decide, then act" split as the MO2 importer.
@@ -8,7 +8,7 @@
 //! content, a wrapped `Data/` folder, a FOMOD needing the guided installer
 //! that doesn't exist yet) and says `Unknown` rather than guessing for
 //! anything else — including root-level files (SKSE loaders, ENB DLLs,
-//! `d3d11.dll`) which `docs/idees.md` §A3 covers but this doesn't yet.
+//! `d3d11.dll`) which `docs/faisabilite.md` A3 covers but this doesn't yet.
 
 use std::fs;
 use std::io;

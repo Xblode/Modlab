@@ -69,10 +69,7 @@ impl GameAdapter for SkyrimAdapter {
                 id: "data_dir",
                 label: "Dossier Data",
                 kind: PathKind::Dir,
-                detected: root
-                    .as_ref()
-                    .map(|r| r.join("Data"))
-                    .filter(|p| p.is_dir()),
+                detected: root.as_ref().map(|r| r.join("Data")).filter(|p| p.is_dir()),
             },
             PathSlot {
                 id: "usvfs_dll",
@@ -169,8 +166,8 @@ pub fn find_usvfs_dll() -> Option<PathBuf> {
 /// instead, same recovery every other slot already offers.
 pub fn find_prefs_ini() -> Option<PathBuf> {
     let profile = std::env::var_os("USERPROFILE")?;
-    let path = PathBuf::from(profile)
-        .join(r"Documents\My Games\Skyrim Special Edition\SkyrimPrefs.ini");
+    let path =
+        PathBuf::from(profile).join(r"Documents\My Games\Skyrim Special Edition\SkyrimPrefs.ini");
     path.is_file().then_some(path)
 }
 
@@ -179,8 +176,7 @@ pub fn find_prefs_ini() -> Option<PathBuf> {
 /// if Documents was relocated.
 pub fn find_saves_dir() -> Option<PathBuf> {
     let profile = std::env::var_os("USERPROFILE")?;
-    let path =
-        PathBuf::from(profile).join(r"Documents\My Games\Skyrim Special Edition\Saves");
+    let path = PathBuf::from(profile).join(r"Documents\My Games\Skyrim Special Edition\Saves");
     path.is_dir().then_some(path)
 }
 
@@ -219,14 +215,25 @@ mod tests {
         let ids: Vec<&str> = slots.iter().map(|s| s.id).collect();
         assert_eq!(
             ids,
-            ["root", "exe", "data_dir", "usvfs_dll", "prefs_ini", "saves_dir"]
+            [
+                "root",
+                "exe",
+                "data_dir",
+                "usvfs_dll",
+                "prefs_ini",
+                "saves_dir"
+            ]
         );
         // A file slot derived from a dir slot must never be reported detected
         // unless it actually exists on disk — `filter(.is_file())` above is
         // what this pins down.
         for slot in &slots {
             if let Some(p) = &slot.detected {
-                assert!(p.exists(), "{} claims a path that doesn't exist: {p:?}", slot.id);
+                assert!(
+                    p.exists(),
+                    "{} claims a path that doesn't exist: {p:?}",
+                    slot.id
+                );
             }
         }
     }

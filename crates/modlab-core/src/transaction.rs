@@ -389,7 +389,10 @@ pub fn list(core: &Core, limit: usize) -> Result<Vec<TransactionRecord>> {
                 SNAPSHOT_EVENT => match serde_json::from_str::<SnapshotPayloadOwned>(&payload) {
                     Ok(s) => (
                         kind.clone(),
-                        vec![format!("{} entrée(s) d'instance capturée(s)", s.entries.len())],
+                        vec![format!(
+                            "{} entrée(s) d'instance capturée(s)",
+                            s.entries.len()
+                        )],
                         Some(s.loadout_id),
                     ),
                     Err(_) => (kind.clone(), vec![payload], None),
@@ -625,7 +628,9 @@ mod tests {
 
         let journal = list(&core, 10).unwrap();
         assert!(
-            !journal.iter().any(|r| r.kind == SNAPSHOT_EVENT || r.kind == ROLLBACK_EVENT),
+            !journal
+                .iter()
+                .any(|r| r.kind == SNAPSHOT_EVENT || r.kind == ROLLBACK_EVENT),
             "the internal safety restore never touches the public snapshot/rollback \
              vocabulary — it would otherwise show up in the Journal and in revision_count"
         );

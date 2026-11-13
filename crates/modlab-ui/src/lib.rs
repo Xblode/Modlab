@@ -254,7 +254,8 @@ fn get_shell_snapshot(
         loadouts,
         entries,
         selected_loadout_id: selected,
-        usvfs_dll: resolve_slot(&core, &SkyrimAdapter, "usvfs_dll").map(|p| p.display().to_string()),
+        usvfs_dll: resolve_slot(&core, &SkyrimAdapter, "usvfs_dll")
+            .map(|p| p.display().to_string()),
     })
 }
 
@@ -279,14 +280,18 @@ pub struct GamePathSlotDto {
 /// has on file as a human override. Read-only (Lecture tier, §7.2): nothing
 /// is written here, so it needs no confirmation.
 #[tauri::command]
-fn game_path_slots(state: State<AppState>, game_id: String) -> Result<Vec<GamePathSlotDto>, String> {
+fn game_path_slots(
+    state: State<AppState>,
+    game_id: String,
+) -> Result<Vec<GamePathSlotDto>, String> {
     let adapter = adapters()
         .into_iter()
         .find(|a| a.id() == game_id)
         .ok_or_else(|| format!("jeu inconnu : {game_id}"))?;
     let overrides = {
         let core = state.core.lock().map_err(|e| e.to_string())?;
-        core.game_path_overrides(&game_id).map_err(|e| e.to_string())?
+        core.game_path_overrides(&game_id)
+            .map_err(|e| e.to_string())?
     };
     Ok(adapter
         .path_slots()
@@ -386,7 +391,8 @@ fn sync_engine_mod_direct_install(
     let Some(row) = rows.into_iter().find(|r| r.mod_id == mod_id) else {
         return Ok(());
     };
-    if row.status != loadout::STATUS_INSTALLED || !modlab_game_skyrim::engine::is_engine_mod(&row.name)
+    if row.status != loadout::STATUS_INSTALLED
+        || !modlab_game_skyrim::engine::is_engine_mod(&row.name)
     {
         return Ok(());
     }
@@ -807,7 +813,11 @@ fn rename_mod(
 /// Soft-delete only — see `download::remove`'s doc. Nothing on disk is
 /// touched, so there is no folder to clean up here.
 #[tauri::command]
-fn delete_mod(state: State<AppState>, mod_id: i64, loadout_id: i64) -> Result<Vec<ModRowDto>, String> {
+fn delete_mod(
+    state: State<AppState>,
+    mod_id: i64,
+    loadout_id: i64,
+) -> Result<Vec<ModRowDto>, String> {
     let core = state.core.lock().map_err(|e| e.to_string())?;
     download::remove(&core, mod_id).map_err(|e| e.to_string())?;
     entries_dto(&core, loadout_id)
@@ -1089,7 +1099,11 @@ fn install_fomod(
     let module = read_fomod_module(&content_root)?;
     for step in &module.steps {
         for group in &step.groups {
-            let count = group.plugins.iter().filter(|p| picked.contains(&p.id)).count();
+            let count = group
+                .plugins
+                .iter()
+                .filter(|p| picked.contains(&p.id))
+                .count();
             if !group.group_type.accepts(count) {
                 return Err(format!(
                     "« {} » : sélection invalide pour le groupe « {} »",
@@ -1192,7 +1206,9 @@ fn downloads_dir_dto(state: &State<AppState>) -> Result<DownloadsDirDto, String>
     let override_path = core
         .game_path_override(downloads::SETTINGS_SCOPE, downloads::DOWNLOADS_DIR_SLOT)
         .map_err(|e| e.to_string())?;
-    let effective = override_path.clone().unwrap_or_else(|| default_path.clone());
+    let effective = override_path
+        .clone()
+        .unwrap_or_else(|| default_path.clone());
     Ok(DownloadsDirDto {
         default_path,
         override_path,
@@ -1220,8 +1236,12 @@ fn set_downloads_dir_override(
     }
     {
         let core = state.core.lock().map_err(|e| e.to_string())?;
-        core.set_game_path_override(downloads::SETTINGS_SCOPE, downloads::DOWNLOADS_DIR_SLOT, path)
-            .map_err(|e| e.to_string())?;
+        core.set_game_path_override(
+            downloads::SETTINGS_SCOPE,
+            downloads::DOWNLOADS_DIR_SLOT,
+            path,
+        )
+        .map_err(|e| e.to_string())?;
     }
     downloads_dir_dto(&state)
 }
@@ -1330,8 +1350,7 @@ fn minecraft_import_instance(
     }
     let core = state.core.lock().map_err(|e| e.to_string())?;
     let root = minecraft_root(&core)?;
-    let (created, imported) =
-        modlab_game_minecraft::instance::import_instance(&core, &root, name)?;
+    let (created, imported) = modlab_game_minecraft::instance::import_instance(&core, &root, name)?;
     Ok(Mo2ImportResultDto {
         loadout: LoadoutDto {
             id: created.id,
