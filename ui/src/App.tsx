@@ -16,7 +16,6 @@ import {
   restoreLoadout,
   attachDownload,
   onDownloadCaptured,
-  listDownloads,
   inspectArchivedMod,
   installArchivedMod,
   installFomod,
@@ -396,7 +395,7 @@ export default function App() {
 
   const { conflictByMod } = useConflicts(activeLoadout, entries);
   const { txs, refreshTxs } = useTransactions(txOpen);
-  const { downloads, refreshDownloads } = useDownloads(txOpen, downloadsRefreshKey);
+  const { downloads } = useDownloads(txOpen, downloadsRefreshKey);
 
   /**
    * The scan only covers enabled mods it could read. A disabled mod, or one
