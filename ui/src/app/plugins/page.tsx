@@ -131,6 +131,7 @@ export default function PluginsPage({ loadoutId }: { loadoutId: number | null })
           <div>
             <Ico name="info" />
             <h3>{loadoutId == null ? "Aucun plugin" : "Lecture en cours…"}</h3>
+            {loadoutId == null ? <p>Choisis une instance pour voir ses plugins</p> : null}
           </div>
         </div>
       </div>
@@ -144,7 +145,7 @@ export default function PluginsPage({ loadoutId }: { loadoutId: number | null })
           <div>
             <Ico name="info" />
             <h3>Aucun plugin</h3>
-            <p>Aucun .esp/.esm/.esl trouvé dans les mods activés de cette instance.</p>
+            <p>Aucun .esp, .esm ou .esl dans les mods activés</p>
           </div>
         </div>
       </div>

@@ -22,7 +22,7 @@ export function ConfigPane({ mod }: { mod: ModRow | null }) {
       ) : (
         <>
           <h2>Aucun mod sélectionné</h2>
-          <p className="muted">Clique une ligne de la table.</p>
+          <p className="muted">Clique une ligne de la table</p>
         </>
       )}
       <div style={{ marginTop: 12 }}>

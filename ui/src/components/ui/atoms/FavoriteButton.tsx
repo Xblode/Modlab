@@ -1,5 +1,6 @@
 import type { ComponentProps } from "react";
 import { Ico } from "../../../Ico";
+import { tip } from "../molecules/Tooltip";
 
 export function FavoriteButton({
   className,
@@ -21,7 +22,7 @@ export function FavoriteButton({
     <button
       className={classNames + (on ? " on" : "")}
       type="button"
-      title={on ? (titleOn ?? "Retirer des favoris") : (titleOff ?? "Ajouter aux favoris")}
+      {...tip(on ? (titleOn ?? "Retirer des favoris") : (titleOff ?? "Ajouter aux favoris"))}
       aria-pressed={on}
       onClick={(e) => {
         e.stopPropagation();

@@ -13,7 +13,6 @@ export type HeaderStat = {
   id: string;
   label: string;
   value: ReactNode;
-  icon: string;
   title?: string;
   onClick?: () => void;
 };
@@ -83,7 +82,6 @@ export function GameDashboardHeader({ name, artwork, metadata, stats, actions }:
                 key={stat.id}
                 label={stat.label}
                 value={stat.value}
-                icon={stat.icon}
                 title={stat.title}
                 onClick={stat.onClick}
               />

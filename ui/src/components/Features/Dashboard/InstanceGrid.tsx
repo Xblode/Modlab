@@ -60,7 +60,7 @@ export function InstanceGrid({
                   {CHANNEL_LETTER[l.channel]}.{l.revision}
                 </span>
                 <span>{l.modCount} mods</span>
-                {cur ? <span className="on">● active</span> : null}
+                {cur ? <span className="on"><span className="hd" />active</span> : null}
               </span>
             </span>
             <FavoriteButton on={fav} onToggle={() => onToggleFavorite(l.id)} />

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Ico } from "../../Ico";
+import { tip } from "../ui";
 import { TabStrip } from "../Features/Tabs/TabStrip";
 import type { TabDef, TabId } from "../../gameChrome";
 
@@ -118,7 +119,7 @@ export function Titlebar({
         <button
           type="button"
           className="ti"
-          title="Ouvrir le navigateur intégré"
+          {...tip("Navigateur intégré")}
           aria-pressed={webActive}
           onClick={onOpenWeb}
         >
@@ -136,7 +137,7 @@ export function Titlebar({
         <button
           type="button"
           className="ti"
-          title="Console"
+          {...tip("Console", "Ctrl J")}
           onClick={onOpenConsole}
         >
           <Ico name="term" />
@@ -147,8 +148,7 @@ export function Titlebar({
         <button
           type="button"
           className="tb-win"
-          title="Réduire"
-          aria-label="Réduire"
+          {...tip("Réduire")}
           onClick={minimize}
         >
           <Ico name="minimize" className="sm" />
@@ -156,8 +156,7 @@ export function Titlebar({
         <button
           type="button"
           className="tb-win"
-          title={maximized ? "Restaurer" : "Agrandir"}
-          aria-label={maximized ? "Restaurer" : "Agrandir"}
+          {...tip(maximized ? "Restaurer" : "Agrandir")}
           onClick={toggleMaximize}
         >
           <Ico name={maximized ? "restore" : "maximize"} className="sm" />
@@ -165,8 +164,7 @@ export function Titlebar({
         <button
           type="button"
           className="tb-win danger"
-          title="Fermer"
-          aria-label="Fermer"
+          {...tip("Fermer")}
           onClick={close}
         >
           <Ico name="x" className="sm" />

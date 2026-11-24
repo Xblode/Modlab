@@ -55,8 +55,8 @@ export default function ModsPage({
         <div className="empty">
           <div>
             <Ico name="box" />
-            <h3>Aucun mod dans ce loadout</h3>
-            <p>Importe une instance existante pour la remplir.</p>
+            <h3>Aucun mod</h3>
+            <p>Importe une instance existante pour la remplir</p>
             <Button variant="sm" onClick={onImportSource} style={{ marginTop: 10 }}>
               <Ico name="download" className="sm" />
               Importer…

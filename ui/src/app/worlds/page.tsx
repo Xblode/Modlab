@@ -33,12 +33,13 @@ export default function WorldsPage() {
           title="Mondes"
           icon="map"
           names={content?.worlds ?? null}
-          emptyLabel="Aucun monde dans saves/."
+          emptyLabel="Aucun monde"
+          emptyHint="Rien dans saves/"
         />
         <div className="dh">Détails d’un monde</div>
         {/* Not a `.tr` row: those fade long text out at the right edge,
             which is right for a mod name and wrong for a sentence. */}
-        <p className="muted" style={{ margin: "0 2px", fontSize: 12.5, maxWidth: "62ch" }}>
+        <p className="muted" style={{ margin: "0 2px", fontSize: "var(--fs-md)", maxWidth: "62ch" }}>
           Graine, mode de jeu et dernière session vivent dans level.dat (NBT
           binaire) : pas de lecteur NBT dans ModLab pour l’instant.
         </p>

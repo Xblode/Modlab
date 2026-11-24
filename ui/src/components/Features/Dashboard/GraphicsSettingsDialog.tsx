@@ -160,7 +160,8 @@ export function GraphicsSettingsDialog({ onClose }: { onClose: () => void }) {
                   <button
                     key={level}
                     type="button"
-                    className={`btn sm ${draft.antialiasing === level ? "accent" : "ghost"}`}
+                    className={`btn sm ${draft.antialiasing === level ? "" : "ghost"}`}
+                    aria-pressed={draft.antialiasing === level}
                     onClick={() => setDraft((d) => ({ ...d, antialiasing: level }))}
                   >
                     {level === 0 ? "Off" : `${level}x`}

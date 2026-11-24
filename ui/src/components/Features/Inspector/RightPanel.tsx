@@ -68,7 +68,7 @@ export function RightPanel({
             Claude
           </button>
           <span className="spacer" />
-          <IconButton name="x" title="Fermer" onClick={onClose} />
+          <IconButton name="x" title="Fermer le panneau" onClick={onClose} />
         </>
       }
     >

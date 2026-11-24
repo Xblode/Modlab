@@ -5,6 +5,7 @@ import { Pop, type PopItem } from "../../../Pop";
 import { Checkbox, ConfirmDialog, IconButton } from "../../ui";
 import { MenuPicker, type MenuItem } from "../MenuPicker/MenuPicker";
 import { categoryIcon } from "../../../categoryIcon";
+import { useRowHeight } from "../../../density";
 import type { ModRow } from "../../../api";
 import type { ModConflicts } from "../../../api";
 import { ConflictBadge } from "./ConflictBadge";
@@ -24,8 +25,6 @@ const ROW_MENU_ITEMS: MenuItem[] = [
   { id: "delete", label: "Supprimer…", icon: "trash", danger: true },
 ];
 
-/** Row and header height: the virtualizer's fixed size, so a pointer position maps to a slot with plain arithmetic (no DOM lookup, most rows are not mounted). */
-const ROW_H = 26;
 /** Distance from the top/bottom edge where a drag starts scrolling the list. */
 const EDGE = 36;
 /** Pointer travel before a press on the handle counts as a drag, not a click. */
@@ -86,12 +85,18 @@ export function ModTable({
   onRevealArchive,
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
+  // Row and header height: the virtualizer's fixed size, so a pointer position maps to a slot with plain arithmetic (no DOM lookup, most rows are not mounted). It follows the density setting.
+  const ROW_H = useRowHeight();
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 26,
+    estimateSize: () => ROW_H,
     overscan: 12,
   });
+  // Cached sizes are stale once the density changes the row height.
+  useEffect(() => {
+    virtualizer.measure();
+  }, [ROW_H]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [editingCategory, setEditingCategory] = useState<number | null>(null);
   const [categoryDraft, setCategoryDraft] = useState("");
@@ -341,7 +346,7 @@ export function ModTable({
                 top: 0,
                 left: 0,
                 width: "100%",
-                transform: `translateY(${v.start + 26}px)`,
+                transform: `translateY(${v.start + ROW_H}px)`,
                 display: "grid",
                 gridTemplateColumns: COLUMNS,
               }}
@@ -354,11 +359,9 @@ export function ModTable({
             >
               <div
                 className={`grip ${canReorder ? "" : "locked"}`}
-                title={
-                  canReorder
-                    ? "Glisser pour changer la priorité (ou Alt+↑ / Alt+↓). Le mod du bas gagne les conflits."
-                    : "Efface la recherche pour changer l'ordre des mods."
-                }
+                {...(canReorder
+                  ? { "data-tip": "Glisser pour changer la priorité", "data-tip-key": "Alt ↑ ↓" }
+                  : { "data-tip": "Efface la recherche pour réordonner" })}
                 onPointerDown={(e) => beginDrag(e, m, v.index)}
                 onClick={(e) => e.stopPropagation()}
               >
@@ -370,7 +373,7 @@ export function ModTable({
                   // ticking it could not deploy a single file.
                   <IconButton
                     name="box"
-                    title={`Archive non extraite — installer « ${m.name} »`}
+                    title="Installer l’archive"
                     onClick={(e) => {
                       e.stopPropagation();
                       onInstallArchived(m);
@@ -423,7 +426,7 @@ export function ModTable({
                   />
                   <IconButton
                     name="more"
-                    title="Plus…"
+                    title="Plus d’actions"
                     ref={(el) => {
                       moreRefs.current.set(m.modId, el);
                     }}

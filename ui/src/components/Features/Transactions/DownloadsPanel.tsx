@@ -1,6 +1,6 @@
 import type { DetectedGame, Download, LoadoutDto } from "../../../api";
 import { Ico } from "../../../Ico";
-import { IconButton } from "../../ui";
+import { IconButton, SideEmpty } from "../../ui";
 import type { BottomTab } from "./BottomTab";
 
 function formatSize(bytes: number | null): string {
@@ -92,14 +92,13 @@ export function DownloadsPanel({
           <span className="cnt">{downloads?.length ?? 0}</span>
         </button>
         <span className="spacer" />
-        <IconButton name="x" title="Fermer (Ctrl+J)" onClick={onClose} />
+        <IconButton name="x" title="Fermer" shortcut="Ctrl J" onClick={onClose} />
       </div>
       <div className="tp-body">
         {downloads && downloads.length === 0 ? (
-          <div className="hint" style={{ border: 0 }}>
-            Aucun téléchargement capturé pour l'instant — ouvre le navigateur
-            intégré et clique un lien de téléchargement.
-          </div>
+          <SideEmpty title="Aucun téléchargement">
+            Ouvre le navigateur intégré et clique un lien de téléchargement
+          </SideEmpty>
         ) : null}
         {groups.map((group) => (
           <div key={group.key} className="tx">

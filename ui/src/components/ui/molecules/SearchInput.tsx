@@ -13,10 +13,10 @@ import { Input } from "../atoms/Input";
  * drop if `ui-designer` ever gives the compact pill a class of its own.
  */
 const COMPACT: CSSProperties = {
-  height: 28,
+  height: "var(--ctl)",
   padding: "0 10px",
   borderRadius: 6,
-  fontSize: 12,
+  fontSize: "var(--fs-md)",
   boxShadow: "none",
   background: "var(--c2)",
 };

@@ -13,7 +13,7 @@ export default function RepertoirePage({ loadoutId }: { loadoutId: number | null
       loadoutId={loadoutId}
       fetchEntries={getLoadoutDirectory}
       emptyTitle="Aucun fichier"
-      emptyBody="Aucun mod activé dans cette instance, ou leurs dossiers sont illisibles."
+      emptyBody="Aucun mod activé, ou leurs dossiers sont illisibles"
     />
   );
 }

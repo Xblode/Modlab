@@ -12,6 +12,7 @@ import {
 } from "../../../api";
 import { Ico } from "../../../Ico";
 import { Badge, IconButton, Input, Panel, Switch } from "../../ui";
+import type { Density } from "../../../density";
 
 export type SettingsMenu =
   | "general"
@@ -136,7 +137,7 @@ function GamePathList({
                   if (e.key === "Escape") setEditing(null);
                 }}
                 onBlur={() => void save(slot.id)}
-                style={{ marginTop: 4, height: 28, fontFamily: "var(--font-mono)", fontSize: 11.5 }}
+                style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 12 }}
               />
             ) : (
               <div
@@ -235,7 +236,7 @@ function DownloadsDirRow({ onUnwired }: { onUnwired: (label: string) => void }) 
               if (e.key === "Escape") setEditing(false);
             }}
             onBlur={() => void save()}
-            style={{ marginTop: 4, height: 28, fontFamily: "var(--font-mono)", fontSize: 11.5 }}
+            style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 12 }}
           />
         ) : (
           <div
@@ -300,6 +301,8 @@ export function SettingsPane({
   onSelectModel,
   communityUpdate,
   onToggleCommunityUpdate,
+  density,
+  onDensityChange,
   onUnwired,
 }: {
   menu: SettingsMenu;
@@ -313,6 +316,9 @@ export function SettingsPane({
    * lives in the `"general"` branch below. */
   communityUpdate: boolean;
   onToggleCommunityUpdate: () => void;
+  /** Row and control size, remembered with the rest of the shell's memory. */
+  density: Density;
+  onDensityChange: (density: Density) => void;
   onUnwired: (label: string) => void;
 }) {
   if (menu === "appearance") {
@@ -327,6 +333,25 @@ export function SettingsPane({
               onClick={() => onUnwired(`Thème : ${label}`)}
             >
               <Ico name={label === "Clair" ? "sparkle" : label === "Sombre" ? "disc" : "refresh"} />
+              <span className="lbl">{label}</span>
+            </button>
+          ))}
+        </SettingsGroup>
+        <SettingsGroup title="Densité">
+          {(
+            [
+              ["compact", "Compact"],
+              ["comfortable", "Confortable"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={`tr ${density === id ? "sel" : ""}`}
+              aria-pressed={density === id}
+              onClick={() => onDensityChange(id)}
+            >
+              <Ico name={density === id ? "check" : "box"} />
               <span className="lbl">{label}</span>
             </button>
           ))}
@@ -357,7 +382,7 @@ export function SettingsPane({
               <Ico name={llm === id ? "check" : "box"} />
               <span className="lbl">
                 {name}
-                <div className="muted" style={{ fontSize: 11 }}>
+                <div className="muted" style={{ fontSize: 12 }}>
                   {sub}
                 </div>
               </span>
@@ -383,7 +408,7 @@ export function SettingsPane({
           {games.length === 0 ? (
             <SettingsRow
               title="Aucun jeu détecté"
-              desc="Aucun adaptateur n'a trouvé d'installation sur cette machine."
+              desc="Aucune installation trouvée sur cette machine"
             />
           ) : (
             games.map((g) => (

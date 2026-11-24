@@ -167,12 +167,8 @@ export function BrowserPane({
           <div className="empty">
             <div>
               <Ico name="globe" />
-              <h3>Navigateur indisponible dans l’aperçu</h3>
-              <p>
-                La page est un vrai WebView2 natif, posé par-dessus la fenêtre —
-                il n’existe que dans le shell Tauri. Lance l’application pour
-                naviguer et capturer des téléchargements.
-              </p>
+              <h3>Navigateur indisponible</h3>
+              <p>Lance l’application ModLab pour naviguer</p>
             </div>
           </div>
         )}

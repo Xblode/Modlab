@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import { Ico } from "../../../Ico";
-import { IconButton, Input } from "../../ui";
+import { IconButton, Input, tip } from "../../ui";
 
 /**
  * The bottom dock's search / command bar. The field itself is read-only on
@@ -31,14 +31,14 @@ export function Composer({
             value={draft}
             onChange={(e) => onDraftChange(e.target.value)}
             onFocus={onFocus}
-            placeholder="Rechercher ou commander… (Ctrl+K)"
+            placeholder="Rechercher ou commander"
             autoComplete="off"
             readOnly
           />
           <span className="kbd">Ctrl K</span>
         </div>
         <div className="composer-toolbar">
-          <button className="cb-add" type="button" title="Ajouter">
+          <button className="cb-add" type="button" {...tip("Ajouter")}>
             +
           </button>
           <button className="cb-select" type="button">

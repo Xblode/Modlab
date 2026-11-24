@@ -3,9 +3,9 @@ import { CHANNEL_LETTER } from "../../../channel";
 import { Ico } from "../../../Ico";
 
 /**
- * The sidebar's status line: what the shell is pointed at, and which
- * deployment backend the game's adapter declares — or that the game is
- * running, which replaces both.
+ * The sidebar's status line. Left: what concerns the game (its short name and
+ * the deployment backend its adapter declares — or that the game is running,
+ * which replaces both). Right: the current instance, name then revision.
  */
 export function SidebarFooter({
   running,
@@ -33,21 +33,26 @@ export function SidebarFooter({
         </span>
       ) : (
         <>
-          <span className="fi fade" title="Contexte">
+          <span className="fi" title="Jeu">
             <Ico name="box" />
             {gameShort ?? "—"}
-            {loadoutName ? ` · ${loadoutName}` : ""}
-            {loadoutName && channel && revision !== undefined
-              ? ` · ${CHANNEL_LETTER[channel]}.${revision}`
-              : ""}
           </span>
-          <span className="spacer" />
-          <span className="fi" title="Backend de déploiement">
+          <span className="fi" title="Déploiement">
             <Ico name="layers" />
             {deploymentLabel ?? "—"}
           </span>
         </>
       )}
+      {loadoutName ? (
+        <span className="fi end" title="Instance en cours">
+          <span className="fade">{loadoutName}</span>
+          {channel && revision !== undefined ? (
+            <span className="mono">
+              {CHANNEL_LETTER[channel]}.{revision}
+            </span>
+          ) : null}
+        </span>
+      ) : null}
     </div>
   );
 }

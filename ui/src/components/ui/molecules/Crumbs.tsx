@@ -27,7 +27,7 @@ export function Crumbs({ path, tail }: { path: ReactNode[]; tail?: ReactNode }) 
       {tail !== undefined ? (
         <>
           <span className="spacer" />
-          <span className="muted" style={{ fontSize: 11.5 }}>
+          <span className="muted" style={{ fontSize: 12 }}>
             {tail}
           </span>
         </>

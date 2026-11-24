@@ -1,5 +1,6 @@
 import type { RightTab } from "./components/Features/Inspector/RightPanel";
 import type { TabId } from "./gameChrome";
+import { DEFAULT_DENSITY, isDensity, type Density } from "./density";
 
 /**
  * What the shell remembers between launches — **browser-local only**, same
@@ -26,6 +27,8 @@ export type UiMemory = {
    * flag. Off by default: nobody sees the mockup screens unless they opt in
    * from Réglages → Général. */
   communityUpdate: boolean;
+  /** Row and control size (`data-density` on the root element). */
+  density: Density;
 };
 
 const DEFAULTS: UiMemory = {
@@ -37,6 +40,7 @@ const DEFAULTS: UiMemory = {
   rightTab: "info",
   llm: "qwen-1.5b",
   communityUpdate: false,
+  density: DEFAULT_DENSITY,
 };
 
 export function readUiMemory(): UiMemory {
@@ -45,7 +49,8 @@ export function readUiMemory(): UiMemory {
     if (!raw) return DEFAULTS;
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return DEFAULTS;
-    return { ...DEFAULTS, ...(parsed as Partial<UiMemory>) };
+    const merged = { ...DEFAULTS, ...(parsed as Partial<UiMemory>) };
+    return isDensity(merged.density) ? merged : { ...merged, density: DEFAULT_DENSITY };
   } catch {
     return DEFAULTS;
   }

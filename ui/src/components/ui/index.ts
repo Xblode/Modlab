@@ -15,10 +15,12 @@ export { Switch } from "./atoms/Switch";
 
 export { ConfirmDialog } from "./molecules/ConfirmDialog";
 export { Crumbs } from "./molecules/Crumbs";
+export { SideEmpty } from "./molecules/SideEmpty";
 export { SearchInput } from "./molecules/SearchInput";
 export { SideBack } from "./molecules/SideBack";
 export { StatTile } from "./molecules/StatTile";
 export { Toast } from "./molecules/Toast";
+export { tip, TooltipLayer } from "./molecules/Tooltip";
 
 export { Accordion } from "./organisms/Accordion";
 export { Panel } from "./organisms/Panel";

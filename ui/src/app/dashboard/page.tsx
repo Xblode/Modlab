@@ -11,7 +11,7 @@ import {
   NOT_TRACKED,
   NOT_TRACKED_TITLE,
 } from "../../components/Features/Dashboard/placeholders";
-import { Crumbs, Panel } from "../../components/ui";
+import { Crumbs, Panel, SideEmpty } from "../../components/ui";
 import { chromeFor, type TabId } from "../../gameChrome";
 import { Ico } from "../../Ico";
 import { Pop } from "../../Pop";
@@ -142,10 +142,10 @@ export default function DashboardPage({
               { id: "instances", content: <><b>{loadouts.length}</b> instance{loadouts.length > 1 ? "s" : ""}</> },
             ]}
             stats={[
-              { id: "playtime", label: "Temps de jeu", value: NOT_TRACKED, icon: "history", title: NOT_TRACKED_TITLE },
-              { id: "session", label: "Dernière session", value: NOT_TRACKED, icon: "play", title: NOT_TRACKED_TITLE },
-              { id: "crashes", label: "Crashs · 30 j", value: NOT_TRACKED, icon: "info", title: `${NOT_TRACKED_TITLE} — aucun journal de crash`, onClick: openHealth },
-              { id: "health", label: "Santé", value: "Non vérifié", icon: "info", title: "Aucune vérification de santé n’a encore tourné", onClick: openHealth },
+              { id: "playtime", label: "Temps de jeu", value: NOT_TRACKED, title: NOT_TRACKED_TITLE },
+              { id: "session", label: "Dernière session", value: NOT_TRACKED, title: NOT_TRACKED_TITLE },
+              { id: "crashes", label: "Crashs · 30 j", value: NOT_TRACKED, title: `${NOT_TRACKED_TITLE} — aucun journal de crash`, onClick: openHealth },
+              { id: "health", label: "Santé", value: "Non vérifié", title: "Aucune vérification de santé n’a encore tourné", onClick: openHealth },
             ]}
             actions={headerActions}
           />
@@ -228,16 +228,16 @@ export default function DashboardPage({
 
             <div className="dh">Outils</div>
             <div className="tools-row">
-              <span className="muted" style={{ fontSize: 12, gridColumn: "1 / -1" }}>
-                Le Core n’a pas encore de registre d’outils (LOOT, xEdit, Nemesis…).
-              </span>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <SideEmpty title="Aucun outil">Le Core n’a pas encore de registre d’outils</SideEmpty>
+              </div>
             </div>
 
             <Panel
               icon="info"
               title="Ce que le Core ne suit pas encore"
               bodyClassName="why"
-              style={{ marginTop: 22 }}
+              style={{ marginTop: 24 }}
             >
               Temps de jeu, dernière session, crashs et santé n’ont <b>aucune source</b>{" "}
               dans le Core aujourd’hui : il n’existe ni journal de sessions ni métriques.

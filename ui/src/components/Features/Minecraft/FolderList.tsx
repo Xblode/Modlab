@@ -1,4 +1,5 @@
 import { Ico } from "../../../Ico";
+import { SideEmpty } from "../../ui";
 
 /**
  * One titled list of entry names read straight from an instance folder
@@ -12,12 +13,15 @@ export function FolderList({
   icon,
   names,
   emptyLabel,
+  emptyHint,
 }: {
   title: string;
   icon: string;
   names: string[] | null;
   /** Shown when the folder exists but holds nothing ModLab can list. */
   emptyLabel: string;
+  /** One short phrase under the title. */
+  emptyHint: string;
 }) {
   return (
     <>
@@ -26,13 +30,11 @@ export function FolderList({
         {names ? <span className="cnt"> ({names.length})</span> : null}
       </div>
       {names === null ? (
-        <div className="tr muted" style={{ fontStyle: "italic" }}>
+        <div className="tr muted">
           Lecture du dossier…
         </div>
       ) : names.length === 0 ? (
-        <div className="tr muted" style={{ fontStyle: "italic" }}>
-          {emptyLabel}
-        </div>
+        <SideEmpty title={emptyLabel}>{emptyHint}</SideEmpty>
       ) : (
         names.map((name) => (
           <div className="tr-row" key={name}>

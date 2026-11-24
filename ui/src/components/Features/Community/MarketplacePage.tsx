@@ -39,7 +39,7 @@ export function MarketplacePage({ onUnwired }: { onUnwired: (label: string) => v
                   <Ico name={item.icon} />
                 </div>
                 <div className="market-card-name">{item.name}</div>
-                <div className="muted" style={{ fontSize: 11 }}>{item.kindLabel}</div>
+                <div className="muted" style={{ fontSize: "var(--fs-xs)" }}>{item.kindLabel}</div>
                 <div className="market-card-foot">
                   {item.owned ? (
                     <Badge tone="root">possédé</Badge>

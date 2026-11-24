@@ -103,7 +103,7 @@ export function CommandPalette({
               setQuery(e.target.value);
               setCursor(0);
             }}
-            placeholder="Commande, instance, mod…"
+            placeholder="Commande, instance, mod"
             spellCheck={false}
           />
           <span className="kbd">Échap</span>
@@ -134,7 +134,7 @@ export function CommandPalette({
                   <span>
                     {it.label}
                     {it.sub ? (
-                      <span className="muted" style={{ marginLeft: 6, fontSize: 11 }}>
+                      <span className="muted" style={{ marginLeft: 6, fontSize: "var(--fs-xs)" }}>
                         {it.sub}
                       </span>
                     ) : null}

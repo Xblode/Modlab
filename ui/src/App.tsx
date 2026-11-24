@@ -1,4 +1,4 @@
-import { FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   getShellSnapshot,
   createLoadout,
@@ -46,6 +46,7 @@ import {
 } from "./sessionNotice";
 import { useFavorites } from "./favorites";
 import { readUiMemory, writeUiMemory } from "./uiMemory";
+import { applyDensity, type Density } from "./density";
 import { useConflicts } from "./hooks/useConflicts";
 import { useTransactions } from "./hooks/useTransactions";
 import { useDownloads } from "./hooks/useDownloads";
@@ -123,6 +124,11 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [llm, setLlm] = useState(initialMemory.llm);
   const [communityUpdate, setCommunityUpdate] = useState(initialMemory.communityUpdate);
+  const [density, setDensity] = useState<Density>(initialMemory.density);
+  // Before paint, so a remembered "compact" never flashes the comfortable sizes.
+  useLayoutEffect(() => {
+    applyDensity(density);
+  }, [density]);
   const [createOpen, setCreateOpen] = useState(false);
   const [mo2Open, setMo2Open] = useState(false);
   /** Set once `installArchived` finds a FOMOD, so the wizard replaces the
@@ -277,8 +283,8 @@ export default function App() {
   const hasSnap = snap !== null;
   useEffect(() => {
     if (!hasSnap) return;
-    writeUiMemory({ gameId, loadoutId, tab, expanded, rightOpen, rightTab, llm, communityUpdate });
-  }, [hasSnap, gameId, loadoutId, tab, expanded, rightOpen, rightTab, llm, communityUpdate]);
+    writeUiMemory({ gameId, loadoutId, tab, expanded, rightOpen, rightTab, llm, communityUpdate, density });
+  }, [hasSnap, gameId, loadoutId, tab, expanded, rightOpen, rightTab, llm, communityUpdate, density]);
 
   const games = snap?.games ?? [];
   const loadouts = snap?.loadouts ?? [];
@@ -1303,6 +1309,8 @@ export default function App() {
           }}
           communityUpdate={communityUpdate}
           onToggleCommunityUpdate={() => setCommunityUpdate((v) => !v)}
+          density={density}
+          onDensityChange={setDensity}
           onUnwired={unwired}
         />
       ) : act === "profile" ? (

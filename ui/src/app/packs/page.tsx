@@ -32,13 +32,15 @@ export default function PacksPage() {
           title="Resource packs"
           icon="image"
           names={content?.resourcePacks ?? null}
-          emptyLabel="Aucun resource pack dans ce dossier."
+          emptyLabel="Aucun resource pack"
+          emptyHint="Rien dans resourcepacks/"
         />
         <FolderList
           title="Shader packs"
           icon="sparkle"
           names={content?.shaderPacks ?? null}
-          emptyLabel="Aucun shader pack dans ce dossier."
+          emptyLabel="Aucun shader pack"
+          emptyHint="Rien dans shaderpacks/"
         />
       </div>
     </div>

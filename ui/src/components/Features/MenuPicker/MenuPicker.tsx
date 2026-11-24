@@ -1,4 +1,5 @@
 import { Ico } from "../../../Ico";
+import { readRowHeight } from "../../../density";
 import { useRef, useLayoutEffect, useState, useEffect, type RefObject } from "react";
 
 export type MenuItem = {
@@ -108,7 +109,8 @@ const OPEN_DELAY_MS = 170;
 const CLOSE_DELAY_MS = 220;
 /** Panel geometry is only needed to decide flips before the panel exists. */
 const PANEL_WIDTH = 300;
-const ROW_HEIGHT = 27;
+/** Gap between two items in `.menu-picker-items`. */
+const ITEM_GAP = 1;
 
 type Pos = { x: number; y: number };
 
@@ -157,7 +159,7 @@ function MenuLevel({
     if (x + PANEL_WIDTH > window.innerWidth - 6) {
       x = Math.max(6, p.left - PANEL_WIDTH - 2);
     }
-    const estimatedHeight = (openItem.children?.length ?? 0) * ROW_HEIGHT + 12;
+    const estimatedHeight = (openItem.children?.length ?? 0) * (readRowHeight() + ITEM_GAP) + 12;
     const y = Math.max(
       6,
       Math.min(r.top - 5, window.innerHeight - 6 - estimatedHeight),

@@ -11,8 +11,8 @@ export default function ArchivesPage({ loadoutId }: { loadoutId: number | null }
     <DirectoryList
       loadoutId={loadoutId}
       fetchEntries={getLoadoutArchives}
-      emptyTitle="Aucune archive BSA/BA2"
-      emptyBody="Aucun .bsa/.ba2 trouvé dans les mods activés de cette instance."
+      emptyTitle="Aucune archive"
+      emptyBody="Aucun .bsa ou .ba2 dans les mods activés"
     />
   );
 }

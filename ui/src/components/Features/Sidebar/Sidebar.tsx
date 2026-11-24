@@ -6,7 +6,7 @@ import { useTransactions } from "../../../hooks/useTransactions";
 import { CHANNEL_LETTER } from "../../../channel";
 import { KIND_LABELS } from "../../../api";
 import { Ico } from "../../../Ico";
-import { Accordion, ChannelBadge, IconButton, SearchInput } from "../../ui";
+import { Accordion, ChannelBadge, IconButton, SearchInput, SideEmpty } from "../../ui";
 import { CommunityMenu, type CommunityMenuId } from "../Community/CommunityMenu";
 import { MenuPicker, type MenuItem } from "../MenuPicker/MenuPicker";
 import type { SettingsMenu } from "../Settings/SettingsPane";
@@ -261,16 +261,26 @@ export function Sidebar({
               compact
               value={query}
               onChange={onQueryChange}
-              placeholder="Filtrer les mods…"
+              placeholder="Filtrer les mods"
             />
           </div>
         ) : act === "history" ? (
           <>
             <Accordion title="Branches" count={gameLoadouts.length}>
               {gameLoadouts.length === 0 ? (
-                <div className="tr muted" style={{ fontStyle: "italic" }}>
-                  Aucune branche pour ce jeu.
-                </div>
+                <SideEmpty
+                  title="Aucune branche"
+                  action={
+                    activeGame ? (
+                      <button className="btn sm" type="button" onClick={onCreateLoadout}>
+                        <Ico name="branch" className="sm" />
+                        Créer une branche
+                      </button>
+                    ) : undefined
+                  }
+                >
+                  Aucune pour ce jeu
+                </SideEmpty>
               ) : (
                 gameLoadouts.map((l) => (
                   <div
@@ -306,47 +316,33 @@ export function Sidebar({
                 <IconButton
                   name="history"
                   className="sec-act"
-                  title="Panneau complet (Ctrl+J)"
+                  title="Panneau complet"
+                  shortcut="Ctrl J"
                   onClick={onOpenTransactions}
                 />
               }
             >
               {!activeLoadout ? (
-                <div className="tr muted" style={{ fontStyle: "italic" }}>
-                  Sélectionne une instance.
-                </div>
+                <SideEmpty title="Aucune instance">Choisis-en une dans l’Explorateur</SideEmpty>
               ) : historyTxs === null ? (
-                <div className="tr muted" style={{ fontStyle: "italic" }}>
+                <div className="tr muted">
                   Chargement…
                 </div>
               ) : loadoutRevisions.length === 0 ? (
-                // Not `.tr` here: that class hard-clips at one line with no
-                // ellipsis, right for a mod name and wrong for a sentence
-                // whose length depends on the instance's own name.
-                <p
-                  className="muted"
-                  style={{
-                    margin: "2px 8px",
-                    fontSize: 12.5,
-                    fontStyle: "italic",
-                    whiteSpace: "normal",
-                  }}
-                >
-                  Aucune révision enregistrée pour « {activeLoadout.name} ».
-                </p>
+                <SideEmpty title="Aucune révision">Rien d’enregistré pour cette instance</SideEmpty>
               ) : (
                 loadoutRevisions.map((t, i) => (
                   <button
                     className="tr"
                     type="button"
                     key={t.id}
-                    style={{ height: "auto", paddingTop: 3, paddingBottom: 3 }}
+                    style={{ height: "auto", paddingTop: 4, paddingBottom: 4 }}
                     onClick={onOpenTransactions}
                   >
                     <span className={`hd ${i === 0 ? "" : "idle"}`} />
                     <span className="lbl">
                       {KIND_LABELS[t.kind] ?? t.kind}
-                      <div className="muted" style={{ fontSize: 11 }}>
+                      <div className="muted" style={{ fontSize: "var(--fs-xs)" }}>
                         {t.steps[0] ?? ""} ·{" "}
                         {new Date(t.occurredAt).toLocaleString("fr-FR")}
                       </div>
@@ -357,13 +353,11 @@ export function Sidebar({
             </Accordion>
             <Accordion title="Corbeille" count={gameTrash.length}>
               {trash === null ? (
-                <div className="tr muted" style={{ fontStyle: "italic" }}>
+                <div className="tr muted">
                   Chargement…
                 </div>
               ) : gameTrash.length === 0 ? (
-                <div className="tr muted" style={{ fontStyle: "italic" }}>
-                  Rien à restaurer pour ce jeu.
-                </div>
+                <SideEmpty title="Corbeille vide">Les instances supprimées apparaissent ici</SideEmpty>
               ) : (
                 gameTrash.map((l) => (
                   <div key={l.id} className="tr-row">
@@ -386,9 +380,7 @@ export function Sidebar({
           </>
         ) : act === "tools" ? (
           <Accordion title="Outils" count={0} defaultOpen={false}>
-            <div className="tr muted" style={{ fontStyle: "italic" }}>
-              Pas de registre d’outils dans le Core pour l’instant.
-            </div>
+            <SideEmpty title="Aucun outil">Le Core n’a pas encore de registre d’outils</SideEmpty>
           </Accordion>
         ) : null}
         {act === "settings" ? (

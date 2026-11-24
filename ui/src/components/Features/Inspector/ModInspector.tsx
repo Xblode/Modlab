@@ -50,7 +50,7 @@ export function ModInspector({
       <div className="rtitle">
         <div className="eyebrow">Panneau</div>
         <h2>Aucun mod sélectionné</h2>
-        <p className="muted">Clique une ligne de la table.</p>
+        <p className="muted">Clique une ligne de la table</p>
       </div>
     );
   }
@@ -110,7 +110,7 @@ export function ModInspector({
         >
           <div style={{ fontSize: 12 }}>
             {conflicts.wins > 0 ? (
-              <div style={{ display: "flex", gap: 8, padding: "3px 0" }}>
+              <div style={{ display: "flex", gap: 8, padding: "4px 0" }}>
                 <Badge tone="win" title={CONFLICT_PRIORITY_CAVEAT}>
                   <Ico name="flag" />
                   {conflicts.wins}
@@ -119,7 +119,7 @@ export function ModInspector({
               </div>
             ) : null}
             {conflicts.loses > 0 ? (
-              <div style={{ display: "flex", gap: 8, padding: "3px 0" }}>
+              <div style={{ display: "flex", gap: 8, padding: "4px 0" }}>
                 <Badge tone="lose" title={CONFLICT_PRIORITY_CAVEAT}>
                   <Ico name="flag" />
                   {conflicts.loses}
@@ -128,7 +128,7 @@ export function ModInspector({
               </div>
             ) : null}
             {conflicts.wins === 0 && conflicts.loses === 0 ? (
-              <span className="muted">Aucun conflit de fichier.</span>
+              <span className="muted">Aucun conflit de fichier</span>
             ) : null}
           </div>
         </Accordion>

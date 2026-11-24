@@ -150,7 +150,7 @@ export function FomodWizard({
                     className={`fomod-dot ${i === stepIdx ? "cur" : i < stepIdx ? "done" : ""}`}
                   />
                 ))}
-                <span className="muted" style={{ fontSize: 11.5 }}>
+                <span className="muted" style={{ fontSize: 12 }}>
                   Étape {stepIdx + 1}/{totalSteps} · {step.name}
                 </span>
               </div>
@@ -158,11 +158,11 @@ export function FomodWizard({
 
             <div className="fomod-body">
               {!step ? (
-                <p className="muted" style={{ fontSize: 12.5 }}>
+                <p className="muted" style={{ fontSize: "var(--fs-md)" }}>
                   Rien à choisir — l’archive n’installe que ses fichiers requis.
                 </p>
               ) : step.groups.length === 0 ? (
-                <p className="muted" style={{ fontSize: 12.5 }}>
+                <p className="muted" style={{ fontSize: "var(--fs-md)" }}>
                   Rien à choisir à cette étape.
                 </p>
               ) : (

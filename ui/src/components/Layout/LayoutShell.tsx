@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { TabDef, TabId } from "../../gameChrome";
+import { TooltipLayer } from "../ui";
 import { Titlebar } from "./Titlebar";
 
 /**
@@ -88,6 +89,7 @@ export function LayoutShell({
           {overlays}
         </div>
       </div>
+      <TooltipLayer />
     </div>
   );
 }

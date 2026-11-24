@@ -1,5 +1,6 @@
 import { forwardRef, type ComponentProps } from "react";
 import { Ico } from "../../../Ico";
+import { tip } from "../molecules/Tooltip";
 
 /**
  * `forwardRef` on purpose: a `Pop`/`MenuPicker` anchored to one of these
@@ -10,11 +11,14 @@ export const IconButton = forwardRef<
   HTMLButtonElement,
   ComponentProps<"button"> & {
     name: string;
+    /** Tooltip text, and the accessible name (the icon carries no text). */
     title?: string;
+    /** Only when a real key handler exists in the code. */
+    shortcut?: string;
     variant?: "sm" | "ghost" | "sm-ghost";
   }
 >(function IconButton(
-  { className, name, title, "aria-label": ariaLabel, variant, ...props },
+  { className, name, title, shortcut, "aria-label": ariaLabel, variant, ...props },
   ref,
 ) {
   const variants = variant ? [variant === "sm" ? "sm" : variant] : [];
@@ -24,8 +28,8 @@ export const IconButton = forwardRef<
       ref={ref}
       className={classNames}
       type="button"
-      title={title}
-      aria-label={ariaLabel ?? title}
+      {...(title ? tip(title, shortcut) : {})}
+      {...(ariaLabel ? { "aria-label": ariaLabel } : {})}
       {...props}
     >
       <Ico name={name} className={variant === "sm" ? "sm" : undefined} />

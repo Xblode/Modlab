@@ -1,6 +1,6 @@
 import { KIND_LABELS, type Transaction } from "../../../api";
 import { Ico } from "../../../Ico";
-import { Button, IconButton } from "../../ui";
+import { Button, IconButton, SideEmpty } from "../../ui";
 import type { BottomTab } from "./BottomTab";
 
 /**
@@ -49,14 +49,13 @@ export function TransactionsPanel({
           <Ico name="shield" className="sm" />
           Instantané
         </Button>
-        <IconButton name="x" title="Fermer (Ctrl+J)" onClick={onClose} />
+        <IconButton name="x" title="Fermer" shortcut="Ctrl J" onClick={onClose} />
       </div>
       <div className="tp-body">
         {txs && txs.length === 0 ? (
-          <div className="hint" style={{ border: 0 }}>
-            Aucune mutation journalisée pour l'instant — importe une
-            instance ou prends un instantané de l'instance active.
-          </div>
+          <SideEmpty title="Journal vide">
+            Importe une instance ou prends un instantané
+          </SideEmpty>
         ) : null}
         {(txs ?? []).map((t) => (
           <div key={t.id} className="tx">

@@ -2,7 +2,7 @@ import { useState, type MouseEvent } from "react";
 import type { Channel, DetectedGame, LoadoutDto } from "../../../api";
 import { categoryIcon } from "../../../categoryIcon";
 import { Ico } from "../../../Ico";
-import { Accordion, ChannelBadge, ConfirmDialog, FavoriteButton, IconButton } from "../../ui";
+import { Accordion, ChannelBadge, ConfirmDialog, FavoriteButton, IconButton, SideEmpty, tip } from "../../ui";
 import { MenuPicker, type MenuItem } from "../MenuPicker/MenuPicker";
 
 export type FavoriteEntry = { loadout: LoadoutDto; short: string };
@@ -90,7 +90,7 @@ function LoadoutRow({
           <span className="lbl">{l.name}</span>
           <span className="tail">
             {short ? (
-              <span className="muted" style={{ fontSize: 10 }}>
+              <span className="muted" style={{ fontSize: "var(--fs-xs)" }}>
                 {short}
               </span>
             ) : null}
@@ -216,27 +216,28 @@ export function ExplorerTree({
 
   return (
     <>
-      {favorites.length === 0 ? null : (
-        <Accordion title="Favoris" count={favorites.length}>
-          {favorites.map(({ loadout: l, short }) => (
-            <LoadoutRow
-              key={l.id}
-              l={l}
-              current={l.id === activeLoadoutId}
-              short={short}
-              fav={isFavorite(l.id)}
-              renaming={renamingId === l.id}
-              draft={draft}
-              onDraftChange={setDraft}
-              onCommitRename={commitRename}
-              onCancelRename={() => setRenamingId(null)}
-              onPick={() => onPickLoadout(l.id)}
-              onToggleFav={() => onToggleFavorite(l.id)}
-              onContextMenu={(e) => openLoadoutMenu(e, l.id)}
-            />
-          ))}
-        </Accordion>
-      )}
+      <Accordion title="Favoris" count={favorites.length}>
+        {favorites.length === 0 ? (
+          <SideEmpty title="Aucun favori">Clique l’étoile d’une instance</SideEmpty>
+        ) : null}
+        {favorites.map(({ loadout: l, short }) => (
+          <LoadoutRow
+            key={l.id}
+            l={l}
+            current={l.id === activeLoadoutId}
+            short={short}
+            fav={isFavorite(l.id)}
+            renaming={renamingId === l.id}
+            draft={draft}
+            onDraftChange={setDraft}
+            onCommitRename={commitRename}
+            onCancelRename={() => setRenamingId(null)}
+            onPick={() => onPickLoadout(l.id)}
+            onToggleFav={() => onToggleFavorite(l.id)}
+            onContextMenu={(e) => openLoadoutMenu(e, l.id)}
+          />
+        ))}
+      </Accordion>
       <Accordion
         title="Jeux"
         count={games.length}
@@ -250,9 +251,7 @@ export function ExplorerTree({
         }
       >
         {games.length === 0 ? (
-          <div className="tr muted" style={{ fontStyle: "italic" }}>
-            Aucun jeu détecté
-          </div>
+          <SideEmpty title="Aucun jeu détecté">Aucune installation trouvée sur cette machine</SideEmpty>
         ) : (
           games.map((g) => {
             const open = expanded.includes(g.id);
@@ -265,7 +264,7 @@ export function ExplorerTree({
                   <button
                     className="tr-chev"
                     type="button"
-                    title={open ? "Réduire" : "Déplier"}
+                    {...tip(open ? "Réduire" : "Déplier")}
                     onClick={(e) => {
                       e.stopPropagation();
                       onToggleExpanded(g.id);
@@ -288,13 +287,14 @@ export function ExplorerTree({
                     );
 
                     return gameLoadouts.length === 0 ? (
-                      <div
+                      <button
                         className="tr muted"
+                        type="button"
                         data-d="2"
-                        style={{ fontStyle: "italic" }}
+                        onClick={() => onCreateLoadoutForGame(g.id)}
                       >
-                        Instance sans branche — créer…
-                      </div>
+                        Aucune branche — créer
+                      </button>
                     ) : (
                       gameLoadouts.map((l) => (
                         <LoadoutRow
@@ -327,9 +327,7 @@ export function ExplorerTree({
         defaultOpen={false}
       >
         {(categoryCounts ?? []).length === 0 ? (
-          <div className="tr muted" style={{ fontStyle: "italic" }}>
-            Aucune catégorie — tagge un mod depuis le tableau
-          </div>
+          <SideEmpty title="Aucune catégorie">Donne-en une à un mod depuis le tableau</SideEmpty>
         ) : (
           (categoryCounts ?? []).map((c) => (
             <button

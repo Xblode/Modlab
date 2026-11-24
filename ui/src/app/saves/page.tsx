@@ -64,12 +64,8 @@ export default function SavesPage() {
         <div className="empty">
           <div>
             <Ico name="disc" />
-            <h3>Aucune sauvegarde trouvée</h3>
-            <p>
-              Dossier « Saves » introuvable ou vide. Associer une sauvegarde à la
-              révision qui tournait au moment où elle a été écrite n'existe pas encore
-              — cette liste ne montre que ce qui est sur le disque.
-            </p>
+            <h3>Aucune sauvegarde</h3>
+            <p>Dossier Saves introuvable ou vide</p>
           </div>
         </div>
       </div>

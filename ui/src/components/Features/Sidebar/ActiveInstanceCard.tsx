@@ -3,6 +3,7 @@ import type { Channel, LoadoutVersion } from "../../../api";
 import { CHANNEL_LETTER } from "../../../channel";
 import { Ico } from "../../../Ico";
 import { Pop, type PopItem } from "../../../Pop";
+import { tip } from "../../ui";
 import type { LaunchNotice } from "../../../sessionNotice";
 
 const CHANNEL_LABEL: Record<Channel, string> = { stable: "Stable", beta: "Beta", alpha: "Alpha" };
@@ -149,7 +150,7 @@ export function ActiveInstanceCard({
           {renaming ? (
             <input
               className="tr-rename-input"
-              style={{ fontSize: 14, fontWeight: 600, height: 22 }}
+              style={{ fontSize: 14, fontWeight: 600, height: 28 }}
               autoFocus
               maxLength={100}
               value={draft}
@@ -213,7 +214,7 @@ export function ActiveInstanceCard({
             <Pop anchorRef={verBtnRef} items={verItems} onClose={() => setVerOpen(false)} />
           ) : null}
           <button
-            className={`btn save-btn ${dirty ? "accent" : ""}`}
+            className="btn save-btn"
             type="button"
             disabled={!dirty}
             title={
@@ -273,8 +274,7 @@ export function ActiveInstanceCard({
               <button
                 className="x"
                 type="button"
-                title="Fermer"
-                aria-label="Fermer le bilan"
+                {...tip("Fermer le bilan")}
                 onClick={onDismissNotice}
               >
                 <Ico name="x" className="sm" />
