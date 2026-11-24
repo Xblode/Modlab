@@ -12,6 +12,7 @@
 ## Design
 
 - `design/` : maquette du shell, `plan-shell-v2.md`, `design-system.md` (tokens, composants), maquettes `.h2d` (dashboard, mods, réglages) et `img/`.
+- `design/regles-interface.md` : règles d'interface ModLab (décisions du 2026-11-24, consensus des références, études). Référence pour faire évoluer `ui/`.
 
 ## Détail vivant
 

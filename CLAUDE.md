@@ -5,7 +5,7 @@ Personal, Skyrim-first, multi-game mod manager — positioned as "Cursor for gam
 ## Source of truth — read before doing anything structural
 
 1. **`docs/01-architecture-decidee.md`** — the locked architecture. Supersedes `docs/archive/00-cadrage-technique.md` and `docs/archive/Modlab — Document de cadrage & architecture.md` on every structural decision (stack, permissions, roadmap). Those two stay only as background/detail — **never implement either of them blindly**; if they disagree with `01-architecture-decidee.md`, the locked doc wins.
-2. **`docs/design/shell-maquette.html`** — the visual source of truth for the UI. It is a single-file HTML/CSS/JS prototype, actively iterated. Match it pixel-for-pixel when building the real React UI; don't redesign on the fly.
+2. **`ui/`** (styles in `ui/src/shell.css`) — the visual reference for the UI since 2026-11-24. `docs/design/shell-maquette.html` is a historical prototype, no longer kept in sync: don't match it, and don't redesign on the fly either — visual changes go through the user first.
 3. **`.bframe/`** — project steering memory: state, decisions, ideas, tasks (`ETAT.md`, `DECISIONS.md`, `IDEES.md`, `TACHES.md`). Read `.bframe/ETAT.md` first. Parked ideas live in `.bframe/IDEES.md`.
 4. **`docs/faisabilite.md`** — feasibility notes (the A-parts of the former `idees.md`).
 5. **`docs/README.md`** — map of `docs/`.
