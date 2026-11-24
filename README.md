@@ -37,38 +37,61 @@ L'idée : « Cursor pour le game modding ».
 
 ### Lancer le logiciel (application complète)
 
-Depuis le dossier `ui/` (la première fois, installer les dépendances de l'interface) :
+Depuis la racine du dépôt, la première fois, installer les dépendances de l'interface :
 
-```
-npm install
-npm run tauri:dev
+```powershell
+npm --prefix ui install
 ```
 
-- `npm install` télécharge les dépendances de l'interface (une seule fois, ou quand `package.json` change).
-- `npm run tauri:dev` compile l'hôte Tauri et ouvre la fenêtre ModLab, avec l'interface qui se recharge à chaque modification. La première compilation est longue.
+- `npm --prefix ui install` télécharge les dépendances de l'interface (une seule fois, ou quand `ui/package.json` change).
+
+Puis, toujours depuis la racine du dépôt, lancer l'application :
+
+```powershell
+npm --prefix ui run tauri:dev
+```
+
+- `npm --prefix ui run tauri:dev` compile l'hôte Tauri et ouvre la fenêtre ModLab, avec l'interface qui se recharge à chaque modification. La première compilation est longue.
+- Toujours lancer ces commandes dans le dossier ModLab : ailleurs, npm peut tomber sur un autre projet.
 
 ### Lancer seulement l'interface ou la maquette
 
-```
+```powershell
 npm --prefix ui run dev
+```
+
+- La commande ci-dessus, depuis la racine du dépôt, sert l'interface seule dans le navigateur sur `http://localhost:1420` (sans le moteur : les appels à l'hôte Tauri ne répondent pas). Arrêt avec `Ctrl+C`.
+
+```powershell
 python -m http.server 5502
 ```
 
-- La première commande, depuis la racine du dépôt, sert l'interface seule dans le navigateur sur `http://localhost:1420` (sans le moteur : les appels à l'hôte Tauri ne répondent pas). Arrêt avec `Ctrl+C`.
-- La seconde, depuis la racine du dépôt, sert la maquette sur `http://localhost:5502/docs/design/shell-maquette.html` (c'est le serveur `maquette` de `.claude/launch.json`). Arrêt avec `Ctrl+C`.
+- La commande ci-dessus, depuis la racine du dépôt, sert la maquette sur `http://localhost:5502/docs/design/shell-maquette.html` (c'est le serveur `maquette` de `.claude/launch.json`). Arrêt avec `Ctrl+C`.
 
 ### La CLI
 
-Depuis la racine du dépôt :
+Depuis la racine du dépôt, afficher l'aide :
 
-```
+```powershell
 cargo run -p modlab-cli -- --help
-cargo run -p modlab-cli -- detect
-cargo run -p modlab-cli -- mc-scan fixtures/fake-minecraft
 ```
 
 - `--help` liste toutes les commandes.
+
+Chercher les jeux installés :
+
+```powershell
+cargo run -p modlab-cli -- detect
+```
+
 - `detect` cherche les jeux installés (lecture seule).
+
+Lister les mods du faux jeu de test :
+
+```powershell
+cargo run -p modlab-cli -- mc-scan fixtures/fake-minecraft
+```
+
 - `mc-scan` liste les mods d'une instance Minecraft ; ici, sur le faux jeu de test (lecture seule).
 - Sans `--data-root`, la CLI écrit dans le dossier d'essai `.modlab-dev`, jamais dans `F:\ModLab`.
 - Attention : `usvfs-check` et `skse-launch` agissent sur le vrai Skyrim (`skse-launch` ouvre le jeu) ; ne les lancer que volontairement.
@@ -77,21 +100,21 @@ cargo run -p modlab-cli -- mc-scan fixtures/fake-minecraft
 
 Depuis la racine du dépôt :
 
-```
+```powershell
 cargo test --workspace
 ```
 
 - Lance tous les tests Rust du projet.
 
-Depuis le dossier `ui/` :
+Depuis la racine du dépôt, vérifier les types TypeScript et construire l'interface :
 
+```powershell
+npm --prefix ui run build
 ```
-npm run build
-```
 
-- Vérifie les types TypeScript puis construit l'interface (il n'y a pas encore de tests d'interface).
+- La commande ci-dessus vérifie les types TypeScript puis construit l'interface (il n'y a pas encore de tests d'interface).
 
-Avant de valider un changement (`cargo fmt -- --check`, `cargo clippy`, `cargo check && cargo test`, `npm run build`) : suivre la section « Before committing » de `CLAUDE.md`.
+Avant de valider un changement (`cargo fmt -- --check`, `cargo clippy`, `cargo check && cargo test`, `npm --prefix ui run build`) : suivre la section « Before committing » de `CLAUDE.md`.
 
 Les tests tournent sur les faux jeux de `fixtures/`, jamais sur le vrai jeu ni sur `F:\ModLab`.
 

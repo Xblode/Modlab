@@ -88,6 +88,54 @@ pub fn detect_shape(extracted_root: &Path) -> io::Result<DetectedArchive> {
     }
 }
 
+/// Move an archive's real content into a mod's own folder (`dest`), laid out
+/// the way USVFS expects: the mod folder is linked straight onto the game's
+/// `Data/`, so its *contents* must already be Data-relative.
+///
+/// For a `WrappedData` archive that means moving the inner `Data/` folder, not
+/// the folder that contains it — otherwise files deploy as `Data/Data/...`.
+/// `keep_game_root` is for the engine mod (SKSE), recognised by its content
+/// (`engine::is_engine_content`: a `skse64_loader.exe` at the content root,
+/// never by the mod's name): its root files (loader, `skse64_*.dll`) are copied
+/// into the game's install root (`engine::install_root_files`), so they must
+/// stay beside `Data/` and the layout is left untouched.
+///
+/// `content_root` is re-classified here (it is already a recognized root, so
+/// no descent happens) to keep callers from having to carry the shape around.
+pub fn place_content(content_root: &Path, dest: &Path, keep_game_root: bool) -> io::Result<()> {
+    let detected = detect_shape(content_root)?;
+    let source = match detected.shape {
+        ArchiveShape::WrappedData { data_dir } if !keep_game_root => {
+            detected.content_root.join(data_dir)
+        }
+        _ => detected.content_root,
+    };
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    // A rename inside the same data root is atomic and instant; the copy
+    // fallback covers a staging area that landed on another volume.
+    if fs::rename(&source, dest).is_err() {
+        copy_dir(&source, dest)?;
+    }
+    Ok(())
+}
+
+/// Recursively copy a directory tree.
+pub fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
 fn classify(dirs: &[String], files: &[String]) -> ArchiveShape {
     if dirs.iter().any(|d| d.eq_ignore_ascii_case("fomod")) {
         ArchiveShape::Fomod
@@ -235,6 +283,68 @@ mod tests {
                 data_dir: "Data".into()
             }
         );
+    }
+
+    #[test]
+    fn wrapped_data_is_placed_without_a_nested_data_folder() {
+        // Regression: the mod folder is linked onto Data/, so moving the
+        // folder that *contains* Data/ deployed files as Data/Data/...
+        let staged = make_tree(&["Data/meshes/thing.nif", "Data/MyMod.esp", "readme.txt"]);
+        let out = tempfile::tempdir().unwrap();
+        let dest = out.path().join("mods").join("1");
+
+        place_content(staged.path(), &dest, false).unwrap();
+
+        assert!(dest.join("meshes/thing.nif").is_file());
+        assert!(dest.join("MyMod.esp").is_file());
+        assert!(!dest.join("Data").exists());
+    }
+
+    #[test]
+    fn wrapped_data_keeps_game_root_layout_for_the_engine_mod() {
+        // SKSE: loader exe beside Data/, copied whole into the install root.
+        let staged = make_tree(&["skse64_loader.exe", "Data/Scripts/placeholder.pex"]);
+        let out = tempfile::tempdir().unwrap();
+        let dest = out.path().join("mods").join("2");
+
+        place_content(staged.path(), &dest, true).unwrap();
+
+        assert!(dest.join("skse64_loader.exe").is_file());
+        assert!(dest.join("Data/Scripts/placeholder.pex").is_file());
+    }
+
+    #[test]
+    fn engine_layout_is_chosen_by_content_not_by_the_mods_name() {
+        // The install command decides `keep_game_root` from the staged content.
+        // "Address Library for SKSE Plugins" is a plain Data mod despite its name:
+        // its SKSE/Plugins folder must end up at the mod root (= Data/SKSE/Plugins
+        // once USVFS links the mod onto Data/), not be kept as a game-root layout.
+        let skse = make_tree(&["skse64_loader.exe", "Data/Scripts/placeholder.pex"]);
+        let address_library = make_tree(&["Data/SKSE/Plugins/x.dll"]);
+        assert!(crate::engine::is_engine_content(
+            &detect_shape(skse.path()).unwrap().content_root
+        ));
+        let detected = detect_shape(address_library.path()).unwrap();
+        let keep_game_root = crate::engine::is_engine_content(&detected.content_root);
+        assert!(!keep_game_root);
+
+        let out = tempfile::tempdir().unwrap();
+        let dest = out.path().join("mods").join("4");
+        place_content(address_library.path(), &dest, keep_game_root).unwrap();
+
+        assert!(dest.join("SKSE/Plugins/x.dll").is_file());
+        assert!(!dest.join("Data").exists());
+    }
+
+    #[test]
+    fn bare_data_is_placed_as_is() {
+        let staged = make_tree(&["meshes/thing.nif"]);
+        let out = tempfile::tempdir().unwrap();
+        let dest = out.path().join("mods").join("3");
+
+        place_content(staged.path(), &dest, false).unwrap();
+
+        assert!(dest.join("meshes/thing.nif").is_file());
     }
 
     #[test]

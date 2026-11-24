@@ -190,10 +190,10 @@ pub struct LoadoutEntryRow {
     pub name: String,
     pub source_path: PathBuf,
     pub enabled: bool,
-    /// Import/add order. Not yet confirmed to correspond to MO2's real
-    /// on-screen priority direction — see `modlab_game_skyrim::mo2`'s
-    /// module doc. Don't treat a larger `position` as "wins conflicts"
-    /// without that confirmation.
+    /// Priority order: the larger `position` wins file conflicts (ADR 0002).
+    /// Contiguous from 0 after any `move_mods`. Importers must hand mods
+    /// over lowest priority first (`modlab_game_skyrim::mo2` reverses
+    /// `modlist.txt`, whose first line is the winner).
     pub position: i64,
     /// Whatever version the mod was imported/installed with, if its source
     /// declared one — `None` when it didn't (most Skyrim imports today).
@@ -264,6 +264,121 @@ pub fn set_enabled(core: &Core, loadout_id: i64, mod_id: i64, enabled: bool) -> 
             }
         },
     )
+}
+
+/// Move one or several mods to a new place in a loadout's priority order,
+/// through the full §5 cycle (plan → approval → snapshot → apply → verify →
+/// automatic rollback), journaled as `loadout.move_mods`.
+///
+/// Order is `position` ascending, so the *last* mod wins conflicts. `to` is
+/// the index, in the final list of visible mods, where the moved block lands
+/// (clamped to the valid range, so `usize::MAX` means "top priority" and `0`
+/// "lowest"). The moved mods keep their relative order. Positions are
+/// renumbered contiguously from 0 afterwards. Returns `false` (nothing
+/// written, nothing journaled) when the order would not change.
+pub fn move_mods(core: &Core, loadout_id: i64, mod_ids: &[i64], to: usize) -> Result<bool> {
+    move_mods_with(core, loadout_id, mod_ids, to, |_| Ok(()))
+}
+
+/// `move_mods` with a hook run between the write and its verification — the
+/// only way a test can make the verification fail on purpose.
+fn move_mods_with(
+    core: &Core,
+    loadout_id: i64,
+    mod_ids: &[i64],
+    to: usize,
+    after_write: impl FnOnce(&Core) -> Result<()>,
+) -> Result<bool> {
+    let visible: Vec<i64> = core
+        .select_loadout_entries(loadout_id)?
+        .into_iter()
+        .map(|r| r.mod_id)
+        .collect();
+    let mut moved: Vec<i64> = Vec::new();
+    for id in mod_ids {
+        if !visible.contains(id) {
+            return Err(CoreError::Message(format!(
+                "le mod {id} n'appartient pas à l'instance {loadout_id}"
+            )));
+        }
+        if !moved.contains(id) {
+            moved.push(*id);
+        }
+    }
+    // Keep the moved mods in their current relative order.
+    moved.sort_by_key(|id| visible.iter().position(|v| v == id));
+    let mut rest: Vec<i64> = visible
+        .iter()
+        .copied()
+        .filter(|id| !moved.contains(id))
+        .collect();
+    let at = to.min(rest.len());
+    rest.splice(at..at, moved.iter().copied());
+    let expected = rest;
+    if moved.is_empty() || expected == visible {
+        return Ok(false);
+    }
+
+    let mut plan = Plan::new(core, loadout_id, "loadout.move_mods");
+    plan.step(format!(
+        "{} mod(s) déplacé(s) à la place {} dans l'instance {loadout_id}",
+        moved.len(),
+        at + 1
+    ));
+    plan.approve().apply(
+        |core| {
+            // Hidden (soft-deleted) mods keep their slots; the visible ones
+            // are re-dealt into the slots visible mods used to occupy.
+            let state = core.select_loadout_state(loadout_id)?;
+            let enabled: std::collections::HashMap<i64, bool> =
+                state.iter().map(|(m, e, _)| (*m, *e)).collect();
+            let mut slots = state
+                .iter()
+                .filter(|(m, _, _)| visible.contains(m))
+                .map(|(_, _, p)| *p);
+            let mut merged: Vec<(i64, bool, i64)> = state
+                .iter()
+                .filter(|(m, _, _)| !visible.contains(m))
+                .copied()
+                .collect();
+            for id in &expected {
+                let slot = slots.next().ok_or_else(|| {
+                    CoreError::Message("positions incohérentes dans l'instance".into())
+                })?;
+                merged.push((*id, enabled[id], slot));
+            }
+            merged.sort_by_key(|(_, _, p)| *p);
+            let renumbered: Vec<(i64, bool, i64)> = merged
+                .into_iter()
+                .enumerate()
+                .map(|(i, (m, e, _))| (m, e, i as i64))
+                .collect();
+            core.replace_loadout_entries(loadout_id, &renumbered)?;
+            after_write(core)?;
+            Ok(())
+        },
+        |core, ()| {
+            let state = core.select_loadout_state(loadout_id)?;
+            let contiguous = state
+                .iter()
+                .enumerate()
+                .all(|(i, (_, _, p))| i64::try_from(i) == Ok(*p));
+            let order: Vec<i64> = core
+                .select_loadout_entries(loadout_id)?
+                .into_iter()
+                .map(|r| r.mod_id)
+                .collect();
+            if contiguous && order == expected {
+                Ok(())
+            } else {
+                Err(CoreError::Message(
+                    "vérification échouée : l'ordre relu ne correspond pas au déplacement demandé"
+                        .into(),
+                ))
+            }
+        },
+    )?;
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -527,5 +642,143 @@ mod tests {
             1,
             "entries were never touched by the soft delete"
         );
+    }
+
+    /// Five mods A..E at positions 0..4; returns the loadout id and mod ids.
+    fn five_mods(core: &Core) -> (i64, Vec<i64>) {
+        let lo = create(core, "skyrimse", "Order").unwrap();
+        let entries: Vec<ImportEntry> = ["A", "B", "C", "D", "E"]
+            .iter()
+            .map(|n| ImportEntry {
+                name: (*n).into(),
+                source_path: format!("F:/mods/{n}").into(),
+                enabled: true,
+                version: None,
+            })
+            .collect();
+        import_mods(core, lo.id, &entries).unwrap();
+        let ids = entries_ids(core, lo.id);
+        (lo.id, ids)
+    }
+
+    fn entries_ids(core: &Core, loadout_id: i64) -> Vec<i64> {
+        entries(core, loadout_id)
+            .unwrap()
+            .iter()
+            .map(|r| r.mod_id)
+            .collect()
+    }
+
+    fn names(core: &Core, loadout_id: i64) -> String {
+        entries(core, loadout_id)
+            .unwrap()
+            .iter()
+            .map(|r| r.name.as_str())
+            .collect()
+    }
+
+    fn assert_contiguous(core: &Core, loadout_id: i64) {
+        let positions: Vec<i64> = entries(core, loadout_id)
+            .unwrap()
+            .iter()
+            .map(|r| r.position)
+            .collect();
+        assert_eq!(positions, (0..positions.len() as i64).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn moves_one_mod_and_journals_it() {
+        let core = Core::open_in_memory().unwrap();
+        let (lo, ids) = five_mods(&core);
+        let before = core.event_count().unwrap();
+
+        assert!(move_mods(&core, lo, &[ids[0]], 3).unwrap());
+
+        assert_eq!(names(&core, lo), "BCDAE");
+        assert_contiguous(&core, lo);
+        assert_eq!(core.event_count().unwrap(), before + 1);
+        let last = &crate::transaction::list(&core, 1).unwrap()[0];
+        assert_eq!(last.kind, "loadout.move_mods");
+    }
+
+    #[test]
+    fn moves_several_mods_as_a_block_keeping_their_relative_order() {
+        let core = Core::open_in_memory().unwrap();
+        let (lo, ids) = five_mods(&core);
+
+        // Given out of order on purpose: E then B.
+        move_mods(&core, lo, &[ids[4], ids[1]], 0).unwrap();
+        assert_eq!(names(&core, lo), "BEACD");
+        assert_contiguous(&core, lo);
+
+        let (lo2, ids2) = five_mods(&core);
+        move_mods(&core, lo2, &[ids2[0], ids2[1]], 3).unwrap();
+        assert_eq!(names(&core, lo2), "CDEAB");
+    }
+
+    #[test]
+    fn target_is_clamped_to_the_bounds() {
+        let core = Core::open_in_memory().unwrap();
+        let (lo, ids) = five_mods(&core);
+
+        move_mods(&core, lo, &[ids[0]], usize::MAX).unwrap();
+        assert_eq!(names(&core, lo), "BCDEA");
+        move_mods(&core, lo, &[ids[0]], 0).unwrap();
+        assert_eq!(names(&core, lo), "ABCDE");
+        assert_contiguous(&core, lo);
+    }
+
+    #[test]
+    fn a_move_that_changes_nothing_writes_and_journals_nothing() {
+        let core = Core::open_in_memory().unwrap();
+        let (lo, ids) = five_mods(&core);
+        let before = core.event_count().unwrap();
+
+        assert!(!move_mods(&core, lo, &[ids[1]], 1).unwrap());
+        assert!(!move_mods(&core, lo, &[], 2).unwrap());
+        assert_eq!(core.event_count().unwrap(), before);
+    }
+
+    #[test]
+    fn refuses_a_mod_that_is_not_in_the_loadout() {
+        let core = Core::open_in_memory().unwrap();
+        let (lo, _) = five_mods(&core);
+        assert!(move_mods(&core, lo, &[9999], 0).is_err());
+        assert_eq!(names(&core, lo), "ABCDE");
+    }
+
+    #[test]
+    fn a_failed_verification_restores_the_previous_order() {
+        let core = Core::open_in_memory().unwrap();
+        let (lo, ids) = five_mods(&core);
+        let before = core.event_count().unwrap();
+
+        // Corrupt the write after it happens: a gap in the positions.
+        let result = move_mods_with(&core, lo, &[ids[0]], 4, |core| {
+            let state: Vec<(i64, bool, i64)> = core
+                .select_loadout_state(lo)?
+                .into_iter()
+                .map(|(m, e, p)| (m, e, p * 2))
+                .collect();
+            core.replace_loadout_entries(lo, &state)
+        });
+
+        assert!(result.is_err());
+        assert_eq!(names(&core, lo), "ABCDE");
+        assert_contiguous(&core, lo);
+        assert_eq!(core.event_count().unwrap(), before, "nothing journaled");
+    }
+
+    #[test]
+    fn a_move_survives_the_explicit_revision_rollback() {
+        let core = Core::open_in_memory().unwrap();
+        let (lo, ids) = five_mods(&core);
+        crate::transaction::snapshot_loadout(&core, lo).unwrap();
+
+        move_mods(&core, lo, &[ids[0]], 4).unwrap();
+        assert_eq!(names(&core, lo), "BCDEA");
+
+        crate::transaction::rollback_loadout(&core, lo).unwrap();
+        assert_eq!(names(&core, lo), "ABCDE");
     }
 }

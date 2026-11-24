@@ -7,6 +7,8 @@ pub mod fomod;
 pub mod graphics;
 pub mod installer;
 pub mod mo2;
+pub mod plugins;
+pub mod skse;
 #[cfg(windows)]
 pub mod usvfs;
 

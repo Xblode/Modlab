@@ -5,7 +5,11 @@ import {
   mo2Import,
   minecraftImportInstance,
   launchSkse,
+  getSkseStatus,
+  getGameSessionState,
+  onGameEnded,
   setModEnabled,
+  moveMods,
   aiAsk,
   snapshotLoadout,
   rollbackLoadout,
@@ -31,7 +35,15 @@ import {
   type LoadoutDto,
   type ModRow,
   type ShellSnapshot,
+  type SkseStatus,
 } from "./api";
+import {
+  noticeFromRefusal,
+  noticeFromReport,
+  skseChip,
+  toastFromReport,
+  type LaunchNotice,
+} from "./sessionNotice";
 import { useFavorites } from "./favorites";
 import { readUiMemory, writeUiMemory } from "./uiMemory";
 import { useConflicts } from "./hooks/useConflicts";
@@ -103,6 +115,11 @@ export default function App() {
   const [rightOpen, setRightOpen] = useState(initialMemory.rightOpen);
   const [rightTab, setRightTab] = useState<RightTab>(initialMemory.rightTab);
   const [running, setRunning] = useState(false);
+  /** What the game folder really holds for SKSE (loader + the DLL of the
+   * game's version) — `null` until read, or outside the Tauri shell. */
+  const [skseStatus, setSkseStatus] = useState<SkseStatus | null>(null);
+  /** Refused launch, or the last session's SKSE balance sheet. */
+  const [launchNotice, setLaunchNotice] = useState<LaunchNotice | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [llm, setLlm] = useState(initialMemory.llm);
   const [communityUpdate, setCommunityUpdate] = useState(initialMemory.communityUpdate);
@@ -319,6 +336,31 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeLoadout]);
 
+  // A game session runs on its own thread in the Core: this window stays
+  // usable, and learns about the end of the game through an event. A window
+  // reloaded mid-session (or after one) asks the Core what it missed.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void onGameEnded((report) => {
+      setRunning(false);
+      setLaunchNotice(noticeFromReport(report));
+      setToast(toastFromReport(report));
+    }).then((off) => {
+      if (cancelled) off();
+      else unlisten = off;
+    });
+    void getGameSessionState().then((s) => {
+      if (cancelled) return;
+      setRunning(s.running);
+      if (s.lastReport) setLaunchNotice(noticeFromReport(s.lastReport));
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   const entries = snap?.entries ?? [];
   const enabledCount = entries.filter((e) => e.enabled).length;
   const selectedRow = entries.find((e) => e.modId === selectedMod) ?? null;
@@ -333,17 +375,41 @@ export default function App() {
    */
   const engineCaps: EngineCap[] = useMemo(() => {
     if (activeGame?.id !== "skyrimse") return [];
-    const skse = entries.find((e) => e.enabled && /skse/i.test(e.name));
+    // Read from the files of the game folder, not from a mod's name.
+    const chip = skseChip(skseStatus);
     return [
       {
         id: "skse",
         label: "SKSE",
-        sub: skse ? (skse.version ?? "détecté") : "non installé",
-        detected: Boolean(skse),
+        sub: chip.sub,
+        detected: chip.tone === "ok",
+        tone: chip.tone,
+        hint: chip.hint,
         icon: "zap",
       },
     ];
-  }, [activeGame?.id, entries]);
+  }, [activeGame?.id, skseStatus]);
+  // Re-read the game folder whenever what could change it did: another
+  // instance, a mod toggled (SKSE's files are copied on the tick), a session
+  // that just started or ended.
+  const skseEntries = snap?.entries;
+  useEffect(() => {
+    if (activeGame?.id !== "skyrimse") {
+      setSkseStatus(null);
+      return;
+    }
+    let cancelled = false;
+    void getSkseStatus()
+      .then((s) => {
+        if (!cancelled) setSkseStatus(s);
+      })
+      .catch(() => {
+        if (!cancelled) setSkseStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeGame?.id, activeLoadout?.id, skseEntries, running]);
   const tabs = tabsFor(activeGame?.capabilities);
   // A game switch can land on a tab the new game does not have. The browser
   // is exempt: it belongs to the shell, so it survives changing games.
@@ -519,6 +585,21 @@ export default function App() {
       const next = await setModEnabled(activeLoadout.id, row.modId, !row.enabled);
       setSnap((prev) => (prev ? { ...prev, entries: next } : prev));
       setVersionTick((t) => t + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /** Priority order changed by drag or keyboard. The Core answers with the
+   * fresh list; conflicts follow from `entries`, and the Plugins/Répertoire
+   * pages re-read the Core each time they open. */
+  async function reorder(row: ModRow, to: number) {
+    if (!activeLoadout) return;
+    try {
+      const next = await moveMods(activeLoadout.id, [row.modId], to);
+      setSnap((prev) => (prev ? { ...prev, entries: next } : prev));
+      setVersionTick((t) => t + 1);
+      refreshTxs();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -752,15 +833,26 @@ export default function App() {
       setToast("Le lancement n’est câblé que pour Skyrim SE / SKSE pour l’instant.");
       return;
     }
+    // The button reads "Arrêter" while a game runs, but ModLab cannot stop
+    // it: say so rather than launching a second one.
+    if (running) {
+      setToast("Une partie est en cours — ferme le jeu pour terminer la session.");
+      return;
+    }
     setRunning(true);
+    setLaunchNotice(null);
     setToast("Lancement SKSE via USVFS…");
     try {
+      // Resolves once the game process exists; the end of the session comes
+      // back through `onGameEnded`.
       await launchSkse(activeLoadout.id);
-      setToast("Session terminée.");
+      setToast("Skyrim est lancé — ModLab reste utilisable pendant la partie.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
       setRunning(false);
+      const message = e instanceof Error ? e.message : String(e);
+      setLaunchNotice(noticeFromRefusal(message));
+      setToast("Lancement annulé — voir le message sous « Jouer ».");
+      void getSkseStatus().then(setSkseStatus);
     }
   }
 
@@ -984,6 +1076,7 @@ export default function App() {
             selectedId={selectedMod}
             onSelect={openMod}
             onToggle={(row) => void toggle(row)}
+            onReorder={reorder}
             conflicts={conflictByMod}
             onImportSource={startImport}
             onInstallArchived={(row) => void installArchived(row)}
@@ -1072,6 +1165,8 @@ export default function App() {
           enabledCount={enabledCount}
           entryCount={entries.length}
           engineCaps={engineCaps}
+          launchNotice={launchNotice}
+          onDismissLaunchNotice={() => setLaunchNotice(null)}
           categoryCounts={categoryCounts}
           onPickCategory={pickCategory}
           running={running}

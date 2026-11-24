@@ -21,11 +21,12 @@
 //!   detail but not a guessed one.
 //! - `loadorder.txt`: one plugin filename per line, already in load order.
 //!
-//! What's *not* confirmed: which direction `modlist.txt`'s line order maps
-//! to MO2's on-screen priority (top-of-file vs. top-of-UI). Preserved
-//! exactly as written for now; don't assume a direction until it's actually
-//! needed for conflict resolution and can be checked against MO2's UI
-//! directly.
+//! Priority direction, verified against MO2's source (`profile.cpp`,
+//! `doWriteModlist` / `refreshModStatus`): the FIRST line of `modlist.txt` is
+//! the mod of HIGHEST priority (the one that wins file conflicts). MO2's own
+//! window shows the opposite order (the bottom row wins). ModLab orders by
+//! ascending `position` and the last one wins (ADR 0002), so
+//! `to_import_entries` hands the mods over reversed: bottom of the file first.
 
 use std::fs;
 use std::io;
@@ -74,7 +75,8 @@ impl Mo2Profile {
             .collect()
     }
 
-    /// Convert the managed mods into ModLab's generic import shape, so
+    /// Convert the managed mods into ModLab's generic import shape, lowest
+    /// priority first (the reverse of `modlist.txt`, see the module doc), so
     /// `modlab_core::loadout::import_mods` can persist them without
     /// knowing anything about MO2. `mods_dir` is the instance's `mods/`
     /// folder (e.g. `<MO2 instance>/mods`) — each managed mod is expected
@@ -85,6 +87,7 @@ impl Mo2Profile {
     pub fn to_import_entries(&self, mods_dir: &Path) -> Vec<modlab_core::loadout::ImportEntry> {
         self.modlist
             .iter()
+            .rev()
             .filter_map(|e| match e {
                 ModlistEntry::Managed { name, enabled } => {
                     Some(modlab_core::loadout::ImportEntry {
@@ -294,15 +297,15 @@ mod tests {
         assert_eq!(listed[0].name, "Main 2026");
 
         // Read back through the Core to assert what was actually stored,
-        // in modlist order with the enabled flag preserved.
+        // lowest priority first (reverse of modlist.txt), enabled flag preserved.
         let rows = loadout::entries(&core, created.id).unwrap();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].name, "SkyUI");
-        assert!(rows[0].enabled);
-        assert_eq!(rows[1].name, "Address Library All in One");
-        assert!(!rows[1].enabled);
+        assert_eq!(rows[1].name, "SkyUI");
+        assert!(rows[1].enabled);
+        assert_eq!(rows[0].name, "Address Library All in One");
+        assert!(!rows[0].enabled);
         assert_eq!(
-            rows[0].source_path,
+            rows[1].source_path,
             mods.path().join("SkyUI"),
             "mods point at MO2's folders in place — never copied"
         );
@@ -471,19 +474,63 @@ mod tests {
             entries,
             vec![
                 modlab_core::loadout::ImportEntry {
-                    name: "SkyUI".into(),
-                    source_path: mods_dir.join("SkyUI"),
-                    enabled: true,
-                    version: None,
-                },
-                modlab_core::loadout::ImportEntry {
                     name: "Disabled Mod".into(),
                     source_path: mods_dir.join("Disabled Mod"),
                     enabled: false,
                     version: None,
                 },
+                modlab_core::loadout::ImportEntry {
+                    name: "SkyUI".into(),
+                    source_path: mods_dir.join("SkyUI"),
+                    enabled: true,
+                    version: None,
+                },
             ],
             "DLC entry must not appear — it was never a mods/ folder"
         );
+    }
+
+    /// First line of `modlist.txt` = highest priority = must win conflicts
+    /// in ModLab (last of the sequence, ADR 0002).
+    #[test]
+    fn first_modlist_line_gets_the_highest_position_and_wins_the_conflict() {
+        let core = Core::open_in_memory().unwrap();
+        let profile = profile_with(
+            "+Winner
++Middle
+-Loser
+",
+            "",
+            "",
+        );
+        let mods = tempfile::tempdir().unwrap();
+        for n in ["Winner", "Middle", "Loser"] {
+            fs::create_dir_all(mods.path().join(n)).unwrap();
+        }
+        fs::write(mods.path().join("Winner").join("a.txt"), b"w").unwrap();
+        fs::write(mods.path().join("Middle").join("a.txt"), b"m").unwrap();
+
+        let (created, _) = import_into(&core, profile.path(), mods.path(), "T").unwrap();
+
+        let rows = loadout::entries(&core, created.id).unwrap();
+        let order: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(order, ["Loser", "Middle", "Winner"]);
+        assert_eq!(rows[2].position, 2);
+
+        let mod_files: Vec<modlab_core::conflicts::ModFiles> = rows
+            .iter()
+            .map(|r| modlab_core::conflicts::ModFiles {
+                mod_id: r.mod_id,
+                name: r.name.clone(),
+                files: if r.source_path.join("a.txt").is_file() {
+                    vec!["a.txt".into()]
+                } else {
+                    vec![]
+                },
+            })
+            .collect();
+        let conflicts = modlab_core::conflicts::find_conflicts(&mod_files);
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].winner().1, "Winner");
     }
 }

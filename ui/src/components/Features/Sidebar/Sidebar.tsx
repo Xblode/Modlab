@@ -12,6 +12,7 @@ import { MenuPicker, type MenuItem } from "../MenuPicker/MenuPicker";
 import type { SettingsMenu } from "../Settings/SettingsPane";
 import { SideMenu } from "../Settings/SideMenu";
 import { ActiveInstanceCard, type EngineCap } from "./ActiveInstanceCard";
+import type { LaunchNotice } from "../../../sessionNotice";
 import { ExplorerTree, type FavoriteEntry } from "./ExplorerTree";
 import { SidebarFooter } from "./SidebarFooter";
 import { SidebarProfile } from "./SidebarProfile";
@@ -90,6 +91,9 @@ type Props = {
   /** "Engine & Indicators" for the active instance — empty for a game with
    * no known engine mod to watch for yet. */
   engineCaps?: EngineCap[];
+  /** The refused-launch message or last-session balance sheet, if any. */
+  launchNotice?: LaunchNotice | null;
+  onDismissLaunchNotice?: () => void;
   /** Distinct categories in the active loadout, with how many mods carry
    * each — see `ExplorerTree`'s own doc on why this isn't a real list. */
   categoryCounts: { name: string; count: number }[];
@@ -147,6 +151,8 @@ export function Sidebar({
   onCommunityBack,
   communityEnabled,
   engineCaps,
+  launchNotice,
+  onDismissLaunchNotice,
   categoryCounts,
   onPickCategory,
 }: Props) {
@@ -203,6 +209,8 @@ export function Sidebar({
           onRollback={onRollback}
           onOpenHistory={onOpenTransactions}
           caps={engineCaps}
+          notice={launchNotice}
+          onDismissNotice={onDismissLaunchNotice}
         />
       ) : act === "explorer" && activeGame ? (
         <div className="side-instance">

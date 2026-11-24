@@ -68,6 +68,10 @@ pub enum UsvfsError {
     CreateVfsFailed(String),
     #[error("usvfsVirtualLinkDirectoryStatic reported failure linking {from} onto {onto}")]
     LinkDirectoryFailed { from: PathBuf, onto: PathBuf },
+    #[error("VirtualLinkFile reported failure linking {from} onto {onto}")]
+    LinkFileFailed { from: PathBuf, onto: PathBuf },
+    #[error("could not write the instance's plugins.txt: {0}")]
+    WritePluginsTxt(std::io::Error),
     #[error("usvfsCreateProcessHooked reported failure launching: {0}")]
     CreateProcessHookedFailed(String),
     #[error("hooked process did not exit within the timeout: {0}")]
@@ -115,6 +119,8 @@ type FnSetInstanceName =
 type FnCreateVfs = unsafe extern "system" fn(*const RawUsvfsParameters) -> i32;
 type FnDisconnectVfs = unsafe extern "system" fn();
 type FnVirtualLinkDirectoryStatic = unsafe extern "system" fn(*const u16, *const u16, u32) -> i32;
+/// `BOOL VirtualLinkFile(LPCWSTR source, LPCWSTR destination, unsigned flags)`.
+type FnVirtualLinkFile = unsafe extern "system" fn(*const u16, *const u16, u32) -> i32;
 type FnCreateProcessHooked = unsafe extern "system" fn(
     *const u16,               // lpApplicationName
     *mut u16,                 // lpCommandLine
@@ -246,6 +252,40 @@ impl Vfs {
 
         if ok == 0 {
             return Err(UsvfsError::LinkDirectoryFailed {
+                from: source.to_path_buf(),
+                onto: destination.to_path_buf(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Make one real *file* appear at `destination` inside the hooked
+    /// processes, without touching `destination` on disk — even if a real
+    /// file already sits there, the hooked process sees `source` instead.
+    /// This is how MO2 hands the game its own `plugins.txt`: the real
+    /// `%LOCALAPPDATA%\Skyrim Special Edition\Plugins.txt` is never written.
+    ///
+    /// Not covered by a real-DLL test: the symbol name comes from usvfs's
+    /// own source (`VirtualLinkFile`, old unprefixed export, like
+    /// `VirtualLinkDirectoryStatic` above), with the modern
+    /// `usvfsVirtualLinkFile` tried as a fallback — neither could be checked
+    /// against a real `usvfs_x64.dll` when this was written (ADR 0001's rule:
+    /// verify exports on the machine's own DLL).
+    pub fn link_file(&self, source: &Path, destination: &Path) -> Result<(), UsvfsError> {
+        let source_w = to_wide(source);
+        let dest_w = to_wide(destination);
+
+        let ok = unsafe {
+            let link_fn: Symbol<FnVirtualLinkFile> = self
+                .lib
+                .get(b"VirtualLinkFile\0")
+                .or_else(|_| self.lib.get(b"usvfsVirtualLinkFile\0"))?;
+            // Flags 0: replace whatever mapping or real file is at the target.
+            link_fn(source_w.as_ptr(), dest_w.as_ptr(), 0)
+        };
+
+        if ok == 0 {
+            return Err(UsvfsError::LinkFileFailed {
                 from: source.to_path_buf(),
                 onto: destination.to_path_buf(),
             });
@@ -469,6 +509,25 @@ pub fn deploy_enabled_mods(
         linked += 1;
     }
     Ok(linked)
+}
+
+/// Give the game its plugin list: compute the instance's load order, write
+/// `instance_file` (inside ModLab's data root) and link it, as a file, onto
+/// `game_plugins_txt` — the `%LOCALAPPDATA%` path Skyrim reads. The real file
+/// is never written; only hooked processes see the replacement. Call it after
+/// `deploy_enabled_mods`, with the same rows. Returns the order so the caller
+/// can journal its issues.
+pub fn deploy_plugins_txt(
+    vfs: &Vfs,
+    entries: &[modlab_core::loadout::LoadoutEntryRow],
+    game: &crate::plugins::GameContext,
+    instance_file: &Path,
+    game_plugins_txt: &Path,
+) -> Result<crate::plugins::LoadOrder, UsvfsError> {
+    let order = crate::plugins::write_instance_plugins_txt(entries, game, instance_file)
+        .map_err(UsvfsError::WritePluginsTxt)?;
+    vfs.link_file(instance_file, game_plugins_txt)?;
+    Ok(order)
 }
 
 impl Drop for Vfs {

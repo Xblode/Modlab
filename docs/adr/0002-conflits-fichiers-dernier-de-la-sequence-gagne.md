@@ -49,3 +49,7 @@ La question de la direction de `modlist.txt` reste **ouverte et documentée comm
 - **La direction de priorité de `modlist.txt`** — reste ouverte, c'est le point à reprendre en premier sur ce sujet.
 - **Les conflits de *records*** (niveau xEdit/Mutagen, §4) : sans rapport. Ce module ne parle que de fichiers. Les conflits de records restent au programme de la Phase 4.
 - **La résolution** des conflits (règles, priorités par extension, patchs) : hors périmètre Phase 1, on détecte et on explique, on ne réarbitre pas.
+
+## Mise à jour (2026-11-24) — direction de `modlist.txt` tranchée
+
+Vérifié sur le code source de MO2 (`profile.cpp`, `doWriteModlist` / `refreshModStatus`) : la **première** ligne de `modlist.txt` est le mod de plus **haute** priorité (celui qui gagne) ; l'interface de MO2 affiche l'ordre inverse. L'import (`mo2::to_import_entries`) inverse donc la séquence à la frontière de l'adaptateur, comme prévu ci-dessus : `position` croît avec la priorité, le plus grand gagne. Les instances importées avant cette date ont un ordre inversé (à ré-importer). L'ordre se change ensuite par `loadout::move_mods` (transactionnel).

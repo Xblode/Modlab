@@ -3,6 +3,7 @@ import type { Channel, LoadoutVersion } from "../../../api";
 import { CHANNEL_LETTER } from "../../../channel";
 import { Ico } from "../../../Ico";
 import { Pop, type PopItem } from "../../../Pop";
+import type { LaunchNotice } from "../../../sessionNotice";
 
 const CHANNEL_LABEL: Record<Channel, string> = { stable: "Stable", beta: "Beta", alpha: "Alpha" };
 const CHANNEL_SUB: Record<Channel, string> = {
@@ -20,6 +21,11 @@ export type EngineCap = {
   sub: string;
   detected: boolean;
   icon: string;
+  /** `warn` = there but not usable as is (wrong version…). Defaults to
+   * `on`/off following `detected`. */
+  tone?: "ok" | "warn" | "off";
+  /** Tooltip; defaults to "label · sub". */
+  hint?: string;
 };
 
 /**
@@ -50,6 +56,8 @@ export function ActiveInstanceCard({
   onRollback,
   onOpenHistory,
   caps,
+  notice,
+  onDismissNotice,
 }: {
   name: string;
   channel: Channel;
@@ -68,6 +76,10 @@ export function ActiveInstanceCard({
   /** "Engine & Indicators" — empty for a game with no known engine mod to
    * watch for yet. */
   caps?: EngineCap[];
+  /** Why the last launch was refused, or what SKSE's journals said about
+   * the last session — shown under the indicators until dismissed. */
+  notice?: LaunchNotice | null;
+  onDismissNotice?: () => void;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(name);
@@ -240,8 +252,8 @@ export function ActiveInstanceCard({
             {caps.map((c) => (
               <span
                 key={c.id}
-                className={`cap ${c.detected ? "on" : ""}`}
-                title={`${c.label} · ${c.sub}`}
+                className={`cap ${c.detected ? "on" : ""} ${c.tone === "warn" ? "warn" : ""}`}
+                title={c.hint ?? `${c.label} · ${c.sub}`}
               >
                 <Ico name={c.icon} />
                 <span className="row">
@@ -250,6 +262,28 @@ export function ActiveInstanceCard({
                 </span>
                 <span className="ver">{c.sub}</span>
               </span>
+            ))}
+          </div>
+        ) : null}
+        {notice ? (
+          <div className={`notice ${notice.tone}`} role="status">
+            <div className="nt">
+              <span className={`hd ${notice.tone === "bad" ? "danger" : notice.tone === "warn" ? "warn" : ""}`} />
+              <span className="ttl">{notice.title}</span>
+              <button
+                className="x"
+                type="button"
+                title="Fermer"
+                aria-label="Fermer le bilan"
+                onClick={onDismissNotice}
+              >
+                <Ico name="x" className="sm" />
+              </button>
+            </div>
+            {notice.lines.map((line, i) => (
+              <div className="nl" key={i}>
+                {line}
+              </div>
             ))}
           </div>
         ) : null}

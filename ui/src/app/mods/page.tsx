@@ -14,6 +14,7 @@ export default function ModsPage({
   selectedId,
   onSelect,
   onToggle,
+  onReorder,
   conflicts,
   onImportSource,
   onInstallArchived,
@@ -32,6 +33,7 @@ export default function ModsPage({
   selectedId: number | null;
   onSelect: (id: number) => void;
   onToggle: (row: ModRow) => void;
+  onReorder: (row: ModRow, to: number) => Promise<void>;
   onInstallArchived: (row: ModRow) => void;
   categories: string[];
   onSetCategory: (row: ModRow, category: string | null) => void;
@@ -70,6 +72,9 @@ export default function ModsPage({
       selectedId={selectedId}
       onSelect={onSelect}
       onToggle={onToggle}
+      onReorder={onReorder}
+      // A search hides rows: an index in a partial list is not a place in the real order.
+      canReorder={rows.length === entryCount}
       onInstallArchived={onInstallArchived}
       categories={categories}
       onSetCategory={onSetCategory}

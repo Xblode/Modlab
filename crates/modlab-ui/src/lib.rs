@@ -9,14 +9,16 @@ use modlab_core::game_adapter::{GameAdapter, PathKind};
 use modlab_core::{conflicts, download, loadout, transaction, Core};
 use modlab_game_minecraft::MinecraftAdapter;
 use modlab_game_skyrim::fomod;
-use modlab_game_skyrim::installer::ArchiveShape;
+use modlab_game_skyrim::installer::{copy_dir, ArchiveShape};
+use modlab_game_skyrim::plugins;
 use modlab_game_skyrim::SkyrimAdapter;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
-use tauri::State;
+#[cfg(windows)]
+use std::time::{Duration, SystemTime};
+use tauri::{Emitter, Manager, State};
 
 pub struct AppState {
     core: Mutex<Core>,
@@ -30,6 +32,9 @@ pub struct AppState {
     /// browser has ever been opened, or for a page opened with no active
     /// game selected.
     active_game: Mutex<Option<String>>,
+    /// What SKSE's journals said about the last finished session — kept so a
+    /// reloaded window can still show it (`game_session_state`).
+    last_session: Mutex<Option<SessionReportDto>>,
 }
 
 /// Resets `game_running` on drop — including on every early-return path.
@@ -363,19 +368,43 @@ fn set_mod_enabled(
     enabled: bool,
 ) -> Result<Vec<ModRowDto>, String> {
     let core = state.core.lock().map_err(|e| e.to_string())?;
+    // Checked first: an engine mod's files must not move under a running game.
+    sync_engine_mod_direct_install(&core, &state, loadout_id, mod_id, enabled)?;
     loadout::set_enabled(&core, loadout_id, mod_id, enabled).map_err(|e| e.to_string())?;
-    sync_engine_mod_direct_install(&core, loadout_id, mod_id, enabled)?;
     entries_dto(&core, loadout_id)
 }
 
-/// If `mod_id` is Skyrim's engine mod (SKSE), mirror its freshly toggled
-/// enabled state onto the real install root — see
-/// `modlab_game_skyrim::engine`'s doc for why this one mod is handled
-/// outside USVFS entirely. A no-op for every other mod, every other game,
-/// and an archived (not yet extracted) row: there is nothing to copy from
-/// yet in that last case.
+/// Change the priority order: move `mod_ids` so the block lands at index `to`
+/// of the list (the last mod wins conflicts). Transactional in the Core.
+#[tauri::command]
+fn move_mods(
+    state: State<AppState>,
+    loadout_id: i64,
+    mod_ids: Vec<i64>,
+    to: usize,
+) -> Result<Vec<ModRowDto>, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    loadout::move_mods(&core, loadout_id, &mod_ids, to).map_err(|e| e.to_string())?;
+    entries_dto(&core, loadout_id)
+}
+
+/// ModLab's own folder for what it did to the game's install root: the
+/// manifest of copied engine files, the originals set aside, the files taken
+/// back out (`modlab_game_skyrim::engine`).
+fn engine_store_dir(data_root: &Path) -> PathBuf {
+    data_root.join("engine").join(SkyrimAdapter.id())
+}
+
+/// If `mod_id` is Skyrim's engine mod (SKSE — recognised by its content, a
+/// `skse64_loader.exe` at the top of its folder, never by its name), mirror
+/// the enabled state it is about to take onto the real install root: only its
+/// root files (loader, `skse64_*.dll`) are concerned, see
+/// `modlab_game_skyrim::engine`. A no-op for every other mod, every other
+/// game, and an archived (not yet extracted) row. The launch also copies
+/// them when needed (`skse::prepare_launch`), so this is not the only way in.
 fn sync_engine_mod_direct_install(
     core: &Core,
+    state: &AppState,
     loadout_id: i64,
     mod_id: i64,
     enabled: bool,
@@ -392,19 +421,59 @@ fn sync_engine_mod_direct_install(
         return Ok(());
     };
     if row.status != loadout::STATUS_INSTALLED
-        || !modlab_game_skyrim::engine::is_engine_mod(&row.name)
+        || !modlab_game_skyrim::engine::is_engine_content(&row.source_path)
     {
         return Ok(());
+    }
+    if state.game_running.load(Ordering::SeqCst) {
+        return Err(
+            "Une partie est en cours : SKSE ne peut pas être modifié avant sa fin.".to_string(),
+        );
     }
     let Some(install_root) = resolve_slot(core, &SkyrimAdapter, "root") else {
         return Ok(());
     };
-    let result = if enabled {
-        modlab_game_skyrim::engine::install_direct(&row.source_path, &install_root)
+    let store = engine_store_dir(&state.data_root);
+    if enabled {
+        // Same rule as at launch: a SKSE built for another game version is
+        // never copied over the one the game folder already has.
+        let game_version = skyrim_install_paths(core)
+            .and_then(|(_, exe)| modlab_game_skyrim::skse::read_exe_version(&exe));
+        modlab_game_skyrim::skse::check_engine_matches_game(
+            &row.name,
+            &row.source_path,
+            game_version,
+        )?;
+    }
+    let described = if enabled {
+        modlab_game_skyrim::engine::install_root_files(&row.source_path, &install_root, &store).map(
+            |r| {
+                format!(
+                    "SKSE : {} fichier(s) copié(s), {} mis de côté, {} déjà identique(s)",
+                    r.copied.len(),
+                    r.backed_up.len(),
+                    r.identical.len()
+                )
+            },
+        )
     } else {
-        modlab_game_skyrim::engine::uninstall_direct(&row.source_path, &install_root)
+        let names = modlab_game_skyrim::engine::engine_root_files(&row.source_path)
+            .map_err(|e| e.to_string())?;
+        modlab_game_skyrim::engine::uninstall_root_files(&install_root, &store, Some(&names)).map(
+            |r| {
+                format!(
+                    "SKSE : {} fichier(s) retiré(s), {} original(aux) remis, {} laissé(s) car modifié(s)",
+                    r.removed.len(),
+                    r.restored.len(),
+                    r.left_alone.len()
+                )
+            },
+        )
     };
-    result.map_err(|e| e.to_string())
+    let summary = described.map_err(|e| e.to_string())?;
+    let mut tx = transaction::Transaction::new(core, "skyrim.engine");
+    tx.step(summary);
+    tx.commit().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// File conflicts for a loadout — the same scan `modlab loadout-conflicts`
@@ -431,7 +500,7 @@ pub struct Mo2ImportResultDto {
 /// exercises the UI's handling of the payload, never this path.
 fn loadout_conflicts(core: &Core, loadout_id: i64) -> Result<LoadoutConflictsDto, String> {
     let rows = loadout::entries(core, loadout_id).map_err(|e| e.to_string())?;
-    let report = conflicts::report_for_entries(&rows);
+    let report = conflicts::report_for_entries(&virtually_deployed_rows(&rows));
     let count = |n: usize| i64::try_from(n).unwrap_or(i64::MAX);
     Ok(LoadoutConflictsDto {
         mods: report
@@ -498,12 +567,12 @@ fn mod_dependencies(
     let Some(row) = rows.iter().find(|r| r.mod_id == mod_id) else {
         return Ok(Vec::new());
     };
-    if modlab_game_skyrim::engine::is_engine_mod(&row.name) {
+    if modlab_game_skyrim::engine::is_engine_content(&row.source_path) {
         return Ok(Vec::new());
     }
     let skse_enabled = rows
         .iter()
-        .any(|r| r.enabled && modlab_game_skyrim::engine::is_engine_mod(&r.name));
+        .any(|r| r.enabled && modlab_game_skyrim::engine::is_engine_content(&r.source_path));
     Ok(vec![ModDependencyDto {
         name: "SKSE".to_string(),
         satisfied: skse_enabled,
@@ -526,7 +595,7 @@ pub struct DirectoryEntryDto {
 
 fn merged_view_dto(core: &Core, loadout_id: i64) -> Result<Vec<DirectoryEntryDto>, String> {
     let rows = loadout::entries(core, loadout_id).map_err(|e| e.to_string())?;
-    let mods: Vec<conflicts::ModFiles> = rows
+    let mods: Vec<conflicts::ModFiles> = virtually_deployed_rows(&rows)
         .iter()
         .filter(|r| r.enabled)
         .filter_map(|r| {
@@ -569,20 +638,125 @@ fn loadout_directory(
     merged_view_dto(&core, loadout_id)
 }
 
-/// The Plugins tab: the same merged view, filtered to `.esp`/`.esm`/`.esl`.
-/// This is the mod-position order the loadout itself stores, not a real
-/// LOOT-sorted load order and not master-dependency validation — neither
-/// exists yet (see `StubTab`'s former copy for this tab).
+/// One row of the Plugins tab: a plugin at its real place in the load order.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginRowDto {
+    pub file_name: String,
+    pub official: bool,
+    /// `None` for a plugin that comes from the game's own `Data/` folder.
+    pub mod_id: Option<i64>,
+    pub mod_name: Option<String>,
+    pub contributor_count: usize,
+    pub master: bool,
+    pub light: bool,
+    pub active: bool,
+    pub missing_masters: Vec<String>,
+    pub readable: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginIssueDto {
+    /// Stable code (`IssueKind::code`); the UI words it in French.
+    pub kind: &'static str,
+    pub plugin: String,
+    pub detail: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginsViewDto {
+    pub plugins: Vec<PluginRowDto>,
+    pub issues: Vec<PluginIssueDto>,
+    pub active_full: usize,
+    pub active_light: usize,
+    pub full_limit: usize,
+    pub light_limit: usize,
+}
+
+/// What the real game install contributes to the load order, honouring the
+/// Réglages → Jeux overrides like every other path lookup.
+fn skyrim_game_context(core: &Core) -> plugins::GameContext {
+    plugins::GameContext {
+        install_root: resolve_slot(core, &SkyrimAdapter, "root"),
+        data_dir: resolve_slot(core, &SkyrimAdapter, "data_dir"),
+    }
+}
+
+/// What USVFS actually layers at launch: every mod, except that the engine mod
+/// (SKSE, recognised by its content) is reduced to its `Data\` part — its
+/// root files are copied for real (`engine::virtual_rows`). Mods merely named
+/// after SKSE stay in, so their plugins reach the Plugins tab and
+/// `plugins.txt`. Those two and the launch all use this set, so the tab shows
+/// exactly what the game gets.
+fn virtually_deployed_rows(rows: &[loadout::LoadoutEntryRow]) -> Vec<loadout::LoadoutEntryRow> {
+    modlab_game_skyrim::engine::virtual_rows(rows)
+}
+
+/// Where an instance's own `plugins.txt` lives: the data root, keyed by
+/// loadout id like `mods/<id>` (a rename must not orphan it).
+fn instance_plugins_txt(data_root: &Path, loadout_id: i64) -> PathBuf {
+    data_root
+        .join("loadouts")
+        .join(loadout_id.to_string())
+        .join("plugins.txt")
+}
+
+fn plugins_view_dto(order: &plugins::LoadOrder) -> PluginsViewDto {
+    let (active_full, active_light) = order.active_counts();
+    PluginsViewDto {
+        plugins: order
+            .entries
+            .iter()
+            .map(|e| {
+                let (mod_id, mod_name) = match &e.source {
+                    plugins::PluginSource::Mod { mod_id, mod_name } => {
+                        (Some(*mod_id), Some(mod_name.clone()))
+                    }
+                    plugins::PluginSource::GameData => (None, None),
+                };
+                PluginRowDto {
+                    file_name: e.file_name.clone(),
+                    official: e.official,
+                    mod_id,
+                    mod_name,
+                    contributor_count: e.contributors,
+                    master: e.master,
+                    light: e.light,
+                    active: e.active,
+                    missing_masters: e.missing_masters.clone(),
+                    readable: e.readable,
+                }
+            })
+            .collect(),
+        issues: order
+            .issues
+            .iter()
+            .map(|i| PluginIssueDto {
+                kind: i.kind.code(),
+                plugin: i.plugin.clone(),
+                detail: i.detail.clone(),
+            })
+            .collect(),
+        active_full,
+        active_light,
+        full_limit: plugins::MAX_FULL_PLUGINS,
+        light_limit: plugins::MAX_LIGHT_PLUGINS,
+    }
+}
+
+/// The Plugins tab: the load order ModLab will hand the game at launch —
+/// computed from the enabled mods' plugins (winner of each conflict), with
+/// masters first and missing masters reported. Read-only (Lecture tier,
+/// §7.2): nothing is written here, `launch_skse` writes `plugins.txt`.
 #[tauri::command]
-fn loadout_plugins(
-    state: State<AppState>,
-    loadout_id: i64,
-) -> Result<Vec<DirectoryEntryDto>, String> {
+fn loadout_plugins(state: State<AppState>, loadout_id: i64) -> Result<PluginsViewDto, String> {
     let core = state.core.lock().map_err(|e| e.to_string())?;
-    Ok(merged_view_dto(&core, loadout_id)?
-        .into_iter()
-        .filter(|e| has_extension(&e.relative_path, &["esp", "esm", "esl"]))
-        .collect())
+    let rows = loadout::entries(&core, loadout_id).map_err(|e| e.to_string())?;
+    let order =
+        plugins::compute_load_order(&virtually_deployed_rows(&rows), &skyrim_game_context(&core));
+    Ok(plugins_view_dto(&order))
 }
 
 /// The Archives tab: the same merged view, filtered to `.bsa`/`.ba2`. Which
@@ -819,6 +993,8 @@ fn delete_mod(
     loadout_id: i64,
 ) -> Result<Vec<ModRowDto>, String> {
     let core = state.core.lock().map_err(|e| e.to_string())?;
+    // An engine mod leaves the game's install root before it leaves the list.
+    sync_engine_mod_direct_install(&core, &state, loadout_id, mod_id, false)?;
     download::remove(&core, mod_id).map_err(|e| e.to_string())?;
     entries_dto(&core, loadout_id)
 }
@@ -835,6 +1011,9 @@ fn uninstall_mod(
     loadout_id: i64,
 ) -> Result<Vec<ModRowDto>, String> {
     let core = state.core.lock().map_err(|e| e.to_string())?;
+    // Before the mod's folder goes: the engine's root files are taken out of
+    // the game's install root while their source still exists.
+    sync_engine_mod_direct_install(&core, &state, loadout_id, mod_id, false)?;
     download::uninstall(&core, mod_id).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_dir_all(mod_dest_dir(&state, mod_id));
     entries_dto(&core, loadout_id)
@@ -981,14 +1160,12 @@ fn install_archived_mod(
     if dest.exists() {
         std::fs::remove_dir_all(&dest).map_err(|e| e.to_string())?;
     }
-    if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    // A rename inside the same data root is atomic and instant; the copy
-    // fallback covers a staging area that landed on another volume.
-    if std::fs::rename(&content_root, &dest).is_err() {
-        copy_dir(Path::new(&content_root), &dest).map_err(|e| e.to_string())?;
-    }
+    // Placement rules (e.g. unwrapping `Data/`) live in the Skyrim adapter.
+    // The engine mod is told by its content (a loader exe at the content root),
+    // never by its name: only it keeps the game-root layout.
+    let keep_game_root = modlab_game_skyrim::engine::is_engine_content(Path::new(&content_root));
+    modlab_game_skyrim::installer::place_content(Path::new(&content_root), &dest, keep_game_root)
+        .map_err(|e| e.to_string())?;
 
     finish_install(&core, &state, mod_id, loadout_id, &dest)
 }
@@ -1134,20 +1311,6 @@ fn install_fomod(
     }
 
     finish_install(&core, &state, mod_id, loadout_id, &dest)
-}
-
-fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(to)?;
-    for entry in std::fs::read_dir(from)? {
-        let entry = entry?;
-        let target = to.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_dir(&entry.path(), &target)?;
-        } else {
-            std::fs::copy(entry.path(), target)?;
-        }
-    }
-    Ok(())
 }
 
 /// Show the embedded browser at `rect` (CSS pixels, measured by the React
@@ -1432,104 +1595,369 @@ fn list_dir_names(dir: &Path) -> Vec<String> {
     names
 }
 
+/// Is SKSE really in the game folder, and does it match the game's version?
+/// (`modlab_game_skyrim::skse::detect`.) This is what the sidebar's SKSE
+/// indicator shows — read from the files, not guessed from a mod's name.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkseStatusDto {
+    /// `"ok"`, `"wrong_version"`, `"missing"` or `"unverifiable"`.
+    pub state: &'static str,
+    pub game_version: Option<String>,
+    pub expected_dll: Option<String>,
+    pub loader_present: bool,
+    pub dlls_found: Vec<String>,
+    /// One French sentence saying what is wrong, or that all is well.
+    pub message: String,
+}
+
+impl From<modlab_game_skyrim::skse::SkseStatus> for SkseStatusDto {
+    fn from(s: modlab_game_skyrim::skse::SkseStatus) -> Self {
+        Self {
+            state: s.state.code(),
+            message: s.message(),
+            game_version: s.game_version,
+            expected_dll: s.expected_dll,
+            loader_present: s.loader_present,
+            dlls_found: s.dlls_found,
+        }
+    }
+}
+
+/// Where the game's install root and executable are, honouring the
+/// Réglages → Jeux overrides.
+fn skyrim_install_paths(core: &Core) -> Option<(PathBuf, PathBuf)> {
+    let root = resolve_slot(core, &SkyrimAdapter, "root")?;
+    let exe =
+        resolve_slot(core, &SkyrimAdapter, "exe").unwrap_or_else(|| root.join("SkyrimSE.exe"));
+    Some((root, exe))
+}
+
+/// Read-only (Lecture tier, §7.2). `None` when Skyrim is not installed.
 #[tauri::command]
-fn launch_skse(state: State<AppState>, loadout_id: i64) -> Result<(), String> {
+fn skse_status(state: State<AppState>) -> Result<Option<SkseStatusDto>, String> {
+    let core = state.core.lock().map_err(|e| e.to_string())?;
+    Ok(skyrim_install_paths(&core)
+        .map(|(root, exe)| modlab_game_skyrim::skse::detect(&root, &exe).into()))
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RejectedPluginDto {
+    pub name: String,
+    pub reason: String,
+}
+
+/// The short balance sheet of one finished game session, read back from
+/// SKSE's own journals (`skse64.log`, `skse64_loader.log`) — the proof of
+/// whether SKSE and its plugins really loaded.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionReportDto {
+    pub loadout_id: i64,
+    /// Unix time in milliseconds.
+    pub ended_at: u64,
+    /// A problem while following the session (the game never registered with
+    /// the virtual filesystem, teardown not confirmed...), if any.
+    pub error: Option<String>,
+    pub log_found: bool,
+    /// `skse64.log` was written during this session.
+    pub log_fresh: bool,
+    pub skse_initialized: bool,
+    pub skse_version: Option<String>,
+    pub init_complete: bool,
+    pub loaded: Vec<String>,
+    pub rejected: Vec<RejectedPluginDto>,
+    /// Plugins the loadout provides that SKSE never even looked at.
+    pub not_seen: Vec<String>,
+    pub loader_launched: bool,
+    pub loader_notes: Vec<String>,
+}
+
+impl SessionReportDto {
+    fn new(
+        loadout_id: i64,
+        report: modlab_game_skyrim::skse::SessionReport,
+        error: Option<String>,
+    ) -> Self {
+        let ended_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+        Self {
+            loadout_id,
+            ended_at,
+            error,
+            log_found: report.log_found,
+            log_fresh: report.log_fresh,
+            skse_initialized: report.skse_initialized,
+            skse_version: report.skse_version,
+            init_complete: report.init_complete,
+            loaded: report.loaded,
+            rejected: report
+                .rejected
+                .into_iter()
+                .map(|r| RejectedPluginDto {
+                    name: r.name,
+                    reason: r.reason,
+                })
+                .collect(),
+            not_seen: report.not_seen,
+            loader_launched: report.loader_launched,
+            loader_notes: report.loader_notes,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameSessionDto {
+    /// A game session is running (launch in progress included).
+    pub running: bool,
+    pub last_report: Option<SessionReportDto>,
+}
+
+/// What a freshly (re)loaded window needs to know: is a game running, and
+/// what did the last session's journals say. Read-only.
+#[tauri::command]
+fn game_session_state(state: State<AppState>) -> Result<GameSessionDto, String> {
+    Ok(GameSessionDto {
+        running: state.game_running.load(Ordering::SeqCst),
+        last_report: state
+            .last_session
+            .lock()
+            .map_err(|e| e.to_string())?
+            .clone(),
+    })
+}
+
+/// Name of the event the window listens to for the end of a session.
+const GAME_ENDED_EVENT: &str = "game://ended";
+
+/// Launch the game through SKSE inside a virtual filesystem. Returns as soon
+/// as the game process has been started — or with the reason it was refused —
+/// and never blocks the window: the session itself is followed on its own
+/// thread, which emits `game://ended` with the journals' balance sheet when the
+/// game has fully exited (`game_session_state` answers the same for a window
+/// that was reloaded meanwhile).
+#[tauri::command]
+async fn launch_skse(app: tauri::AppHandle, loadout_id: i64) -> Result<(), String> {
     #[cfg(not(windows))]
     {
-        let _ = (state, loadout_id);
+        let _ = (app, loadout_id);
         return Err("le lancement SKSE n'est disponible que sous Windows".into());
     }
     #[cfg(windows)]
     {
-        // A human override from Réglages → Jeux must win here — this is the
-        // one place that actually launches the game, so it's the one place
-        // an ignored override would be most visible (and most confusing).
-        let (install_root, usvfs_dll, data_dir, rows) = {
-            let core = state.core.lock().map_err(|e| e.to_string())?;
-            let install_root = resolve_slot(&core, &SkyrimAdapter, "root")
-                .ok_or_else(|| "Skyrim SE introuvable sur cette machine".to_string())?;
-            let usvfs_dll = resolve_slot(&core, &SkyrimAdapter, "usvfs_dll").ok_or_else(|| {
-                "usvfs_x64.dll introuvable — installe MO2, ou renseigne son chemin dans \
-                 Réglages → Jeux"
-                    .to_string()
-            })?;
-            let data_dir = resolve_slot(&core, &SkyrimAdapter, "data_dir")
-                .unwrap_or_else(|| install_root.join("Data"));
-            let rows = loadout::entries(&core, loadout_id).map_err(|e| e.to_string())?;
-            (install_root, usvfs_dll, data_dir, rows)
-        };
-        // SKSE is deployed for real, directly into `install_root`, by
-        // `sync_engine_mod_direct_install` whenever its row is enabled —
-        // never through USVFS (see `modlab_game_skyrim::engine`'s doc for
-        // why). Excluding it from the virtual deployment here is what keeps
-        // the two paths from fighting over the same files.
-        let vfs_rows: Vec<_> = rows
-            .iter()
-            .filter(|r| !modlab_game_skyrim::engine::is_engine_mod(&r.name))
-            .cloned()
-            .collect();
-
-        // SKSE not installed (no loader sitting in the install root) is not
-        // an error — it means a vanilla launch. Every enabled mod's files
-        // still need USVFS to be visible to whichever executable runs, so
-        // the virtual session below is built the same way either way.
-        let loader = install_root.join("skse64_loader.exe");
-        let vanilla_exe = install_root.join("SkyrimSE.exe");
-        let exe_to_launch = if loader.is_file() {
-            loader
-        } else if vanilla_exe.is_file() {
-            vanilla_exe
-        } else {
-            return Err(format!(
-                "Ni skse64_loader.exe ni SkyrimSE.exe trouvés dans {}",
-                install_root.display()
-            ));
-        };
-        // The whole session counts as "game running" (§6): while it lasts,
-        // `ai_ask` refuses to run the local LLM.
-        state.game_running.store(true, Ordering::SeqCst);
-        let _session = GameSessionGuard(&state.game_running);
-
-        // Deterministic per-loadout name, not a shared literal: two
-        // loadouts launching independently must never reconnect to the
-        // same VFS session (see modlab_game_skyrim::usvfs::instance_name's
-        // doc — this is what keeps a fresh loadout from appearing to
-        // already have another loadout's mods installed).
-        let vfs_instance_name = modlab_game_skyrim::usvfs::instance_name("skyrim", loadout_id);
-        let mut vfs = modlab_game_skyrim::usvfs::Vfs::create(&usvfs_dll, &vfs_instance_name)
+        let (started_tx, started_rx) = std::sync::mpsc::channel::<Result<(), String>>();
+        std::thread::Builder::new()
+            .name("modlab-game-session".into())
+            .spawn(move || run_game_session(&app, loadout_id, &started_tx))
             .map_err(|e| e.to_string())?;
-        {
-            let core = state.core.lock().map_err(|e| e.to_string())?;
-            let mut tx = transaction::Transaction::new(&core, "skyrim.usvfs");
-            tx.step(format!("usvfs instance '{vfs_instance_name}' connected"));
-            tx.commit().map_err(|e| e.to_string())?;
-        }
-        modlab_game_skyrim::usvfs::deploy_enabled_mods(&vfs, &vfs_rows, &data_dir)
-            .map_err(|e| e.to_string())?;
-        let cmd = format!("\"{}\"", exe_to_launch.display());
-        vfs.launch_hooked_visible(&cmd, &install_root)
-            .map_err(|e| e.to_string())?;
-        vfs.wait_for_session_end(Duration::from_secs(2), Duration::from_secs(60))
-            .map_err(|e| e.to_string())?;
-
-        // Explicit, verified disconnect rather than leaving it to `Drop`:
-        // `Drop` can't propagate an error, so a teardown that silently
-        // fails there could leave a stale session for the next launch to
-        // collide with.
-        let disconnect_result = vfs.disconnect();
-        {
-            let core = state.core.lock().map_err(|e| e.to_string())?;
-            let step = match &disconnect_result {
-                Ok(()) => format!("usvfs instance '{vfs_instance_name}' disconnected (confirmed)"),
-                Err(e) => format!("usvfs instance '{vfs_instance_name}' disconnect FAILED: {e}"),
-            };
-            let mut tx = transaction::Transaction::new(&core, "skyrim.usvfs");
-            tx.step(step);
-            tx.commit().map_err(|e| e.to_string())?;
-        }
-        disconnect_result.map_err(|e| e.to_string())?;
-        Ok(())
+        tauri::async_runtime::spawn_blocking(move || started_rx.recv())
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|_| "La session de jeu s'est arrêtée avant d'avoir démarré.".to_string())?
     }
+}
+
+/// A game process started under a virtual filesystem, not yet finished.
+#[cfg(windows)]
+struct LaunchedSession {
+    vfs: modlab_game_skyrim::usvfs::Vfs,
+    instance_name: String,
+    started_at: SystemTime,
+    /// Where SKSE writes its journals; `None` when it cannot be located.
+    log_dir: Option<PathBuf>,
+    /// The plugin DLLs the loadout provides, to spot the ones never looked at.
+    expected_plugins: Vec<String>,
+}
+
+/// Everything from "the human clicked Jouer" up to "the game process exists".
+/// Any `Err` is a French message that is shown as is, and nothing was
+/// launched. Order matters: SKSE is put in place and verified *before* a
+/// virtual filesystem is even created, so a refusal costs nothing.
+#[cfg(windows)]
+fn start_game_session(state: &AppState, loadout_id: i64) -> Result<LaunchedSession, String> {
+    // A human override from Réglages → Jeux must win here — this is the
+    // one place that actually launches the game, so it's the one place
+    // an ignored override would be most visible (and most confusing).
+    let (install_root, game_exe, usvfs_dll, data_dir, rows, log_dir) = {
+        let core = state.core.lock().map_err(|e| e.to_string())?;
+        let (install_root, game_exe) = skyrim_install_paths(&core)
+            .ok_or_else(|| "Skyrim SE introuvable sur cette machine".to_string())?;
+        let usvfs_dll = resolve_slot(&core, &SkyrimAdapter, "usvfs_dll").ok_or_else(|| {
+            "usvfs_x64.dll introuvable — installe MO2, ou renseigne son chemin dans \
+             Réglages → Jeux"
+                .to_string()
+        })?;
+        let data_dir = resolve_slot(&core, &SkyrimAdapter, "data_dir")
+            .unwrap_or_else(|| install_root.join("Data"));
+        let rows = loadout::entries(&core, loadout_id).map_err(|e| e.to_string())?;
+        // SKSE writes its journals next to SkyrimPrefs.ini (Documents).
+        let log_dir = resolve_slot(&core, &SkyrimAdapter, "prefs_ini")
+            .and_then(|p| p.parent().map(|d| d.join("SKSE")))
+            .or_else(modlab_game_skyrim::skse::find_log_dir);
+        (install_root, game_exe, usvfs_dll, data_dir, rows, log_dir)
+    };
+
+    // SKSE's root files go for real into the game folder (safely: see
+    // `engine`), then the folder must really hold a loader and the DLL of
+    // this game's version. No silent fallback to the vanilla exe: that would
+    // look like a modded launch and load nothing.
+    let (engine_report, _status) = modlab_game_skyrim::skse::prepare_launch(
+        &rows,
+        &install_root,
+        modlab_game_skyrim::skse::read_exe_version(&game_exe),
+        &engine_store_dir(&state.data_root),
+    )?;
+    if !engine_report.copied.is_empty() || !engine_report.backed_up.is_empty() {
+        let core = state.core.lock().map_err(|e| e.to_string())?;
+        let mut tx = transaction::Transaction::new(&core, "skyrim.engine");
+        tx.step(format!(
+            "avant lancement : {} fichier(s) SKSE copié(s), {} mis de côté",
+            engine_report.copied.len(),
+            engine_report.backed_up.len()
+        ));
+        tx.commit().map_err(|e| e.to_string())?;
+    }
+    let loader = install_root.join(modlab_game_skyrim::engine::LOADER_FILE);
+
+    // The engine mod contributes only its `Data\` part to the virtual layer.
+    let vfs_rows = virtually_deployed_rows(&rows);
+    let expected_plugins = modlab_game_skyrim::skse::expected_plugins(&vfs_rows);
+
+    // Deterministic per-loadout name, not a shared literal: two loadouts
+    // launching independently must never reconnect to the same VFS session
+    // (see modlab_game_skyrim::usvfs::instance_name's doc).
+    let instance_name = modlab_game_skyrim::usvfs::instance_name("skyrim", loadout_id);
+    let vfs = modlab_game_skyrim::usvfs::Vfs::create(&usvfs_dll, &instance_name)
+        .map_err(|e| e.to_string())?;
+    {
+        let core = state.core.lock().map_err(|e| e.to_string())?;
+        let mut tx = transaction::Transaction::new(&core, "skyrim.usvfs");
+        tx.step(format!("usvfs instance '{instance_name}' connected"));
+        tx.commit().map_err(|e| e.to_string())?;
+    }
+    modlab_game_skyrim::usvfs::deploy_enabled_mods(&vfs, &vfs_rows, &data_dir)
+        .map_err(|e| e.to_string())?;
+    // Skyrim loads only the plugins its `Plugins.txt` lists. Write the
+    // instance's own (in the data root) and link it onto the game's path
+    // for the hooked process only — the real AppData file is never touched.
+    let game_plugins_txt = plugins::find_game_plugins_txt()
+        .ok_or_else(|| "%LOCALAPPDATA% introuvable — impossible de lier plugins.txt".to_string())?;
+    let game_ctx = plugins::GameContext {
+        install_root: Some(install_root.clone()),
+        data_dir: Some(data_dir.clone()),
+    };
+    let order = modlab_game_skyrim::usvfs::deploy_plugins_txt(
+        &vfs,
+        &vfs_rows,
+        &game_ctx,
+        &instance_plugins_txt(&state.data_root, loadout_id),
+        &game_plugins_txt,
+    )
+    .map_err(|e| e.to_string())?;
+    {
+        let core = state.core.lock().map_err(|e| e.to_string())?;
+        let (full, light) = order.active_counts();
+        let mut tx = transaction::Transaction::new(&core, "skyrim.plugins_txt");
+        tx.step(format!(
+            "plugins.txt linked: {full} full + {light} light active, {} issue(s)",
+            order.issues.len()
+        ));
+        tx.commit().map_err(|e| e.to_string())?;
+    }
+
+    let started_at = SystemTime::now();
+    vfs.launch_hooked_visible(&format!("\"{}\"", loader.display()), &install_root)
+        .map_err(|e| e.to_string())?;
+    Ok(LaunchedSession {
+        vfs,
+        instance_name,
+        started_at,
+        log_dir,
+        expected_plugins,
+    })
+}
+
+/// The whole life of one session, on its own thread: start it (reporting the
+/// outcome of the start on `started`), follow it until the game has fully
+/// exited, tear the virtual filesystem down, read SKSE's journals and tell
+/// the window.
+#[cfg(windows)]
+fn run_game_session(
+    app: &tauri::AppHandle,
+    loadout_id: i64,
+    started: &std::sync::mpsc::Sender<Result<(), String>>,
+) {
+    let state = app.state::<AppState>();
+    // One session at a time; claimed here, released when this function ends
+    // — on every path, the guard sees to it. While it is set `ai_ask` refuses
+    // to run the local LLM (§6) and the engine mod's files are not touched.
+    if state
+        .game_running
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        let _ = started.send(Err("Une partie est déjà en cours.".to_string()));
+        return;
+    }
+    let session = GameSessionGuard(&state.game_running);
+
+    let mut launched = match start_game_session(&state, loadout_id) {
+        Ok(l) => l,
+        Err(e) => {
+            let _ = started.send(Err(e));
+            return;
+        }
+    };
+    let _ = started.send(Ok(()));
+
+    let mut problem = launched
+        .vfs
+        .wait_for_session_end(Duration::from_secs(2), Duration::from_secs(60))
+        .err()
+        .map(|e| e.to_string());
+
+    // Explicit, verified disconnect rather than leaving it to `Drop`: `Drop`
+    // can't propagate an error, so a teardown that silently fails there
+    // could leave a stale session for the next launch to collide with.
+    let disconnect_result = launched.vfs.disconnect();
+    if let Ok(core) = state.core.lock() {
+        let step = match &disconnect_result {
+            Ok(()) => format!(
+                "usvfs instance '{}' disconnected (confirmed)",
+                launched.instance_name
+            ),
+            Err(e) => format!(
+                "usvfs instance '{}' disconnect FAILED: {e}",
+                launched.instance_name
+            ),
+        };
+        let mut tx = transaction::Transaction::new(&core, "skyrim.usvfs");
+        tx.step(step);
+        let _ = tx.commit();
+    }
+    if let Err(e) = disconnect_result {
+        problem.get_or_insert_with(|| e.to_string());
+    }
+
+    let report = match &launched.log_dir {
+        Some(dir) => modlab_game_skyrim::skse::read_session_report(
+            dir,
+            launched.started_at,
+            &launched.expected_plugins,
+        ),
+        None => modlab_game_skyrim::skse::SessionReport::default(),
+    };
+    let dto = SessionReportDto::new(loadout_id, report, problem);
+    if let Ok(mut last) = state.last_session.lock() {
+        *last = Some(dto.clone());
+    }
+    // The flag drops with the guard; the event comes after it so that a
+    // window reacting to it already sees "not running".
+    drop(session);
+    let _ = app.emit(GAME_ENDED_EVENT, &dto);
 }
 
 #[derive(Serialize, serde::Deserialize)]
@@ -1619,7 +2047,7 @@ fn loadout_facts(core: &Core, loadout_id: i64) -> Result<LoadoutFacts, String> {
         .map(|l| (l.game_id, l.name))
         .unwrap_or_else(|| ("?".to_string(), "?".to_string()));
     let rows = loadout::entries(core, loadout_id).map_err(|e| e.to_string())?;
-    let report = conflicts::report_for_entries(&rows);
+    let report = conflicts::report_for_entries(&virtually_deployed_rows(&rows));
     let mods = rows
         .iter()
         .map(|r| {
@@ -1800,6 +2228,7 @@ pub fn run() {
             data_root,
             game_running: AtomicBool::new(false),
             active_game: Mutex::new(None),
+            last_session: Mutex::new(None),
         })
         .setup(|app| {
             // Must happen here, before the event loop runs — see
@@ -1815,6 +2244,7 @@ pub fn run() {
             set_game_path_override,
             clear_game_path_override,
             set_mod_enabled,
+            move_mods,
             get_loadout_conflicts,
             mod_dependencies,
             loadout_directory,
@@ -1853,6 +2283,8 @@ pub fn run() {
             get_fomod_module,
             install_fomod,
             launch_skse,
+            skse_status,
+            game_session_state,
             skyrim_graphics_settings,
             set_skyrim_graphics_settings,
             ai_ask,
@@ -2055,5 +2487,168 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(present);
+    }
+
+    /// A fake SKSE mod folder (loader beside `Data/`) and a fake "Address
+    /// Library for SKSE Plugins" (plain Data mod), both imported enabled.
+    fn skse_loadout(core: &Core, tag: &str) -> (i64, PathBuf, PathBuf) {
+        let loadout = loadout::create(core, "skyrimse", "Test").unwrap();
+        let skse = scratch(&format!("skse-engine-{tag}"));
+        fs::write(skse.join("skse64_loader.exe"), b"fake loader").unwrap();
+        fs::write(skse.join("skse64_1_7_104.dll"), b"fake runtime").unwrap();
+        fs::create_dir_all(skse.join("Data/Scripts")).unwrap();
+        fs::write(skse.join("Data/Scripts/Actor.pex"), b"fake pex").unwrap();
+        let address_library = scratch(&format!("skse-address-library-{tag}"));
+        fs::create_dir_all(address_library.join("SKSE/Plugins")).unwrap();
+        fs::write(address_library.join("SKSE/Plugins/x.dll"), b"fake plugin").unwrap();
+        loadout::import_mods(
+            core,
+            loadout.id,
+            &[
+                ImportEntry {
+                    name: "SKSE64".into(),
+                    source_path: skse.clone(),
+                    enabled: false,
+                    version: None,
+                },
+                ImportEntry {
+                    name: "Address Library for SKSE Plugins".into(),
+                    source_path: address_library.clone(),
+                    enabled: true,
+                    version: None,
+                },
+            ],
+        )
+        .unwrap();
+        (loadout.id, skse, address_library)
+    }
+
+    fn test_state(core: Core, data_root: PathBuf) -> AppState {
+        AppState {
+            core: Mutex::new(core),
+            data_root,
+            game_running: AtomicBool::new(false),
+            active_game: Mutex::new(None),
+            last_session: Mutex::new(None),
+        }
+    }
+
+    #[test]
+    fn skse_named_mods_go_through_usvfs_and_only_the_engine_is_cut_to_its_data() {
+        let core = Core::open_in_memory().unwrap();
+        let (loadout_id, skse, address_library) = skse_loadout(&core, "virtual");
+        let rows = loadout::entries(&core, loadout_id).unwrap();
+
+        let deployed = virtually_deployed_rows(&rows);
+
+        let by_name = |n: &str| deployed.iter().find(|r| r.name == n).unwrap();
+        assert_eq!(deployed.len(), 2);
+        assert_eq!(by_name("SKSE64").source_path, skse.join("Data"));
+        assert_eq!(
+            by_name("Address Library for SKSE Plugins").source_path,
+            address_library
+        );
+
+        for dir in [skse, address_library] {
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn ticking_the_engine_copies_only_its_root_files_and_unticking_takes_them_out() {
+        let core = Core::open_in_memory().unwrap();
+        let (loadout_id, skse, address_library) = skse_loadout(&core, "toggle");
+        let game = scratch("skse-fake-game");
+        let data_root = scratch("skse-data-root");
+        core.set_game_path_override("skyrimse", "root", &game.display().to_string())
+            .unwrap();
+        let rows = loadout::entries(&core, loadout_id).unwrap();
+        let engine_id = rows.iter().find(|r| r.name == "SKSE64").unwrap().mod_id;
+        let plugin_id = rows
+            .iter()
+            .find(|r| r.name == "Address Library for SKSE Plugins")
+            .unwrap()
+            .mod_id;
+        let state = test_state(core, data_root.clone());
+        let core = state.core.lock().unwrap();
+
+        // A mod merely named after SKSE never reaches the game folder.
+        sync_engine_mod_direct_install(&core, &state, loadout_id, plugin_id, true).unwrap();
+        assert_eq!(fs::read_dir(&game).unwrap().count(), 0);
+
+        sync_engine_mod_direct_install(&core, &state, loadout_id, engine_id, true).unwrap();
+        assert!(game.join("skse64_loader.exe").is_file());
+        assert!(game.join("skse64_1_7_104.dll").is_file());
+        assert!(!game.join("Data").exists());
+        assert!(data_root.join("engine/skyrimse/engine-files.tsv").is_file());
+
+        sync_engine_mod_direct_install(&core, &state, loadout_id, engine_id, false).unwrap();
+        assert!(!game.join("skse64_loader.exe").exists());
+        assert!(skse.join("skse64_loader.exe").is_file());
+
+        drop(core);
+        for dir in [skse, address_library, game, data_root] {
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn ticking_an_engine_built_for_another_game_version_copies_nothing() {
+        // A system DLL stands in for SkyrimSE.exe: it has a file version that
+        // is certainly not 1.7.104 (read only, never written).
+        let kernel32 = PathBuf::from(std::env::var_os("SystemRoot").expect("SystemRoot"))
+            .join(r"System32\kernel32.dll");
+        let core = Core::open_in_memory().unwrap();
+        let (loadout_id, skse, address_library) = skse_loadout(&core, "wrong-version");
+        let game = scratch("skse-fake-game-wrong-version");
+        let data_root = scratch("skse-data-root-wrong-version");
+        core.set_game_path_override("skyrimse", "root", &game.display().to_string())
+            .unwrap();
+        core.set_game_path_override("skyrimse", "exe", &kernel32.display().to_string())
+            .unwrap();
+        let rows = loadout::entries(&core, loadout_id).unwrap();
+        let engine_id = rows.iter().find(|r| r.name == "SKSE64").unwrap().mod_id;
+        let state = test_state(core, data_root.clone());
+        let core = state.core.lock().unwrap();
+
+        let err =
+            sync_engine_mod_direct_install(&core, &state, loadout_id, engine_id, true).unwrap_err();
+
+        assert!(err.contains("1.7.104"), "{err}");
+        assert!(err.contains("Rien n'a été copié"), "{err}");
+        assert_eq!(fs::read_dir(&game).unwrap().count(), 0);
+        assert!(!data_root.join("engine").exists());
+
+        drop(core);
+        for dir in [skse, address_library, game, data_root] {
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn the_engine_is_not_touched_while_a_game_runs() {
+        let core = Core::open_in_memory().unwrap();
+        let (loadout_id, skse, address_library) = skse_loadout(&core, "running");
+        let game = scratch("skse-fake-game-running");
+        let data_root = scratch("skse-data-root-running");
+        core.set_game_path_override("skyrimse", "root", &game.display().to_string())
+            .unwrap();
+        let rows = loadout::entries(&core, loadout_id).unwrap();
+        let engine_id = rows.iter().find(|r| r.name == "SKSE64").unwrap().mod_id;
+        let state = test_state(core, data_root.clone());
+        state.game_running.store(true, Ordering::SeqCst);
+        let core = state.core.lock().unwrap();
+
+        let err =
+            sync_engine_mod_direct_install(&core, &state, loadout_id, engine_id, true).unwrap_err();
+
+        assert!(err.contains("Une partie est en cours"), "{err}");
+        assert_eq!(fs::read_dir(&game).unwrap().count(), 0);
+
+        drop(core);
+        for dir in [skse, address_library, game, data_root] {
+            let _ = fs::remove_dir_all(dir);
+        }
     }
 }

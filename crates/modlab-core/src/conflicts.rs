@@ -3,13 +3,11 @@
 //! fichier"). Generic, not Skyrim-specific: any game whose mods are
 //! folders of files has this same concept.
 //!
-//! Deliberately conservative about "who wins": this module computes
-//! winners as *last in the sequence you give it wins*, full stop. It does
-//! **not** decide what that sequence should be — `modlab_game_skyrim::mo2`
-//! found a real, still-open question (which direction `modlist.txt`'s line
-//! order maps to MO2's actual on-screen priority) and this module must not
-//! quietly bake in a guessed answer to that. Callers pass mods already in
-//! the priority order they're confident in.
+//! Winners are computed as *last in the sequence you give it wins*. This
+//! module does not decide what that sequence should be: callers pass mods in
+//! ascending priority (`loadout::entries` order, larger `position` wins).
+//! MO2's `modlist.txt` direction is handled at import time, in
+//! `modlab_game_skyrim::mo2`.
 
 use crate::loadout::LoadoutEntryRow;
 use std::collections::HashMap;

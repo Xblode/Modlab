@@ -121,6 +121,42 @@ export async function setModEnabled(
   return invoke<ModRow[]>("set_mod_enabled", { loadoutId, modId, enabled });
 }
 
+/** Preview-only: the order the browser fixture was last dragged into. */
+let mockOrder: number[] | null = null;
+
+/**
+ * Move `modIds` so the block lands at index `to` of the list. Later rows win
+ * file conflicts, so a higher index means a higher priority. The Core does the
+ * real work (one transaction); this twin only exists for the browser preview.
+ */
+function moveBlock(ids: number[], moved: number[], to: number): number[] {
+  const block = ids.filter((id) => moved.includes(id));
+  const rest = ids.filter((id) => !moved.includes(id));
+  const at = Math.max(0, Math.min(to, rest.length));
+  return [...rest.slice(0, at), ...block, ...rest.slice(at)];
+}
+
+/**
+ * Change the priority order of an instance: the mods in `modIds` go to index
+ * `to` of the list (the last row wins conflicts). One transaction in the Core,
+ * journaled, undone by "Annuler les modifications". Returns the fresh entries.
+ */
+export async function moveMods(
+  loadoutId: number,
+  modIds: number[],
+  to: number,
+): Promise<ModRow[]> {
+  if (!isTauri()) {
+    const base = mockSnapshot().entries;
+    const ids = mockOrder ?? base.map((e) => e.modId);
+    mockOrder = moveBlock(ids, modIds, to);
+    const byId = new Map(base.map((e) => [e.modId, e]));
+    return mockOrder.map((id, position) => ({ ...byId.get(id)!, position }));
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<ModRow[]>("move_mods", { loadoutId, modIds, to });
+}
+
 /** Create an empty instance through the Core (or a preview-only fixture). */
 export async function createLoadout(
   gameId: string,
@@ -555,12 +591,86 @@ export async function getMinecraftContent(): Promise<MinecraftContent> {
   return invoke<MinecraftContent>("minecraft_content", {});
 }
 
+/**
+ * Starts the game through SKSE and returns as soon as the game process
+ * exists — or rejects with the (French) reason it was refused: SKSE absent
+ * or built for another game version, a session already running... It does
+ * not wait for the end of the game: `onGameEnded` / `getGameSessionState`
+ * tell when that happens.
+ */
 export async function launchSkse(loadoutId: number): Promise<void> {
   if (!isTauri()) {
     throw new Error("Le lancement SKSE n’est disponible que dans le shell Tauri.");
   }
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("launch_skse", { loadoutId });
+}
+
+/**
+ * `ok` — loader and the DLL of the game's version are in the game folder;
+ * `wrong_version` — SKSE is there but built for another game version;
+ * `missing` — no loader, or no runtime DLL; `unverifiable` — the game's own
+ * version could not be read, so the match cannot be checked.
+ */
+export type SkseState = "ok" | "wrong_version" | "missing" | "unverifiable";
+
+/** What the game folder really holds, read from the files — see `skse_status`. */
+export type SkseStatus = {
+  state: SkseState;
+  gameVersion: string | null;
+  expectedDll: string | null;
+  loaderPresent: boolean;
+  dllsFound: string[];
+  /** One French sentence saying what is wrong, or that all is well. */
+  message: string;
+};
+
+/** `null` outside the Tauri shell, or when Skyrim is not installed. */
+export async function getSkseStatus(): Promise<SkseStatus | null> {
+  if (!isTauri()) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<SkseStatus | null>("skse_status", {});
+}
+
+export type RejectedPlugin = { name: string; reason: string };
+
+/** The balance sheet of one finished game session, from SKSE's own journals. */
+export type SessionReport = {
+  loadoutId: number;
+  /** Unix time, milliseconds. */
+  endedAt: number;
+  /** A problem while following the session itself, if any. */
+  error: string | null;
+  logFound: boolean;
+  /** `skse64.log` was written during this session (not a leftover). */
+  logFresh: boolean;
+  skseInitialized: boolean;
+  skseVersion: string | null;
+  initComplete: boolean;
+  loaded: string[];
+  rejected: RejectedPlugin[];
+  /** Plugins the instance provides that SKSE never even looked at. */
+  notSeen: string[];
+  loaderLaunched: boolean;
+  loaderNotes: string[];
+};
+
+export type GameSessionState = {
+  running: boolean;
+  lastReport: SessionReport | null;
+};
+
+export async function getGameSessionState(): Promise<GameSessionState> {
+  if (!isTauri()) return { running: false, lastReport: null };
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<GameSessionState>("game_session_state", {});
+}
+
+/** Fired once the game (and everything it started) has fully exited. */
+export async function onGameEnded(handler: (report: SessionReport) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<SessionReport>("game://ended", (e) => handler(e.payload));
 }
 
 /** A field left `null` means `SkyrimPrefs.ini` doesn't set that key yet —
@@ -697,12 +807,65 @@ export async function getLoadoutDirectory(loadoutId: number): Promise<DirectoryE
   return invoke<DirectoryEntry[]>("loadout_directory", { loadoutId });
 }
 
-/** The Plugins tab: the merged view filtered to .esp/.esm/.esl. Mod-position
- * order, not a validated LOOT load order — that doesn't exist yet. */
-export async function getLoadoutPlugins(loadoutId: number): Promise<DirectoryEntry[]> {
-  if (!isTauri()) return [];
+/** One plugin at its place in the load order ModLab hands the game. */
+export type PluginRow = {
+  fileName: string;
+  /** Official plugin (base game / DLC / Creation Club): first, always active. */
+  official: boolean;
+  /** `null` when the file comes from the game's own Data folder. */
+  modId: number | null;
+  modName: string | null;
+  contributorCount: number;
+  master: boolean;
+  light: boolean;
+  /** Written with `*` in plugins.txt. `false` = cannot load (see issues). */
+  active: boolean;
+  missingMasters: string[];
+  readable: boolean;
+};
+
+/** Stable codes from the Core (`IssueKind::code`); the page words them. */
+export type PluginIssueKind =
+  | "missing_master"
+  | "inactive_master"
+  | "unreadable"
+  | "master_cycle"
+  | "master_after_non_master"
+  | "full_limit"
+  | "light_limit"
+  | "unencodable_name";
+
+export type PluginIssue = {
+  kind: PluginIssueKind;
+  plugin: string;
+  detail: string | null;
+};
+
+export type PluginsView = {
+  plugins: PluginRow[];
+  issues: PluginIssue[];
+  activeFull: number;
+  activeLight: number;
+  fullLimit: number;
+  lightLimit: number;
+};
+
+/** The Plugins tab: the load order computed by the Skyrim adapter from the
+ * enabled mods (masters first, missing masters reported). Same computation
+ * that writes plugins.txt at launch; no LOOT sorting, no manual order yet. */
+export async function getLoadoutPlugins(loadoutId: number): Promise<PluginsView> {
+  if (!isTauri()) {
+    return {
+      plugins: [],
+      issues: [],
+      activeFull: 0,
+      activeLight: 0,
+      fullLimit: 255,
+      lightLimit: 4096,
+    };
+  }
   const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<DirectoryEntry[]>("loadout_plugins", { loadoutId });
+  return invoke<PluginsView>("loadout_plugins", { loadoutId });
 }
 
 /** The Archives tab: the merged view filtered to .bsa/.ba2. Which files
