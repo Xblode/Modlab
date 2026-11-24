@@ -10,6 +10,10 @@ Une ligne par décision validée. Les plus récentes en haut. Les décisions tec
 
 | Date | Sujet | Le choix | Pourquoi | Écarté |
 | --- | --- | --- | --- | --- |
+| 2026-11-24 | Look de l'interface | Densité « confortable » par défaut (lignes 32 px, boutons et champs 36 px) + réglage Compact/Confortable branché | Faire respirer sans perdre la densité pour qui la veut ; shadcn, Primer ; aucune étude ne prouve que plus aéré = plus efficace | Confortable sans réglage ; garder 28 px |
+| 2026-11-24 | Look de l'interface | Texte : corps 14 px, petits libellés 12 px, plus rien sous 12 | Windows (Fluent) et shadcn | 13/12 comme VS Code |
+| 2026-11-24 | Look de l'interface | Finitions shadcn : arrondis 8 (contrôles) / 12 (cartes), bordures 10 %, moins de traits, zones par nuances de fond, espaces 8 dans un groupe et 12-24 entre groupes | Style voulu « type shadcn » | Seulement l'espacement |
+| 2026-11-24 | Look de l'interface | Un seul bouton principal (Jouer), infobulles avec raccourci sur les boutons à icône seule, états vides courts (titre, phrase, action), barre de statut gauche = jeu / droite = instance | Consensus VS Code, Windows, GitHub | — |
 | 2026-11-24 | Look de l'interface (unslop) | L'appli React `ui/` devient la référence visuelle ; la maquette HTML n'est plus la source (remplace la décision du 2026-09-15 « toute évolution passe d'abord par la maquette ») | Choix de Benjamin | Maquette d'abord ; mettre la maquette à jour ensuite |
 | 2026-11-24 | Look de l'interface (unslop) | Appliquer la méthode unslop (github.com/heydamir/unslop) directement à l'appli React `ui/`, audit puis corrections sans étape de validation de la direction ; plugin installé pour ce projet seulement | Choix de Benjamin | Maquette d'abord ; audit seul ; pas d'installation ; installation globale |
 | 2026-11-24 | Bilan de la Phase 2 | Plan MVP en 3 lots : 1) Skyrim vraiment jouable, 2) socle multi-jeux, 3) Minecraft. Lot 1 lancé : plugins.txt, SKSE et ses plugins, archives `Data/`, ordre des mods | Rendre Skyrim jouable vite, puis ne pas empiler Minecraft sur des raccourcis Skyrim | Minecraft d'abord ; socle d'abord |

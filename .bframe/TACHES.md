@@ -1,7 +1,7 @@
 ---
 titre: Tâches
 description: Ce qu'il y a à faire, du plus proche au plus lointain.
-maj: 2026-11-13
+maj: 2026-11-24
 ---
 
 # Tâches
@@ -16,8 +16,32 @@ Lot 1 — Skyrim vraiment jouable (Bilan de la Phase 2) :
 - [x] 2026-11-24 : Écrire `plugins.txt` (ordre + actifs) pour l'instance, lié par USVFS comme MO2 ; page Plugins montre l'ordre réel (`plugins.rs`, bibliothèque `esplugin` de LOOT). Liaison réelle non testée sans le jeu
 - [x] 2026-11-24 : Réparer SKSE : détection par les fichiers et la version, plugins SKSE par USVFS, copie à la racine avec sauvegarde, refus clair, lancement non bloquant, bilan après partie (`skse.rs`, `engine.rs`). Non testé en jeu
 - [x] 2026-11-24 : Réordonner les mods (cycle sûr, glisser-déposer, Alt+flèches) et corriger l'import MO2 inversé. Les instances importées avant gardent l'ordre inversé : ré-importer
-- [ ] Contre-vérification du lot 1 par un second développeur, et vérifier la version de SKSE avant de le copier
-- [ ] Essai en jeu par Benjamin : lancer depuis ModLab, lire `skse64.log`
+- [x] 2026-11-24 : Contre-vérification du lot 1 (aucun défaut bloquant) ; version de SKSE vérifiée avant toute copie
+- [ ] Essai en jeu par Benjamin : lancer depuis ModLab, lire le bilan SKSE et la page Plugins. Bloqué tant que `usvfs_x64.dll` (MO2) et le disque F: ne sont pas trouvés sur ce PC
+- [ ] Vérifier le nom `VirtualLinkFile` sur la vraie `usvfs_x64.dll` et traduire l'erreur en français (Bilan de la Phase 2)
+- [ ] Réinstaller les mods installés avant le 24 nov. (rangés en `Data/Data`) et ré-importer les instances MO2 (ordre inversé) (Bilan de la Phase 2)
+
+Look de l'interface (unslop) :
+- [x] 2026-11-24 : Commit local du lot 1 après vérifications (`dd951f5`, `7b33f40`) ; tri des versions SKSE dans le message d'erreur
+- [x] 2026-11-24 : Installer unslop pour ce projet ; passe unslop sur `ui/src/` (espacements, contrastes, tailles de texte, icônes, rayons, animations), build OK
+- [x] 2026-11-24 : Recherche (règles des logiciels + études) et document `docs/design/regles-interface.md`
+- [x] 2026-11-24 : Densité confortable + réglage Compact (Réglages → Apparence), texte 14/12, finitions shadcn
+- [x] 2026-11-24 : Un seul bouton principal, infobulles avec raccourcis réels (composant `Tooltip`), états vides courts, barre de statut jeu / instance
+- [ ] Benjamin regarde l'appli et décide : garder (commit) ou annuler
+- [ ] Brancher le choix de thème Clair/Sombre/Auto et « Taille de police » des Réglages (boutons sans effet aujourd'hui)
+- [ ] Raccourci « ⌃Q » affiché pour Quitter sans gestionnaire ; bouton « Console » du composeur sans action ; « Skyrim en cours » écrit en dur dans la barre de statut (`SidebarFooter.tsx`)
+- [ ] Raccourcir les encadrés « Ce que le Core ne suit pas encore » (tableau de bord) et l'explication des Mondes
+- [ ] Vérifier les écrans non vus : thème clair, Minecraft, Santé, Sauvegardes, dialogues
+- [x] 2026-11-24 : CLAUDE.md : l'appli `ui/` est la référence visuelle, la maquette devient un historique
+- [ ] Aligner sur cette règle : `docs/01-architecture-decidee.md` (l.15, 53, 246, 325, 327), `docs/README.md`, `docs/design/design-system.md`, agents `frontend-dev` et `ui-designer`, `.bframe/PROJET.md`
+- [ ] Icône soleil pour le thème « Clair » (aujourd'hui une étincelle) ; police dédiée (Geist ou IBM Plex Sans) seulement si Benjamin le veut
+
+Défauts relevés par la contre-vérification, pour le lot 2 (Bilan de la Phase 2) :
+- [ ] Fermer ModLab pendant une partie : demander confirmation, et retrouver la session au redémarrage (`lib.rs` `launch_skse`)
+- [ ] `_ResourcePack.esl` : confirmer s'il est implicite comme les officiels (`plugins.rs`)
+- [ ] Chemin `Plugins.txt` selon l'édition (Steam, GOG, Epic)
+- [ ] Manifeste SKSE : garder la plus ancienne sauvegarde ; ne retirer l'enregistrement qu'après restauration ; verrou commun case à cocher / lancement
+- [ ] `import_mods` dans une instance non vide : positions en double
 
 ## Ensuite
 
