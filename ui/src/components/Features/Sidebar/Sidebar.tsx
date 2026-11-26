@@ -1,20 +1,27 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Channel, DetectedGame, LoadoutDto } from "../../../api";
 import { useDeletedLoadouts } from "../../../hooks/useDeletedLoadouts";
-import { useLoadoutVersion } from "../../../hooks/useLoadoutVersion";
 import { useTransactions } from "../../../hooks/useTransactions";
-import { CHANNEL_LETTER } from "../../../channel";
 import { KIND_LABELS } from "../../../api";
 import { Ico } from "../../../Ico";
-import { Accordion, ChannelBadge, IconButton, SearchInput, SideEmpty } from "../../ui";
+import {
+  Accordion,
+  Button,
+  IconButton,
+  PopoverMenu,
+  PopoverMenuEntries,
+  SearchInput,
+  SideEmpty,
+  SideRow,
+  type PopoverMenuEntry,
+} from "../../ui";
 import { CommunityMenu, type CommunityMenuId } from "../Community/CommunityMenu";
-import { MenuPicker, type MenuItem } from "../MenuPicker/MenuPicker";
 import type { SettingsMenu } from "../Settings/SettingsPane";
 import { SideMenu } from "../Settings/SideMenu";
-import { ActiveInstanceCard, type EngineCap } from "./ActiveInstanceCard";
+import { ActiveInstanceCard } from "./ActiveInstanceCard";
 import type { LaunchNotice } from "../../../sessionNotice";
+import { APP_MENU_TREE } from "./appMenu";
 import { ExplorerTree, type FavoriteEntry } from "./ExplorerTree";
-import { SidebarFooter } from "./SidebarFooter";
 import { SidebarProfile } from "./SidebarProfile";
 import { SidebarRail } from "./SidebarRail";
 
@@ -38,21 +45,21 @@ type Props = {
   menuOpen: boolean;
   onToggleMenu: () => void;
   onCloseMenu: () => void;
-  onMenuAction: (item: MenuItem) => void;
+  onMenuAction: (item: PopoverMenuEntry) => void;
 
   activeGame: DetectedGame | undefined;
   activeLoadout: LoadoutDto | undefined;
   games: DetectedGame[];
   loadouts: LoadoutDto[];
+  /** Branches of the instance on screen. Not the other instances. */
+  branches: readonly LoadoutDto[];
+  onPickBranch: (branchId: number) => void;
   favorites: FavoriteEntry[];
   expanded: string[];
   enabledCount: number;
   entryCount: number;
   running: boolean;
   dataRoot: string | undefined;
-  /** Bumped after anything that can move the active loadout's revision or
-   * dirty state (a toggle, a snapshot, a rollback) — see `ActiveInstanceCard`. */
-  versionTick: number;
 
   isFavorite: (loadoutId: number) => boolean;
   onToggleFavorite: (loadoutId: number) => void;
@@ -64,6 +71,8 @@ type Props = {
   onShare: () => void;
   onRenameLoadout: (name: string) => void;
   onSetLoadoutChannel: (channel: Channel) => void;
+  /** Still accepted so the shell can pass them (Ctrl+S, the transactions
+   * panel). The sidebar card no longer draws save or rollback. */
   onSnapshot: () => Promise<void>;
   onRollback: () => Promise<void>;
   onCreateLoadout: () => void;
@@ -88,16 +97,19 @@ type Props = {
   /** Gates the "Communauté" icon in `SidebarProfile` — see `SettingsPane`'s
    * `"general"` branch, where the toggle actually lives. */
   communityEnabled: boolean;
-  /** "Engine & Indicators" for the active instance — empty for a game with
-   * no known engine mod to watch for yet. */
-  engineCaps?: EngineCap[];
   /** The refused-launch message or last-session balance sheet, if any. */
   launchNotice?: LaunchNotice | null;
   onDismissLaunchNotice?: () => void;
   /** Distinct categories in the active loadout, with how many mods carry
    * each — see `ExplorerTree`'s own doc on why this isn't a real list. */
   categoryCounts: { name: string; count: number }[];
+  /** The active game's categories, so a stored id shows its French label. */
+  categoryCatalog: { id: string; label: string; icon: string }[];
+  /** Catalog id of the active sidebar category filter, or null. */
+  activeCategory: string | null;
   onPickCategory: (name: string) => void;
+  showEmptyCategories: boolean;
+  onToggleShowEmptyCategories: () => void;
 };
 
 /**
@@ -116,13 +128,12 @@ export function Sidebar({
   activeLoadout,
   games,
   loadouts,
+  branches,
+  onPickBranch,
   favorites,
   expanded,
-  enabledCount,
-  entryCount,
   running,
   dataRoot,
-  versionTick,
   isFavorite,
   onToggleFavorite,
   onPickLoadout,
@@ -133,8 +144,6 @@ export function Sidebar({
   onShare,
   onRenameLoadout,
   onSetLoadoutChannel,
-  onSnapshot,
-  onRollback,
   onCreateLoadout,
   onRenameLoadoutById,
   onSetLoadoutChannelById,
@@ -150,24 +159,38 @@ export function Sidebar({
   onCommunityMenu,
   onCommunityBack,
   communityEnabled,
-  engineCaps,
   launchNotice,
   onDismissLaunchNotice,
   categoryCounts,
+  categoryCatalog,
+  activeCategory,
   onPickCategory,
+  showEmptyCategories,
+  onToggleShowEmptyCategories,
 }: Props) {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
-  const { version, refresh: refreshVersion } = useLoadoutVersion(
-    activeLoadout?.id,
-    `${versionTick}:${enabledCount}`,
-  );
+  // `running` is a single session flag. Keep the instance that was selected
+  // when the session started, so choosing another row does not move the loader.
+  const [runningLoadoutId, setRunningLoadoutId] = useState<number | undefined>(undefined);
+  const runningLatched = useRef(false);
+  useEffect(() => {
+    if (!running) {
+      runningLatched.current = false;
+      setRunningLoadoutId(undefined);
+      return;
+    }
+    if (!runningLatched.current && activeLoadout) {
+      runningLatched.current = true;
+      setRunningLoadoutId(activeLoadout.id);
+    }
+  }, [running, activeLoadout]);
   // A second, independent fetch of the same journal `TransactionsPanel`
   // shows — only loaded while the History activity is actually open, same
   // "recompute on demand, don't share a cache" rule `useConflicts` follows.
   const { txs: historyTxs } = useTransactions(act === "history");
   const { trash, refreshTrash } = useDeletedLoadouts(act === "history");
-  const gameLoadouts = loadouts.filter((l) => l.gameId === activeGame?.id);
   const gameTrash = (trash ?? []).filter((l) => l.gameId === activeGame?.id);
+  const branchRows = [...branches].sort((a, b) => a.id - b.id);
   const loadoutRevisions = (historyTxs ?? []).filter(
     (t) =>
       t.loadoutId === activeLoadout?.id &&
@@ -185,30 +208,30 @@ export function Sidebar({
       />
 
       {menuOpen ? (
-        <MenuPicker
+        <PopoverMenu
+          chrome="context"
           anchorRef={menuButtonRef}
           onClose={onCloseMenu}
-          onItemSelect={onMenuAction}
-        />
+        >
+          <PopoverMenuEntries
+            items={APP_MENU_TREE}
+            onSelect={(item) => {
+              onMenuAction(item);
+              onCloseMenu();
+            }}
+          />
+        </PopoverMenu>
       ) : null}
 
       {act === "explorer" && activeLoadout ? (
         <ActiveInstanceCard
-          name={activeLoadout.name}
+          name={activeLoadout.instanceName}
           channel={activeLoadout.channel}
           running={running}
-          enabledCount={enabledCount}
-          totalCount={entryCount}
-          version={version}
-          onRefreshVersion={refreshVersion}
           onPlay={onPlay}
           onShare={onShare}
           onRename={onRenameLoadout}
           onSetChannel={onSetLoadoutChannel}
-          onSnapshot={onSnapshot}
-          onRollback={onRollback}
-          onOpenHistory={onOpenTransactions}
-          caps={engineCaps}
           notice={launchNotice}
           onDismissNotice={onDismissLaunchNotice}
         />
@@ -216,31 +239,35 @@ export function Sidebar({
         <div className="side-instance">
           <div className="lo">
             <div className="lo-top">
-              <span className="lo-name muted">Instance sans branche</span>
+              <span className="lo-name muted">Aucune instance</span>
             </div>
-            <button className="btn sm" type="button" onClick={onCreateLoadout}>
-              <Ico name="branch" className="sm" />
-              Créer une branche
-            </button>
+            <Button variant="sm" onClick={onCreateLoadout}>
+              <Ico name="plus" className="sm" />
+              Créer une instance
+            </Button>
           </div>
         </div>
       ) : null}
 
       <div className="side-body">
+        <div className="side-body-scroll">
         {act === "explorer" ? (
           <ExplorerTree
             favorites={favorites}
             games={games}
             loadouts={loadouts}
             expanded={expanded}
-            activeGameId={activeGame?.id}
             activeLoadoutId={activeLoadout?.id}
+            activeInstanceId={activeLoadout?.instanceId}
             categoryCounts={categoryCounts}
+            categoryCatalog={categoryCatalog}
+            activeCategory={activeCategory}
             onPickCategory={onPickCategory}
+            showEmptyCategories={showEmptyCategories}
+            onToggleShowEmptyCategories={onToggleShowEmptyCategories}
             isFavorite={isFavorite}
             onToggleFavorite={onToggleFavorite}
             onPickLoadout={onPickLoadout}
-            onPickGame={onPickGame}
             onToggleExpanded={onToggleExpanded}
             onAddGame={onAddGame}
             onRenameLoadout={onRenameLoadoutById}
@@ -254,6 +281,11 @@ export function Sidebar({
               onSettingsMenu("games");
               onAct("settings");
             }}
+            onOpenCategorySettings={() => {
+              onSettingsMenu("categories");
+              onAct("settings");
+            }}
+            runningLoadoutId={runningLoadoutId}
           />
         ) : act === "search" ? (
           <div style={{ padding: "8px 8px 6px" }}>
@@ -266,49 +298,28 @@ export function Sidebar({
           </div>
         ) : act === "history" ? (
           <>
-            <Accordion title="Branches" count={gameLoadouts.length}>
-              {gameLoadouts.length === 0 ? (
-                <SideEmpty
-                  title="Aucune branche"
-                  action={
-                    activeGame ? (
-                      <button className="btn sm" type="button" onClick={onCreateLoadout}>
-                        <Ico name="branch" className="sm" />
-                        Créer une branche
-                      </button>
-                    ) : undefined
-                  }
-                >
-                  Aucune pour ce jeu
-                </SideEmpty>
-              ) : (
-                gameLoadouts.map((l) => (
-                  <div
-                    key={l.id}
-                    className={`tr-row ${l.id === activeLoadout?.id ? "sel" : ""}`}
-                  >
-                    <button
-                      className="tr-label"
-                      type="button"
-                      onClick={() => onPickLoadout(l.id)}
-                    >
-                      <Ico name="branch" />
-                      <span className="lbl">{l.name}</span>
-                      <span className="tail">
-                        {l.id === activeLoadout?.id && version ? (
-                          <span className="mono">
-                            {CHANNEL_LETTER[l.channel]}.{version.revision}
-                          </span>
-                        ) : null}
-                        <ChannelBadge channel={l.channel} className="xs">
-                          {l.channel}
-                        </ChannelBadge>
-                      </span>
-                    </button>
-                  </div>
-                ))
-              )}
-            </Accordion>
+            {!activeLoadout ? (
+              <SideEmpty title="Aucune instance">Choisis-en une dans l’Explorateur</SideEmpty>
+            ) : (
+              <Accordion title={activeLoadout.instanceName} count={branchRows.length}>
+                {branchRows.length === 0 ? (
+                  <SideEmpty title="Aucune branche">Cette instance n’en a pas</SideEmpty>
+                ) : (
+                  branchRows.map((branch) => (
+                    <SideRow
+                      key={branch.id}
+                      className="nested"
+                      icon="branch"
+                      label={branch.name}
+                      current={branch.id === activeLoadout.id}
+                      onClick={() => {
+                        if (branch.id !== activeLoadout.id) onPickBranch(branch.id);
+                      }}
+                    />
+                  ))
+                )}
+              </Accordion>
+            )}
             <Accordion
               title="Révisions"
               count={loadoutRevisions.length}
@@ -389,20 +400,13 @@ export function Sidebar({
         {act === "community" ? (
           <CommunityMenu active={communityMenu} onSelect={onCommunityMenu} onBack={onCommunityBack} />
         ) : null}
+        </div>
       </div>
       <SidebarProfile
         act={act}
         onAct={onAct}
         dataRoot={dataRoot}
         communityEnabled={communityEnabled}
-      />
-      <SidebarFooter
-        running={running}
-        gameShort={activeGame?.short}
-        loadoutName={activeLoadout?.name}
-        channel={activeLoadout?.channel}
-        revision={version?.revision}
-        deploymentLabel={activeGame?.capabilities.deploymentLabel}
       />
     </aside>
   );

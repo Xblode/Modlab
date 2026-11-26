@@ -61,8 +61,7 @@ const PROFILE_LINEAGE: readonly (readonly [string, string, "root" | "upd" | "plu
 ];
 
 /** One `.heatmap` activity grid — 52 columns of 7 days, coloured by mock
- * intensity. Purely decorative (`aria-hidden`): nothing here is announced,
- * same reasoning as `Avatar`'s image fallback. */
+ * intensity. Purely decorative (`aria-hidden`): nothing here is announced. */
 function ActivityHeatmap() {
   const weeks = mockActivityWeeks();
   return (

@@ -1,4 +1,4 @@
-import type { TabDef, TabId } from "../../../gameChrome";
+import { splitGameTab, type TabDef, type TabId } from "../../../gameChrome";
 import { Ico } from "../../../Ico";
 
 /**
@@ -10,48 +10,63 @@ export function TabStrip({
   tabs,
   currentTab,
   modCount,
-  webOpen,
   onSelect,
 }: {
   tabs: TabDef[];
   currentTab: TabId;
   /** Shown as the Mods tab's counter. */
   modCount: number;
-  /** The embedded browser is a shell tab, not a game capability: it is
-   * appended after the adapter's own tabs and only once opened. */
-  webOpen: boolean;
   onSelect: (tab: TabId) => void;
 }) {
+  const { group, game } = splitGameTab(tabs);
   return (
     <div className="tabs" role="tablist">
       <div className="tabs-l">
-        {tabs.map((t) => (
-          <button
+        {group.map((t) => (
+          <TabButton
             key={t.id}
-            className="tab"
-            type="button"
-            role="tab"
-            aria-selected={currentTab === t.id}
-            onClick={() => onSelect(t.id)}
-          >
-            <Ico name={t.icon} className="sm" />
-            <span>{t.label}</span>
-            {t.id === "mods" ? <span className="cnt">{modCount}</span> : null}
-          </button>
+            tab={t}
+            currentTab={currentTab}
+            modCount={modCount}
+            onSelect={onSelect}
+          />
         ))}
-        {webOpen ? (
-          <button
-            className="tab"
-            type="button"
-            role="tab"
-            aria-selected={currentTab === "web"}
-            onClick={() => onSelect("web")}
-          >
-            <Ico name="globe" className="sm" />
-            <span>Navigateur</span>
-          </button>
+        {game && group.length > 0 ? <span className="tab-sep" aria-hidden="true" /> : null}
+        {game ? (
+          <TabButton
+            tab={game}
+            currentTab={currentTab}
+            modCount={modCount}
+            onSelect={onSelect}
+          />
         ) : null}
       </div>
     </div>
+  );
+}
+
+function TabButton({
+  tab,
+  currentTab,
+  modCount,
+  onSelect,
+}: {
+  tab: TabDef;
+  currentTab: TabId;
+  modCount: number;
+  onSelect: (tab: TabId) => void;
+}) {
+  return (
+    <button
+      className="tab"
+      type="button"
+      role="tab"
+      aria-selected={currentTab === tab.id}
+      onClick={() => onSelect(tab.id)}
+    >
+      <Ico name={tab.icon} className="sm" />
+      <span>{tab.label}</span>
+      {tab.id === "mods" ? <span className="cnt">{modCount}</span> : null}
+    </button>
   );
 }

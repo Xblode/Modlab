@@ -1,23 +1,39 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
 import { Ico } from "../../../Ico";
-import { Pop, type PopItem } from "../../../Pop";
-import { Checkbox, ConfirmDialog, IconButton } from "../../ui";
-import { MenuPicker, type MenuItem } from "../MenuPicker/MenuPicker";
-import { categoryIcon } from "../../../categoryIcon";
+import {
+  Badge,
+  Checkbox,
+  ConfirmDialog,
+  IconButton,
+  PopoverMenu,
+  PopoverMenuEntries,
+  PopoverMenuItem,
+  type PopoverMenuEntry,
+} from "../../ui";
 import { useRowHeight } from "../../../density";
-import type { ModRow } from "../../../api";
+import {
+  modTableCatTrack,
+  modTableColumnTemplate,
+  useModTableCatContentPx,
+  useModTableWidthTier,
+} from "../../../modTableWidth";
+import type { GameCategory, ModRow, ResolvedDependency } from "../../../api";
+import { presentCategory } from "../../../categoryIcon";
 import type { ModConflicts } from "../../../api";
+import { compareModRows, nextModSort, type ModSort, type ModSortKey } from "../../../modSort";
+import { modSortFor, rememberModSort } from "../../../uiMemory";
 import { ConflictBadge } from "./ConflictBadge";
+import { DependencyBadge } from "./DependencyBadge";
+import { formatDownloadProgress, type DownloadBytes } from "../../../downloadProgress";
+import { formatBytes, formatExactBytes } from "../../../formatBytes";
+import { formatDateTime, formatMonthYear } from "../../../format";
+import { modSourceDisplay } from "../../../modSource";
 
-/** Exploits the shell's own minimum width (`tauri.conf.json`'s 1024px)
- * rather than an arbitrary number: below that, horizontal scroll (already
- * on the container) is the fallback, not a broken layout. `Mod` and
- * `Catégorie` are the two columns that actually benefit from extra room —
- * everything else is icon- or badge-sized and stays put. */
-const COLUMNS = "20px 28px 40px minmax(220px,1fr) 130px 84px minmax(100px,170px) 90px";
+/** Column widths live in `shell.css` (`.virt-grid { --mod-cols* }`, tiers via `data-width-tier`). */
 
-const ROW_MENU_ITEMS: MenuItem[] = [
+const ROW_MENU_ITEMS: PopoverMenuEntry[] = [
+  { id: "chat", label: "Chat", icon: "sparkle" },
   { id: "rename", label: "Renommer", icon: "edit" },
   { id: "folder", label: "Voir le dossier", icon: "folder" },
   { id: "archive", label: "Voir l'archive", icon: "box" },
@@ -29,6 +45,140 @@ const ROW_MENU_ITEMS: MenuItem[] = [
 const EDGE = 36;
 /** Pointer travel before a press on the handle counts as a drag, not a click. */
 const DRAG_THRESHOLD = 4;
+/** Spoken and shown while a display sort is on: drag would rewrite priority from the wrong indexes. */
+const REORDER_SORTED = "Revenir à l'ordre de priorité pour réordonner";
+
+/**
+ * État kinds, in the order `modStateKind` tests them. The header cycles the
+ * kinds that actually occur; it does not keep a second list of labels.
+ */
+const MOD_STATE_ORDER = [
+  "installing",
+  "downloading",
+  "archived",
+  "dependency",
+  "conflict",
+  "installed",
+] as const;
+
+type ModStateKind = (typeof MOD_STATE_ORDER)[number];
+
+const MOD_STATE_LABEL: Record<ModStateKind, string> = {
+  installing: "Installation",
+  downloading: "Téléchargement",
+  archived: "Archive",
+  dependency: "Dépendance",
+  conflict: "Conflit",
+  installed: "Installé",
+};
+
+/** Required deps that are disabled or missing. Optional / used-by never badge. */
+function dependencyProblems(
+  row: ModRow,
+  dependencies: Map<number, ResolvedDependency[]> | null,
+): ResolvedDependency[] {
+  if (!dependencies || !row.enabled) return [];
+  return (dependencies.get(row.modId) ?? []).filter((dep) => {
+    const kind = dep.kind ?? "required";
+    if (kind !== "required") return false;
+    return dep.state === "disabled" || dep.state === "missing";
+  });
+}
+
+/** Nexus / Curse / Modrinth page, or homepage when that is all we have. */
+function modWebPage(row: ModRow): string {
+  return row.pageUrl?.trim() || row.website?.trim() || "";
+}
+
+/** What the État cell draws for this row. Installing wins over the stored status. */
+function modStateKind(
+  row: ModRow,
+  installing: boolean,
+  problems: readonly ResolvedDependency[],
+  conflicts: ModConflicts | undefined,
+): ModStateKind {
+  if (installing) return "installing";
+  if (row.status === "downloading") return "downloading";
+  if (row.status === "archived") return "archived";
+  if (problems.length > 0) return "dependency";
+  if (conflicts && (conflicts.wins > 0 || conflicts.loses > 0)) return "conflict";
+  return "installed";
+}
+
+/**
+ * Why a drag must not run. Priority ascending is the Core's order, so a
+ * screen index is still a real slot. Any other sort, a state filter, or a
+ * search is not.
+ */
+function reorderLockedReason(
+  canReorder: boolean,
+  sort: ModSort | null,
+  stateFilter: ModStateKind | null,
+): string | null {
+  if (sort && !(sort.key === "priority" && sort.dir === "asc")) return `${REORDER_SORTED}.`;
+  if (stateFilter) return "Affiche tous les états pour changer l'ordre des mods.";
+  if (!canReorder) return "Efface la recherche pour changer l'ordre des mods.";
+  return null;
+}
+
+function SortHeader({
+  label,
+  column,
+  sort,
+  end,
+  colClass,
+  onSort,
+}: {
+  label: string;
+  column: ModSortKey;
+  sort: ModSort | null;
+  end?: boolean;
+  colClass?: string;
+  onSort: (column: ModSortKey) => void;
+}) {
+  const active = sort?.key === column ? sort.dir : null;
+  return (
+    <div
+      role="columnheader"
+      className={`gh-sortable${colClass ? ` ${colClass}` : ""}${end ? " end" : ""}`}
+      aria-sort={active === "asc" ? "ascending" : active === "desc" ? "descending" : "none"}
+    >
+      <button
+        type="button"
+        className={`gh-sort${end ? " end" : ""}${active ? " on" : ""}`}
+        onClick={() => onSort(column)}
+      >
+        <span className="gh-label">{label}</span>
+        {active ? <Ico name={active === "asc" ? "up" : "down"} className="gh-arrow" /> : null}
+      </button>
+    </div>
+  );
+}
+
+function StateHeader({
+  filter,
+  onCycle,
+}: {
+  filter: ModStateKind | null;
+  onCycle: () => void;
+}) {
+  const label = filter ? `État : ${MOD_STATE_LABEL[filter]}` : "État";
+  return (
+    <div role="columnheader" className="gh-sortable col-flags">
+      <button
+        type="button"
+        className={`gh-sort${filter ? " on" : ""}`}
+        data-tip="Cliquer pour filtrer par état"
+        aria-label={
+          filter ? `${label}. Cliquer pour filtrer par état` : "État. Cliquer pour filtrer par état"
+        }
+        onClick={onCycle}
+      >
+        <span className="gh-label">{label}</span>
+      </button>
+    </div>
+  );
+}
 
 type Drag = { modId: number; from: number; slot: number };
 
@@ -41,15 +191,19 @@ type Props = {
   onReorder: (row: ModRow, to: number) => Promise<void>;
   /** False while a search hides rows: an index in a partial list is not a place in the real order. */
   canReorder: boolean;
+  /** Active game. The display sort is remembered for this id. */
+  gameId: string | null;
   /** An archived row has no usable checkbox — its box is replaced by an
    * "Installer" affordance that unpacks the archive first. */
   onInstallArchived: (row: ModRow) => void;
-  /** Every tag already in use, for the category field's autocomplete. */
-  categories: string[];
-  onSetCategory: (row: ModRow, category: string | null) => void;
-  /** Other instances of the active game — an archived row can be moved to
-   * one of these instead, since nothing has been extracted yet. Empty when
-   * there is nowhere else to send it. */
+  /** Mods whose install is in flight. The button stays disabled. */
+  installingIds: ReadonlySet<number>;
+  /** Live byte counts for rows in `downloading`, keyed by mod id. */
+  downloadProgress?: ReadonlyMap<number, DownloadBytes>;
+  /** This game's categories, from the adapter. */
+  catalog: GameCategory[];
+  /** Other instances of the active game — an inactive or archived row can
+   * be moved here. Empty when there is nowhere else to send it. */
   otherLoadouts: { id: number; name: string }[];
   onReassign: (row: ModRow, toLoadoutId: number) => void;
   /**
@@ -58,11 +212,20 @@ type Props = {
    * and found it in no conflict (which is why the two are kept apart).
    */
   conflicts: Map<number, ModConflicts> | null;
+  /**
+   * Per-mod dependencies from the game adapter. `null` means not scanned
+   * yet. A mod missing from the map was scanned and has nothing to report.
+   */
+  dependencies: Map<number, ResolvedDependency[]> | null;
   onRename: (row: ModRow, name: string) => void;
   onDelete: (row: ModRow) => void;
   onUninstall: (row: ModRow) => void;
   onRevealFolder: (row: ModRow) => void;
   onRevealArchive: (row: ModRow) => void;
+  /** Open the mod's Nexus/Curse/Modrinth/homepage URL in the SideDrawer browser. */
+  onOpenPage: (url: string) => void;
+  /** Right-click / ⋯ → Chat: open the SideDrawer Chat tab and tag this mod. */
+  onChat: (row: ModRow) => void;
 };
 
 export function ModTable({
@@ -72,23 +235,114 @@ export function ModTable({
   onToggle,
   onReorder,
   canReorder,
+  gameId,
   onInstallArchived,
-  categories,
-  onSetCategory,
+  installingIds,
+  downloadProgress,
+  catalog,
   otherLoadouts,
   onReassign,
   conflicts,
+  dependencies,
   onRename,
   onDelete,
   onUninstall,
   onRevealFolder,
   onRevealArchive,
+  onOpenPage,
+  onChat,
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const widthTier = useModTableWidthTier(parentRef);
+  const columns = modTableColumnTemplate(widthTier);
+  const showTailCols = widthTier < 2;
+  /** Minecraft shows Load.; Skyrim (and others) hide it — no empty track. */
+  const showLoaderCol = showLoaderColumn(gameId);
+  const catMeasureItems = useMemo(() => {
+    const seen = new Map<string, { icon: string; label: string }>();
+    for (const item of catalog) {
+      seen.set(`${item.icon}\0${item.label}`, { icon: item.icon, label: item.label });
+    }
+    for (const row of rows) {
+      const presented = presentCategory(row.category, catalog);
+      if (!presented.icon) continue;
+      seen.set(`${presented.icon}\0${presented.label}`, {
+        icon: presented.icon,
+        label: presented.label,
+      });
+    }
+    return Array.from(seen.values());
+  }, [catalog, rows]);
+  const catMeasureKey = useMemo(
+    () => catMeasureItems.map((item) => `${item.icon}:${item.label}`).join("|"),
+    [catMeasureItems],
+  );
+  const { measureRef: catMeasureRef, contentPx: catContentPx } =
+    useModTableCatContentPx(catMeasureKey);
+  const catTrack = modTableCatTrack(widthTier, catContentPx);
+  // Display order only. Priority (`position`) stays whatever the Core stored.
+  const [sort, setSort] = useState<ModSort | null>(() => modSortFor(gameId));
+  // Session only: a state filter is not written next to the remembered sort.
+  const [stateFilter, setStateFilter] = useState<ModStateKind | null>(null);
+  useEffect(() => {
+    const next = modSortFor(gameId);
+    setSort((current) =>
+      current?.key === next?.key && current?.dir === next?.dir ? current : next,
+    );
+    setStateFilter(null);
+  }, [gameId]);
+  const presentStates = useMemo(() => {
+    const seen = new Set<ModStateKind>();
+    for (const row of rows) {
+      seen.add(
+        modStateKind(
+          row,
+          installingIds.has(row.modId),
+          dependencyProblems(row, dependencies),
+          conflicts?.get(row.modId),
+        ),
+      );
+    }
+    return MOD_STATE_ORDER.filter((kind) => seen.has(kind));
+  }, [rows, installingIds, dependencies, conflicts]);
+  const filtered = useMemo(() => {
+    if (!stateFilter) return rows;
+    return rows.filter(
+      (row) =>
+        modStateKind(
+          row,
+          installingIds.has(row.modId),
+          dependencyProblems(row, dependencies),
+          conflicts?.get(row.modId),
+        ) === stateFilter,
+    );
+  }, [rows, stateFilter, installingIds, dependencies, conflicts]);
+  const shown = useMemo(() => {
+    if (!sort) return filtered;
+    return filtered.slice().sort((a, b) => compareModRows(a, b, sort, catalog));
+  }, [filtered, sort, catalog]);
+  const lockedReason = reorderLockedReason(canReorder, sort, stateFilter);
+  const reorderable = lockedReason == null;
+
+  function onSortColumn(key: ModSortKey) {
+    const next = nextModSort(sort, key);
+    setSort(next);
+    rememberModSort(gameId, next);
+    parentRef.current?.scrollTo({ top: 0 });
+  }
+
+  function onStateColumn() {
+    const cycle: (ModStateKind | null)[] = [null, ...presentStates];
+    const at = cycle.indexOf(stateFilter);
+    const next = cycle[at < 0 ? 0 : (at + 1) % cycle.length];
+    setStateFilter(next);
+    parentRef.current?.scrollTo({ top: 0 });
+  }
+
   // Row and header height: the virtualizer's fixed size, so a pointer position maps to a slot with plain arithmetic (no DOM lookup, most rows are not mounted). It follows the density setting.
   const ROW_H = useRowHeight();
   const virtualizer = useVirtualizer({
-    count: rows.length,
+    count: shown.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => ROW_H,
     overscan: 12,
@@ -97,9 +351,12 @@ export function ModTable({
   useEffect(() => {
     virtualizer.measure();
   }, [ROW_H]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (selectedId == null) return;
+    const index = shown.findIndex((row) => row.modId === selectedId);
+    if (index >= 0) virtualizer.scrollToIndex(index, { align: "auto" });
+  }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [editingCategory, setEditingCategory] = useState<number | null>(null);
-  const [categoryDraft, setCategoryDraft] = useState("");
   const [reassignRow, setReassignRow] = useState<number | null>(null);
   const reassignRefs = useRef(new Map<number, HTMLButtonElement | null>());
   const moreRefs = useRef(new Map<number, HTMLButtonElement | null>());
@@ -119,8 +376,8 @@ export function ModTable({
   const busy = useRef(false);
   const focusAfter = useRef<number | null>(null);
   const pointerY = useRef(0);
-  const rowsRef = useRef(rows);
-  rowsRef.current = rows;
+  const rowsRef = useRef(shown);
+  rowsRef.current = shown;
 
   /** Run one move and tell assistive tech where the mod ended up. */
   async function commitMove(m: ModRow, to: number) {
@@ -143,14 +400,14 @@ export function ModTable({
   useEffect(() => {
     const id = focusAfter.current;
     if (id === null) return;
-    const idx = rows.findIndex((r) => r.modId === id);
+    const idx = shown.findIndex((r) => r.modId === id);
     if (idx < 0) return;
     focusAfter.current = null;
     virtualizer.scrollToIndex(idx, { align: "auto" });
     requestAnimationFrame(() => {
       parentRef.current?.querySelector<HTMLElement>(`[data-mod-id="${id}"]`)?.focus();
     });
-  }, [rows, virtualizer]);
+  }, [shown, virtualizer]);
 
   function slotAt(clientY: number): number {
     const el = parentRef.current;
@@ -160,7 +417,7 @@ export function ModTable({
   }
 
   function beginDrag(e: PointerEvent, m: ModRow, from: number) {
-    if (!canReorder || busy.current || e.button !== 0) return;
+    if (!reorderable || busy.current || e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
     const startY = e.clientY;
@@ -221,26 +478,14 @@ export function ModTable({
     if (e.key === "ArrowUp") to = index - 1;
     else if (e.key === "ArrowDown") to = index + 1;
     else if (e.key === "Home") to = 0;
-    else if (e.key === "End") to = rows.length - 1;
+    else if (e.key === "End") to = rowsRef.current.length - 1;
     if (to === null) return;
     e.preventDefault();
-    if (!canReorder) {
-      setAnnouncement("Efface la recherche pour changer l'ordre des mods.");
+    if (!reorderable) {
+      if (lockedReason) setAnnouncement(lockedReason);
       return;
     }
     void commitMove(m, to);
-  }
-
-  function startEditCategory(m: ModRow) {
-    setCategoryDraft(m.category ?? "");
-    setEditingCategory(m.modId);
-  }
-
-  function commitCategory(m: ModRow) {
-    setEditingCategory(null);
-    const trimmed = categoryDraft.trim();
-    const next = trimmed || null;
-    if (next !== m.category) onSetCategory(m, next);
   }
 
   function startRename(m: ModRow) {
@@ -254,59 +499,62 @@ export function ModTable({
     if (trimmed && trimmed !== m.name) onRename(m, trimmed);
   }
 
-  function rowMenuItems(m: ModRow): MenuItem[] {
-    const installed = m.status !== "archived";
+  function rowMenuItems(m: ModRow): PopoverMenuEntry[] {
+    const installed = m.status === "installed";
+    const downloading = m.status === "downloading";
     return ROW_MENU_ITEMS.filter((it) => {
       if (it.id === "folder") return installed;
-      if (it.id === "archive") return m.archivePath != null;
+      if (it.id === "archive") return m.archivePath != null && !downloading;
       if (it.id === "uninstall") return installed && m.archivePath != null;
       return true;
     });
   }
 
-  function handleMenuSelect(item: MenuItem, modId: number) {
+  function handleMenuSelect(item: PopoverMenuEntry, modId: number) {
     const m = rows.find((r) => r.modId === modId);
     if (!m) return;
-    if (item.id === "rename") startRename(m);
+    if (item.id === "chat") onChat(m);
+    else if (item.id === "rename") startRename(m);
     else if (item.id === "folder") onRevealFolder(m);
     else if (item.id === "archive") onRevealArchive(m);
     else if (item.id === "uninstall") onUninstall(m);
     else if (item.id === "delete") setConfirmDelete(m);
   }
 
-  const reassignItems: PopItem[] = otherLoadouts.map((l) => ({
-    label: l.name,
-    icon: "branch",
-    onPick: () => {
-      const row = rows.find((r) => r.modId === reassignRow);
-      if (row) onReassign(row, l.id);
-    },
-  }));
-
   return (
     <div className="content" ref={parentRef} style={{ overflow: "auto" }}>
       <div className="sr-only" role="status" aria-live="polite">
         {announcement}
       </div>
-      <datalist id="mod-categories">
-        {categories.map((c) => (
-          <option key={c} value={c} />
-        ))}
-      </datalist>
       <div
         className="grid virt-grid"
+        data-width-tier={widthTier}
+        {...(showLoaderCol ? { "data-loader-col": "1" } : {})}
         style={{
           height: virtualizer.getTotalSize(),
           position: "relative",
           display: "block",
-          minWidth: 760,
+          ["--mod-col-cat" as string]: catTrack,
         }}
       >
+        <div className="mod-cat-measure" ref={catMeasureRef} aria-hidden="true">
+          <span className="cat-face cat-face-measure">
+            <span className="lbl">Cat.</span>
+          </span>
+          {catMeasureItems.map((item) => (
+            <span key={`${item.icon}:${item.label}`} className="cat-face cat-face-measure">
+              <Badge variant="ghost">
+                <Ico name={item.icon} />
+              </Badge>
+              <span className="lbl">{item.label}</span>
+            </span>
+          ))}
+        </div>
         <div
           className="gh"
           style={{
             display: "grid",
-            gridTemplateColumns: COLUMNS,
+            gridTemplateColumns: columns,
             position: "sticky",
             top: 0,
             zIndex: 2,
@@ -315,12 +563,40 @@ export function ModTable({
         >
           <div />
           <div />
-          <div style={{ justifyContent: "flex-end" }}>Pri.</div>
-          <div>Mod</div>
-          <div>État</div>
-          <div>Version</div>
-          <div>Catégorie</div>
-          <div>Source</div>
+          <SortHeader label="Pri." column="priority" sort={sort} end onSort={onSortColumn} />
+          <SortHeader label="Mod" column="name" sort={sort} onSort={onSortColumn} />
+          <StateHeader filter={stateFilter} onCycle={onStateColumn} />
+          <SortHeader
+            label="Cat."
+            column="category"
+            sort={sort}
+            colClass="col-cat"
+            onSort={onSortColumn}
+          />
+          <div className="col-ver">Version</div>
+          <div className="col-game">Jeux</div>
+          {showLoaderCol ? <div className="col-loader">Load.</div> : null}
+          {showTailCols ? (
+            <>
+              <SortHeader
+                label="Taille"
+                column="size"
+                sort={sort}
+                end
+                colClass="col-sz"
+                onSort={onSortColumn}
+              />
+              <SortHeader
+                label="Date"
+                column="date"
+                sort={sort}
+                end
+                colClass="col-when"
+                onSort={onSortColumn}
+              />
+              <div className="col-src">Source</div>
+            </>
+          ) : null}
         </div>
         {drag ? (
           <div
@@ -330,16 +606,43 @@ export function ModTable({
           />
         ) : null}
         {virtualizer.getVirtualItems().map((v) => {
-          const m = rows[v.index];
-          const pri = String(v.index + 1).padStart(3, "0");
+          const m = shown[v.index];
+          // `position` is the Core's 0-based priority. The column keeps that
+          // rank (1-based), never the row's place on screen after a sort.
+          const priority = m.position + 1;
+          const pri = String(priority).padStart(3, "0");
           const selected = selectedId === m.modId;
+          const installing = installingIds.has(m.modId);
+          const live =
+            m.status === "downloading" ? downloadProgress?.get(m.modId) : undefined;
+          const downloadLabel = live
+            ? `Téléchargement ${formatDownloadProgress(live)}`
+            : "Téléchargement…";
+          const problems = dependencyProblems(m, dependencies);
+          const kind = modStateKind(m, installing, problems, conflicts?.get(m.modId));
+          const game = gameVersionCell(m);
+          const loader = showLoaderCol ? loaderLetterCell(m) : null;
+          const src = modSourceDisplay(m);
+          const category = presentCategory(m.category, catalog);
+          const categoryTitle = m.category
+            ? m.categoryUserSet
+              ? `${category.label} — choisie à la main`
+              : category.label
+            : undefined;
+          const webPage = modWebPage(m);
+          // Inactive or archived: offer move when another instance exists.
+          const canMoveToInstance =
+            (m.status === "archived" || !m.enabled) &&
+            m.status !== "downloading" &&
+            !installing &&
+            otherLoadouts.length > 0;
           return (
             <div
               key={m.modId}
               role="row"
               tabIndex={0}
               data-mod-id={m.modId}
-              aria-label={`${m.name}, position ${v.index + 1} sur ${rows.length}`}
+              aria-label={`${m.name}, priorité ${priority}`}
               className={`row ${selected ? "sel" : ""} ${m.enabled ? "" : "off"} ${drag?.modId === m.modId ? "dragging" : ""}`}
               style={{
                 position: "absolute",
@@ -348,7 +651,7 @@ export function ModTable({
                 width: "100%",
                 transform: `translateY(${v.start + ROW_H}px)`,
                 display: "grid",
-                gridTemplateColumns: COLUMNS,
+                gridTemplateColumns: columns,
               }}
               onClick={() => onSelect(m.modId)}
               onKeyDown={(e) => onRowKeyDown(e, m, v.index)}
@@ -358,29 +661,35 @@ export function ModTable({
               }}
             >
               <div
-                className={`grip ${canReorder ? "" : "locked"}`}
-                {...(canReorder
+                className={`grip ${reorderable ? "" : "locked"}`}
+                {...(reorderable
                   ? { "data-tip": "Glisser pour changer la priorité", "data-tip-key": "Alt ↑ ↓" }
-                  : { "data-tip": "Efface la recherche pour réordonner" })}
+                  : { "data-tip": lockedReason ?? REORDER_SORTED })}
                 onPointerDown={(e) => beginDrag(e, m, v.index)}
                 onClick={(e) => e.stopPropagation()}
               >
                 <Ico name="grip" className="sm" />
               </div>
               <div>
-                {m.status === "archived" ? (
+                {m.status === "downloading" ? (
+                  <span title="Téléchargement en cours">
+                    <Ico name="download" className="sm" />
+                  </span>
+                ) : m.status === "archived" ? (
                   // Never a checkbox here: nothing is extracted yet, so
                   // ticking it could not deploy a single file.
                   <IconButton
                     name="box"
-                    title="Installer l’archive"
+                    title={installing ? "Installation en cours" : "Installer l’archive"}
+                    disabled={installing}
                     onClick={(e) => {
                       e.stopPropagation();
-                      onInstallArchived(m);
+                      if (!installing) onInstallArchived(m);
                     }}
                   />
                 ) : (
                   <Checkbox
+                    variant="mod"
                     checked={m.enabled}
                     onToggle={() => onToggle(m)}
                     stopPropagation
@@ -419,9 +728,31 @@ export function ModTable({
                       onRevealFolder(m);
                     }}
                   />
+                  {canMoveToInstance ? (
+                    <IconButton
+                      name="share"
+                      title="Déplacer vers une autre instance"
+                      ref={(el) => {
+                        reassignRefs.current.set(m.modId, el);
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setReassignRow(m.modId);
+                      }}
+                    />
+                  ) : null}
+                  <IconButton
+                    name="globe"
+                    title={webPage ? "Ouvrir sur le Web" : "Pas de page Web"}
+                    disabled={!webPage}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (webPage) onOpenPage(webPage);
+                    }}
+                  />
                   <IconButton
                     name="sparkle"
-                    title="Demander à Claude"
+                    title="Demander à Chat"
                     style={{ color: "var(--claude)" }}
                   />
                   <IconButton
@@ -439,97 +770,118 @@ export function ModTable({
                 </span>
               </div>
               <div className="flags">
-                {m.status === "archived" ? (
-                  <>
-                    <span className="tag archived" title={m.archivePath ?? undefined}>
-                      <Ico name="box" className="sm" />
-                      Archive
-                    </span>
-                    {otherLoadouts.length > 0 ? (
-                      <IconButton
-                        name="share"
-                        variant="sm"
-                        title="Déplacer vers une autre instance"
-                        ref={(el) => {
-                          reassignRefs.current.set(m.modId, el);
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setReassignRow(m.modId);
-                        }}
-                      />
-                    ) : null}
-                  </>
-                ) : (
+                {kind === "installing" ? (
+                  <Badge
+                    tone="downloading"
+                    data-tip="Installation en cours"
+                    aria-label="Installation en cours"
+                  >
+                    <Ico name="box" />
+                  </Badge>
+                ) : kind === "downloading" ? (
+                  <Badge
+                    tone="downloading"
+                    data-tip={live ? downloadLabel : "Le fichier n’est pas encore arrivé"}
+                    aria-label={live ? downloadLabel : "Le fichier n’est pas encore arrivé"}
+                  >
+                    <Ico name="download" />
+                  </Badge>
+                ) : kind === "archived" ? (
+                  <Badge
+                    tone="archived"
+                    data-tip={m.archivePath ?? "Archive"}
+                    aria-label={m.archivePath ?? "Archive"}
+                  >
+                    <Ico name="box" />
+                  </Badge>
+                ) : kind === "dependency" ? (
+                  <DependencyBadge deps={problems} modId={m.modId} onOpen={onSelect} />
+                ) : kind === "conflict" ? (
                   <ConflictBadge conflicts={conflicts?.get(m.modId)} />
-                )}
+                ) : null}
+              </div>
+              <div className={`cat ${m.category ? "" : "muted"}`}>
+                <span className="cat-face">
+                  {category.icon ? (
+                    <Badge
+                      variant="ghost"
+                      data-tip={categoryTitle}
+                      aria-label={categoryTitle}
+                    >
+                      <Ico name={category.icon} />
+                    </Badge>
+                  ) : null}
+                  <span className="lbl">{category.label}</span>
+                </span>
               </div>
               {/* Real value from the Core when the mod's source declared one
                   (a Minecraft jar manifest does, an MO2 import doesn't) —
                   a dash otherwise, never an invented number. */}
               <div className="ver" title={m.version ?? "Version non déclarée par la source"}>
-                {m.version ?? "—"}
+                <span className="lbl">{m.version ?? "—"}</span>
               </div>
-              {/* A free tag the human typed (no Provider metadata is
-                  involved) — still a dash when they haven't. */}
-              <div
-                className={`cat ${m.category ? "" : "muted"}`}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {editingCategory === m.modId ? (
-                  <input
-                    className="cat-input"
-                    list="mod-categories"
-                    autoFocus
-                    maxLength={40}
-                    value={categoryDraft}
-                    onChange={(e) => setCategoryDraft(e.target.value)}
-                    onFocus={(e) => e.currentTarget.select()}
-                    onBlur={() => commitCategory(m)}
-                    onKeyDown={(e) => {
-                      e.stopPropagation();
-                      if (e.key === "Enter") commitCategory(m);
-                      if (e.key === "Escape") setEditingCategory(null);
-                    }}
-                  />
-                ) : (
-                  <button
-                    className="cat-btn"
-                    type="button"
-                    title="Modifier la catégorie"
-                    onClick={() => startEditCategory(m)}
-                  >
-                    {m.category ? <Ico name={categoryIcon(m.category)} className="sm" /> : null}
-                    {m.category ?? "—"}
-                  </button>
-                )}
+              <div className="game" title={game.title}>
+                <span className="lbl">{game.text}</span>
               </div>
-              {/* Accurate today rather than a placeholder: every mod the
-                  Core holds got there by a local import or install. It
-                  starts varying the day a Provider lands. */}
-              <div className="src">
-                <Ico name="folder" className="sm" />
-                local
-              </div>
+              {loader ? (
+                <div className="loader" title={loader.title}>
+                  <span className="lbl">{loader.text}</span>
+                </div>
+              ) : null}
+              {showTailCols ? (
+                <>
+                  <div className="sz num" title={sizeTitle(m.sizeBytes)}>
+                    {m.sizeBytes == null ? "—" : formatBytes(m.sizeBytes)}
+                  </div>
+                  <div className="when num" title={downloadedTitle(m)}>
+                    {downloadedMonth(m)}
+                  </div>
+                  <div className="src" title={src.title}>
+                    <Ico name={src.icon} className="sm" />
+                    {src.label}
+                  </div>
+                </>
+              ) : null}
             </div>
           );
         })}
       </div>
       {reassignRow !== null ? (
-        <Pop
+        <PopoverMenu
+          chrome="context"
+          title="Déplacer vers…"
           anchorRef={{ current: reassignRefs.current.get(reassignRow) ?? null }}
-          items={reassignItems}
           onClose={() => setReassignRow(null)}
-        />
+        >
+          {otherLoadouts.map((l) => (
+            <PopoverMenuItem
+              key={l.id}
+              icon="branch"
+              label={l.name}
+              onPick={() => {
+                const row = rows.find((r) => r.modId === reassignRow);
+                if (row) onReassign(row, l.id);
+                setReassignRow(null);
+              }}
+            />
+          ))}
+        </PopoverMenu>
       ) : null}
       {menuTarget && rows.some((r) => r.modId === menuTarget.modId) ? (
-        <MenuPicker
-          items={rowMenuItems(rows.find((r) => r.modId === menuTarget.modId)!)}
+        <PopoverMenu
+          chrome="context"
           anchorPoint={menuTarget.point}
           anchorRef={menuTarget.anchor ? { current: menuTarget.anchor } : undefined}
           onClose={() => setMenuTarget(null)}
-          onItemSelect={(item) => handleMenuSelect(item, menuTarget.modId)}
-        />
+        >
+          <PopoverMenuEntries
+            items={rowMenuItems(rows.find((r) => r.modId === menuTarget.modId)!)}
+            onSelect={(item) => {
+              handleMenuSelect(item, menuTarget.modId);
+              setMenuTarget(null);
+            }}
+          />
+        </PopoverMenu>
       ) : null}
       {confirmDelete ? (
         <ConfirmDialog
@@ -543,4 +895,97 @@ export function ModTable({
       ) : null}
     </div>
   );
+}
+
+function sizeTitle(bytes: number | null): string {
+  return bytes == null ? "Taille inconnue" : formatExactBytes(bytes);
+}
+
+function downloadedMonth(row: ModRow): string {
+  if (!row.downloadedAt) return "—";
+  return formatMonthYear(row.downloadedAt) ?? "—";
+}
+
+function downloadedTitle(row: ModRow): string {
+  if (!row.downloadedAt) return "Date de téléchargement inconnue";
+  const full = formatDateTime(row.downloadedAt);
+  return full ? `Téléchargé le ${full}` : "Date de téléchargement inconnue";
+}
+
+const LOADER_LABELS: Record<string, string> = {
+  fabric: "Fabric",
+  forge: "Forge",
+  neoforge: "NeoForge",
+  quilt: "Quilt",
+};
+
+/** Single-letter (or short) cell codes for the Load. column. */
+const LOADER_LETTERS: Record<string, string> = {
+  forge: "F",
+  neoforge: "N",
+  fabric: "Fb",
+  quilt: "Q",
+};
+
+/** Minecraft shows Load.; Skyrim* and others keep it off until a real loader exists. */
+function showLoaderColumn(gameId: string | null): boolean {
+  return gameId === "minecraft";
+}
+
+function declaredList(values: readonly string[] | null | undefined): string[] {
+  if (!values) return [];
+  const out: string[] = [];
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed && !out.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+      out.push(trimmed);
+    }
+  }
+  return out;
+}
+
+function loaderName(id: string): string {
+  const known = LOADER_LABELS[id.toLowerCase()];
+  if (known) return known;
+  return id.charAt(0).toUpperCase() + id.slice(1);
+}
+
+function loaderLetter(id: string): string {
+  const known = LOADER_LETTERS[id.toLowerCase()];
+  if (known) return known;
+  return id.charAt(0).toUpperCase();
+}
+
+/** Natural order, then a single version or a min–max span. */
+function versionSpan(versions: readonly string[]): string | null {
+  if (versions.length === 0) return null;
+  const sorted = versions.slice().sort((a, b) =>
+    a.localeCompare(b, "en", { numeric: true, sensitivity: "base" }),
+  );
+  const min = sorted[0];
+  const max = sorted[sorted.length - 1];
+  return min === max ? min : `${min}–${max}`;
+}
+
+/** Jeux cell: game versions only (no loader names). Tip may still list loaders. */
+function gameVersionCell(row: ModRow): { text: string; title: string } {
+  const versions = declaredList(row.gameVersions);
+  const loaders = declaredList(row.loaders).map(loaderName);
+  const parts: string[] = [];
+  if (versions.length > 0) parts.push(versions.join(", "));
+  if (loaders.length > 0) parts.push(loaders.join(", "));
+  const title = parts.length > 0 ? parts.join(" · ") : "Aucune version de jeu déclarée";
+  return { text: versionSpan(versions) ?? "—", title };
+}
+
+/** Load. cell: letter code(s). Tip = full loader name(s). */
+function loaderLetterCell(row: ModRow): { text: string; title: string } {
+  const loaders = declaredList(row.loaders);
+  if (loaders.length === 0) {
+    return { text: "—", title: "Aucun loader déclaré" };
+  }
+  const letters = loaders.map(loaderLetter);
+  const names = loaders.map(loaderName);
+  return { text: letters.join(""), title: names.join(", ") };
 }

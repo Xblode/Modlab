@@ -1,7 +1,7 @@
 ---
 titre: Idées
 description: Les idées de l'humain, rangées par sujet.
-maj: 2026-11-13
+maj: 2026-11-25
 ---
 
 # Idées
@@ -42,6 +42,10 @@ Une ligne datée par idée, sous son sujet. Une idée n'est pas une décision. F
 - 2026-09-14 : Détecter les fichiers « fantômes » du dossier du jeu et proposer de les adopter. (P12)
 - 2026-09-14 : Page mod façon README GitHub : image Nexus, description, changelog, mes notes, mes choix FOMOD. (P1)
 
+## Métadonnées
+
+- 2026-11-25 : Métadonnées via l'API officielle Nexus, en option dans Réglages avec une clé personnelle de l'utilisateur, désactivée sans clé ; interrogée seulement pour les mods déjà téléchargés, sans téléchargement automatique. Remplit nom, version, catégorie, auteur. Reportée par l'utilisateur : local d'abord. Même principe possible plus tard pour CurseForge (clé) et Modrinth (API publique).
+
 ## Réglages
 
 - 2026-09-15 : Réglages transversaux : un curseur ModLab qui écrit dans plusieurs INI/JSON, tracé et réversible. (B18)
@@ -76,11 +80,20 @@ Une ligne datée par idée, sous son sujet. Une idée n'est pas une décision. F
 
 ## Minecraft
 
+- 2026-11-25 : Install drop-in jar → `mods/`. Un mod téléchargé se pose tel quel, sans extraction. Décision du jour, pour le futur GameAdapter (`DECISIONS.md`).
 - 2026-09-15 : Une branche par serveur : mods du modpack, version de Java, RAM et JVM par branche. (B16)
+
+## Look de l'interface
+
+- 2026-11-26 : Unifier Pop + MenuPicker en `PopoverMenu` (structure GitHub : titre, croix, une utilitaire max, tabs). Décision posée le même jour.
 
 ## Table des mods
 
 - 2026-09-15 : repenser un jour la table des mods façon Asana / ClickUp ; garder la table actuelle de la maquette en attendant.
+
+## Les 8 agents spécialisés
+
+- 2026-11-24 : les workers bFrame vivent comme sous-agents Cursor du compte, mêmes règles quel que soit le modèle. L'orchestrateur reste le chat, pas un sous-agent.
 
 ## Sans sujet
 

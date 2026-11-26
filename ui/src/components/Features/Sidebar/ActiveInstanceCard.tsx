@@ -1,156 +1,90 @@
 import { useRef, useState } from "react";
-import type { Channel, LoadoutVersion } from "../../../api";
-import { CHANNEL_LETTER } from "../../../channel";
+import type { Channel } from "../../../api";
+import { CHANNEL_ORDER, CHANNELS } from "../../../channel";
 import { Ico } from "../../../Ico";
-import { Pop, type PopItem } from "../../../Pop";
-import { tip } from "../../ui";
+import { ChannelDot, PopoverMenu, PopoverMenuItem, tip } from "../../ui";
 import type { LaunchNotice } from "../../../sessionNotice";
-
-const CHANNEL_LABEL: Record<Channel, string> = { stable: "Stable", beta: "Beta", alpha: "Alpha" };
-const CHANNEL_SUB: Record<Channel, string> = {
-  stable: "jouable, ne bouge plus",
-  beta: "en test, peut casser",
-  alpha: "expérimental, jetable",
-};
-const CHANNEL_ICON: Record<Channel, string> = { stable: "shield", beta: "zap", alpha: "tri" };
-
-/** One "Engine & Indicators" chip — an engine/loader mod (SKSE today,
- * Forge/Fabric tomorrow) or another notable capability, detected or not. */
-export type EngineCap = {
-  id: string;
-  label: string;
-  sub: string;
-  detected: boolean;
-  icon: string;
-  /** `warn` = there but not usable as is (wrong version…). Defaults to
-   * `on`/off following `detected`. */
-  tone?: "ok" | "warn" | "off";
-  /** Tooltip; defaults to "label · sub". */
-  hint?: string;
-};
+import "./sidebar-actions.css";
 
 /**
- * The active instance, pinned at the top of the explorer: what it is
- * (renameable, its channel), whether it is up to date (its revision, real
- * ones now — see `useLoadoutVersion`), and the things one does with it —
- * play, share, save a new revision, discard, rename, switch channel.
+ * The active instance, pinned at the top of the explorer. Three list rows,
+ * each `var(--row)` tall and sharing a 24px leading column: the name (edited
+ * in place, channel dot centered in that column),
+ * Play, and Share. Play and Share have no fill until hover; Play stays
+ * filled while the instance is running and its label becomes Arrêter.
+ * Revision, save and mod counts live at the top of Mods. A
+ * refused launch still shows under the three rows.
  *
- * Every mutation here is a callback prop, same rule the rest of the sidebar
- * follows (`Sidebar`'s own doc comment: "this component only routes clicks
- * back up") — including reads: `version` and `onRefreshVersion` come from
- * `Sidebar`'s own `useLoadoutVersion`, shared with `SidebarFooter`, rather
- * than each fetching its own copy of the same Core call.
+ * Every mutation is a callback prop — this component only routes clicks up.
  */
 export function ActiveInstanceCard({
   name,
   channel,
   running,
-  enabledCount,
-  totalCount,
-  version,
-  onRefreshVersion,
   onPlay,
   onShare,
   onRename,
   onSetChannel,
-  onSnapshot,
-  onRollback,
-  onOpenHistory,
-  caps,
   notice,
   onDismissNotice,
 }: {
   name: string;
   channel: Channel;
   running: boolean;
-  enabledCount: number;
-  totalCount: number;
-  version: LoadoutVersion | null;
-  onRefreshVersion: () => void;
   onPlay: () => void;
   onShare: () => void;
   onRename: (name: string) => void;
   onSetChannel: (channel: Channel) => void;
-  onSnapshot: () => Promise<void>;
-  onRollback: () => Promise<void>;
-  onOpenHistory: () => void;
-  /** "Engine & Indicators" — empty for a game with no known engine mod to
-   * watch for yet. */
-  caps?: EngineCap[];
   /** Why the last launch was refused, or what SKSE's journals said about
-   * the last session — shown under the indicators until dismissed. */
+   * the last session — shown under the three rows until dismissed. */
   notice?: LaunchNotice | null;
   onDismissNotice?: () => void;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(name);
   const [chanOpen, setChanOpen] = useState(false);
-  const [verOpen, setVerOpen] = useState(false);
   const chanBtnRef = useRef<HTMLButtonElement>(null);
-  const verBtnRef = useRef<HTMLButtonElement>(null);
-
-  const dirty = version ? version.dirtyPlus > 0 || version.dirtyMinus > 0 : false;
+  const skipRename = useRef(false);
 
   function startRename() {
+    skipRename.current = false;
     setDraft(name);
     setRenaming(true);
   }
   function commitRename() {
+    if (skipRename.current) {
+      skipRename.current = false;
+      return;
+    }
+    skipRename.current = true;
     setRenaming(false);
     const trimmed = draft.trim();
     if (trimmed && trimmed !== name) onRename(trimmed);
   }
-
-  async function handleSave() {
-    if (!dirty) return;
-    await onSnapshot();
-    onRefreshVersion();
+  function cancelRename() {
+    skipRename.current = true;
+    setDraft(name);
+    setRenaming(false);
   }
-
-  const chanItems: PopItem[] = (["stable", "beta", "alpha"] as const).map((ch) => ({
-    label: CHANNEL_LABEL[ch],
-    sub: CHANNEL_SUB[ch],
-    icon: CHANNEL_ICON[ch],
-    current: channel === ch,
-    onPick: () => onSetChannel(ch),
-  }));
-
-  const verItems: PopItem[] = version
-    ? [
-        ...(dirty
-          ? ([
-              {
-                label: "Modifications non enregistrées",
-                sub: `${version.dirtyPlus} activé(s) · ${version.dirtyMinus} désactivé(s) depuis ${CHANNEL_LETTER[channel]}.${version.revision}`,
-                icon: "alert",
-              },
-              {
-                label: "Annuler les modifications",
-                sub: `revenir à ${CHANNEL_LETTER[channel]}.${version.revision}`,
-                icon: "history",
-                onPick: () => {
-                  void onRollback().then(onRefreshVersion);
-                },
-              },
-              "-",
-            ] as PopItem[])
-          : []),
-        {
-          label: "Voir l’historique complet",
-          icon: "db",
-          onPick: onOpenHistory,
-        },
-      ]
-    : [];
 
   return (
     <div className="side-instance">
-      <div className="lo">
+      <div className="lo instance-actions">
         <div className="lo-top">
+          <button
+            className="lo-chan"
+            type="button"
+            ref={chanBtnRef}
+            {...tip("Changer de canal")}
+            aria-haspopup="dialog"
+            aria-expanded={chanOpen}
+            onClick={() => setChanOpen((v) => !v)}
+          >
+            <ChannelDot channel={channel} />
+          </button>
           {renaming ? (
             <input
               className="tr-rename-input"
-              style={{ fontSize: 14, fontWeight: 600, height: 28 }}
               autoFocus
               maxLength={100}
               value={draft}
@@ -158,8 +92,14 @@ export function ActiveInstanceCard({
               onFocus={(e) => e.currentTarget.select()}
               onKeyDown={(e) => {
                 e.stopPropagation();
-                if (e.key === "Enter") commitRename();
-                if (e.key === "Escape") setRenaming(false);
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commitRename();
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  cancelRename();
+                }
               }}
               onBlur={commitRename}
             />
@@ -167,105 +107,52 @@ export function ActiveInstanceCard({
             <button
               className="lo-name"
               type="button"
-              title="Renommer l’instance"
+              {...tip("Renommer l’instance")}
               onClick={startRename}
             >
               <span className="fade">{name}</span>
             </button>
           )}
-          <button
-            className={`chan ${channel}`}
-            type="button"
-            ref={chanBtnRef}
-            title="Canal de la branche"
-            onClick={() => setChanOpen((v) => !v)}
-          >
-            {channel}
-            <Ico name="chev" className="sm" />
-          </button>
           {chanOpen ? (
-            <Pop anchorRef={chanBtnRef} items={chanItems} onClose={() => setChanOpen(false)} />
+            <PopoverMenu
+              chrome="context"
+              title="Canal"
+              anchorRef={chanBtnRef}
+              onClose={() => setChanOpen(false)}
+            >
+              {CHANNEL_ORDER.map((ch) => (
+                <PopoverMenuItem
+                  key={ch}
+                  icon={CHANNELS[ch].icon}
+                  label={CHANNELS[ch].label}
+                  sub={CHANNELS[ch].sub}
+                  current={channel === ch}
+                  onPick={() => {
+                    setChanOpen(false);
+                    onSetChannel(ch);
+                  }}
+                />
+              ))}
+            </PopoverMenu>
           ) : null}
-        </div>
-        <div className="lo-row">
-          <button
-            className="vsel"
-            type="button"
-            ref={verBtnRef}
-            title="Révision de la branche"
-            onClick={() => setVerOpen((v) => !v)}
-          >
-            {CHANNEL_LETTER[channel]}.{version?.revision ?? "—"}
-            {version ? (
-              dirty ? (
-                <span className="d">
-                  {version.dirtyPlus ? `+${version.dirtyPlus}` : ""}
-                  {version.dirtyPlus && version.dirtyMinus ? " " : ""}
-                  {version.dirtyMinus ? `−${version.dirtyMinus}` : ""}
-                </span>
-              ) : (
-                <span className="d ok">✓</span>
-              )
-            ) : null}
-            <span className="spacer" />
-            <Ico name="chev" />
-          </button>
-          {verOpen && version ? (
-            <Pop anchorRef={verBtnRef} items={verItems} onClose={() => setVerOpen(false)} />
-          ) : null}
-          <button
-            className="btn save-btn"
-            type="button"
-            disabled={!dirty}
-            title={
-              dirty
-                ? `Enregistrer l’état actif/inactif comme ${CHANNEL_LETTER[channel]}.${(version?.revision ?? 0) + 1}`
-                : `Aucune modification depuis ${CHANNEL_LETTER[channel]}.${version?.revision ?? 0}`
-            }
-            onClick={() => void handleSave()}
-          >
-            <Ico name="db" className="sm" />
-            {dirty ? "Enregistrer" : "À jour"}
-          </button>
         </div>
         <button
-          className={`play-btn ${running ? "stop" : ""}`}
+          className={running ? "play-btn is-active" : "play-btn"}
           type="button"
+          aria-pressed={running}
           onClick={onPlay}
         >
-          <Ico name={running ? "x" : "play"} />
-          {running ? "Arrêter" : "Jouer"}
+          <span className="act-lead">
+            <Ico name={running ? "x" : "play"} className={running ? undefined : "play-glyph"} />
+          </span>
+          <span className="act-label">{running ? "Arrêter" : "Jouer"}</span>
         </button>
         <button className="share-btn" type="button" onClick={onShare}>
-          <Ico name="share" />
-          Partager
+          <span className="act-lead">
+            <Ico name="share" />
+          </span>
+          <span className="act-label">Partager</span>
         </button>
-        <div className="st">
-          <span>
-            <b>{enabledCount}</b> mods
-          </span>
-          <span>
-            <b>{totalCount}</b> dans le loadout
-          </span>
-        </div>
-        {caps && caps.length > 0 ? (
-          <div className="caps">
-            {caps.map((c) => (
-              <span
-                key={c.id}
-                className={`cap ${c.detected ? "on" : ""} ${c.tone === "warn" ? "warn" : ""}`}
-                title={c.hint ?? `${c.label} · ${c.sub}`}
-              >
-                <Ico name={c.icon} />
-                <span className="row">
-                  <span className="dot" />
-                  <span className="lbl">{c.label}</span>
-                </span>
-                <span className="ver">{c.sub}</span>
-              </span>
-            ))}
-          </div>
-        ) : null}
         {notice ? (
           <div className={`notice ${notice.tone}`} role="status">
             <div className="nt">

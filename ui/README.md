@@ -12,6 +12,6 @@ Ce dossier contient l'interface de ModLab, en React, TypeScript et Vite.
 
 ## Règles
 
-- `docs/design/shell-maquette.html` est la source de vérité visuelle : toute évolution passe d'abord par la maquette.
+- L'ancienne maquette HTML a été retirée, remplacée par `ui/`.
 - Le rendu par jeu suit les capacités déclarées par les adaptateurs (ADR 0005).
 - Les tests d'interface viendront plus tard.

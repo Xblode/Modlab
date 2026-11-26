@@ -1,16 +1,38 @@
-import { useState, type MouseEvent } from "react";
+import { useRef, useState, type MouseEvent, type ReactNode } from "react";
 import type { Channel, DetectedGame, LoadoutDto } from "../../../api";
-import { categoryIcon } from "../../../categoryIcon";
+import { presentCategory } from "../../../categoryIcon";
 import { Ico } from "../../../Ico";
-import { Accordion, ChannelBadge, ConfirmDialog, FavoriteButton, IconButton, SideEmpty, tip } from "../../ui";
-import { MenuPicker, type MenuItem } from "../MenuPicker/MenuPicker";
+import {
+  Accordion,
+  ChannelDot,
+  ConfirmDialog,
+  FavoriteButton,
+  IconButton,
+  PixelLoader,
+  PopoverMenu,
+  PopoverMenuEntries,
+  SideEmpty,
+  SideRow,
+  Switch,
+  type PopoverMenuEntry,
+} from "../../ui";
+import "./sidebar-rows.css";
+
+/** 24px line-start column. The glyph is centered; the label begins after it. */
+function RowMark({ children }: { children?: ReactNode }) {
+  return (
+    <span className="side-mark" aria-hidden="true">
+      {children}
+    </span>
+  );
+}
 
 export type FavoriteEntry = { loadout: LoadoutDto; short: string };
 
 type CtxTarget = { kind: "game"; gameId: string } | { kind: "loadout"; loadoutId: number };
 
-const LOADOUT_MENU_ITEMS: MenuItem[] = [
-  { id: "activate", label: "Activer", icon: "branch" },
+const LOADOUT_MENU_ITEMS: PopoverMenuEntry[] = [
+  { id: "activate", label: "Activer", icon: "check" },
   { id: "rename", label: "Renommer", icon: "edit" },
   {
     id: "channel",
@@ -26,10 +48,20 @@ const LOADOUT_MENU_ITEMS: MenuItem[] = [
   { id: "delete", label: "Supprimer…", icon: "trash", danger: true },
 ];
 
-const GAME_MENU_ITEMS: MenuItem[] = [
+const GAME_MENU_ITEMS: PopoverMenuEntry[] = [
   { id: "create", label: "Créer une instance", icon: "plus" },
   { id: "settings", label: "Réglages du jeu…", icon: "gear" },
 ];
+
+/** Folder glyph that turns into a disclosure chevron while the pointer is on it. */
+function GameFolderMark({ open }: { open: boolean }) {
+  return (
+    <span className="game-folder side-mark" aria-hidden="true">
+      <Ico name="folder" className="game-folder-ico" />
+      <Ico name={open ? "chev" : "chevr"} className="game-folder-chev" />
+    </span>
+  );
+}
 
 /**
  * One instance row, in either the Favoris or the per-game section. A plain
@@ -50,6 +82,7 @@ function LoadoutRow({
   onPick,
   onToggleFav,
   onContextMenu,
+  running,
 }: {
   l: LoadoutDto;
   current: boolean;
@@ -62,13 +95,22 @@ function LoadoutRow({
   onCancelRename: () => void;
   onPick: () => void;
   onToggleFav: () => void;
-  onContextMenu: (e: MouseEvent) => void;
+  onContextMenu: (e: MouseEvent<HTMLElement>) => void;
+  /** This instance is the one whose game session is running. */
+  running: boolean;
 }) {
   return (
-    <div className={`tr-row inst-row ${current ? "cur" : ""}`} onContextMenu={onContextMenu}>
-      {renaming ? (
-        <div className="tr-label" style={{ cursor: "default" }}>
-          <Ico name="branch" />
+    <SideRow
+      className="explorer-line"
+      current={current}
+      title={running ? "Jeu en cours" : undefined}
+      icon={
+        <RowMark>
+          {running ? <PixelLoader /> : <ChannelDot channel={l.channel} />}
+        </RowMark>
+      }
+      label={
+        renaming ? (
           <input
             className="tr-rename-input"
             autoFocus
@@ -78,54 +120,55 @@ function LoadoutRow({
             onFocus={(e) => e.currentTarget.select()}
             onKeyDown={(e) => {
               e.stopPropagation();
-              if (e.key === "Enter") onCommitRename();
-              if (e.key === "Escape") onCancelRename();
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onCommitRename();
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                onCancelRename();
+              }
             }}
             onBlur={onCommitRename}
           />
-        </div>
-      ) : (
-        <button className="tr-label" type="button" onClick={onPick}>
-          <Ico name="branch" />
-          <span className="lbl">{l.name}</span>
-          <span className="tail">
-            {short ? (
-              <span className="muted" style={{ fontSize: "var(--fs-xs)" }}>
-                {short}
-              </span>
-            ) : null}
-            <ChannelBadge channel={l.channel} className="xs">
-              {l.channel}
-            </ChannelBadge>
-          </span>
-        </button>
-      )}
-      <FavoriteButton on={fav} onToggle={onToggleFav} />
-    </div>
+        ) : (
+          l.name
+        )
+      }
+      end={!renaming && short ? <span className="side-row-meta">{short}</span> : undefined}
+      trailing={
+        <span className="instance-tail">
+          <FavoriteButton on={fav} onToggle={onToggleFav} />
+        </span>
+      }
+      onClick={renaming ? undefined : onPick}
+      onContextMenu={onContextMenu}
+    />
   );
 }
 
 /**
- * The explorer's three sections: starred instances, the games tree with their
- * instances, and the categories. Everything listed here comes from the Core's
- * snapshot — the stars are the one exception, and they live in the browser.
+ * The explorer's three sections: categories in use, starred instances, and
+ * the games tree with their instances. Branches are not listed here — they
+ * live in the Mods toolbar. Everything listed comes from the Core's snapshot;
+ * the stars are the one exception, and they live in the browser.
  *
- * Right-clicking a game or an instance opens a `MenuPicker` context menu
- * (edit/delete-style actions); the mutations themselves are routed back up
- * through callback props, same rule as every click in this tree.
+ * A game name opens or closes its folder. An instance name calls
+ * `onPickLoadout`. Right-clicking a game or an instance opens a `PopoverMenu`;
+ * the mutations themselves are routed back up through callback props.
  */
 export function ExplorerTree({
   favorites,
   games,
   loadouts,
   expanded,
-  activeGameId,
   activeLoadoutId,
+  activeInstanceId,
   categoryCounts,
+  categoryCatalog,
   isFavorite,
   onToggleFavorite,
   onPickLoadout,
-  onPickGame,
   onToggleExpanded,
   onAddGame,
   onRenameLoadout,
@@ -133,22 +176,29 @@ export function ExplorerTree({
   onDeleteLoadout,
   onCreateLoadoutForGame,
   onOpenGameSettings,
+  onOpenCategorySettings,
+  activeCategory,
   onPickCategory,
+  showEmptyCategories,
+  onToggleShowEmptyCategories,
+  runningLoadoutId,
 }: {
   favorites: FavoriteEntry[];
   games: DetectedGame[];
   loadouts: LoadoutDto[];
   expanded: string[];
-  activeGameId: string | undefined;
   activeLoadoutId: number | undefined;
+  /** Instance that owns the branch on screen. Rows highlight on this, not on
+   * a branch id — a second branch must not add a second sidebar row. */
+  activeInstanceId: number | undefined;
   /** Distinct categories in the active loadout, with how many mods carry
    * each — a free tag on `mod_`, not a first-class list a human can create
    * ahead of tagging a mod with it. */
   categoryCounts: { name: string; count: number }[];
+  categoryCatalog: { id: string; label: string; icon: string }[];
   isFavorite: (loadoutId: number) => boolean;
   onToggleFavorite: (loadoutId: number) => void;
   onPickLoadout: (loadoutId: number) => void;
-  onPickGame: (gameId: string) => void;
   onToggleExpanded: (gameId: string) => void;
   onAddGame: () => void;
   onRenameLoadout: (loadoutId: number, name: string) => void;
@@ -156,30 +206,45 @@ export function ExplorerTree({
   onDeleteLoadout: (loadoutId: number) => void;
   onCreateLoadoutForGame: (gameId: string) => void;
   onOpenGameSettings: () => void;
-  /** Filters the Mods table down to this category and switches to it. */
+  onOpenCategorySettings: () => void;
+  /** Catalog id of the active category filter, or null when none. */
+  activeCategory: string | null;
+  /** Toggle category filter (same id clears) and switch to Mods. */
   onPickCategory: (name: string) => void;
+  showEmptyCategories: boolean;
+  onToggleShowEmptyCategories: () => void;
+  /** The instance whose game is running, if any. Only that row swaps its
+   * channel dot for the pixel loader; every other instance keeps the dot. */
+  runningLoadoutId: number | undefined;
 }) {
   const [ctx, setCtx] = useState<{ x: number; y: number; target: CtxTarget } | null>(null);
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<LoadoutDto | null>(null);
+  const skipRename = useRef(false);
 
-  function openLoadoutMenu(e: MouseEvent, loadoutId: number) {
+  function openLoadoutMenu(e: MouseEvent<HTMLElement>, loadoutId: number) {
     e.preventDefault();
     setCtx({ x: e.clientX, y: e.clientY, target: { kind: "loadout", loadoutId } });
   }
 
-  function openGameMenu(e: MouseEvent, gameId: string) {
+  function openGameMenu(e: MouseEvent<HTMLElement>, gameId: string) {
     e.preventDefault();
     setCtx({ x: e.clientX, y: e.clientY, target: { kind: "game", gameId } });
   }
 
   function startRename(l: LoadoutDto) {
+    skipRename.current = false;
     setDraft(l.name);
     setRenamingId(l.id);
   }
 
   function commitRename() {
+    if (skipRename.current) {
+      skipRename.current = false;
+      return;
+    }
+    skipRename.current = true;
     const id = renamingId;
     setRenamingId(null);
     if (id === null) return;
@@ -188,7 +253,12 @@ export function ExplorerTree({
     if (trimmed && trimmed !== current) onRenameLoadout(id, trimmed);
   }
 
-  function handleMenuSelect(item: MenuItem) {
+  function cancelRename() {
+    skipRename.current = true;
+    setRenamingId(null);
+  }
+
+  function handleMenuSelect(item: PopoverMenuEntry) {
     if (!ctx) return;
     const { target } = ctx;
     if (target.kind === "game") {
@@ -201,12 +271,16 @@ export function ExplorerTree({
     if (item.id === "activate") onPickLoadout(l.id);
     else if (item.id === "rename") startRename(l);
     else if (item.id.startsWith("channel-")) {
-      onSetLoadoutChannel(l.id, item.id.slice("channel-".length) as Channel);
+      const targetId =
+        l.instanceId === activeInstanceId && activeLoadoutId != null
+          ? activeLoadoutId
+          : l.id;
+      onSetLoadoutChannel(targetId, item.id.slice("channel-".length) as Channel);
     } else if (item.id === "fav") onToggleFavorite(l.id);
     else if (item.id === "delete") setConfirmDelete(l);
   }
 
-  function ctxMenuItems(target: CtxTarget): MenuItem[] {
+  function ctxMenuItems(target: CtxTarget): PopoverMenuEntry[] {
     if (target.kind === "game") return GAME_MENU_ITEMS;
     const fav = isFavorite(target.loadoutId);
     return LOADOUT_MENU_ITEMS.map((it) =>
@@ -216,31 +290,79 @@ export function ExplorerTree({
 
   return (
     <>
+      <Accordion
+        title="Catégories"
+        count={(categoryCounts ?? []).length}
+        collapsible={false}
+        action={
+          <>
+            <IconButton
+              name="more"
+              className="sec-act"
+              title="Configurer les catégories"
+              aria-label="Configurer les catégories"
+              onClick={onOpenCategorySettings}
+            />
+            <Switch
+              className="sec-act-cat"
+              checked={showEmptyCategories}
+              onToggle={onToggleShowEmptyCategories}
+              title="Afficher les catégories vides"
+              aria-label="Afficher les catégories vides"
+            />
+          </>
+        }
+      >
+        {(categoryCounts ?? []).length === 0 ? (
+          <SideEmpty title="Aucune catégorie">Choisis-en une sur la fiche du mod</SideEmpty>
+        ) : (
+          (categoryCounts ?? []).map((c) => {
+            const shown = presentCategory(c.name, categoryCatalog ?? []);
+            const active = activeCategory === c.name;
+            return (
+              <button
+                key={c.name}
+                className={`tr explorer-line${active ? " sel" : ""}`}
+                type="button"
+                aria-pressed={active}
+                title={active ? "Retirer le filtre catégorie" : `Filtrer : ${shown.label}`}
+                onClick={() => onPickCategory(c.name)}
+              >
+                <RowMark>
+                  <Ico name={shown.icon ?? "box"} />
+                </RowMark>
+                <span className="lbl">{shown.label}</span>
+                <span className="tail">{c.count}</span>
+              </button>
+            );
+          })
+        )}
+      </Accordion>
+
       <Accordion title="Favoris" count={favorites.length}>
-        {favorites.length === 0 ? (
-          <SideEmpty title="Aucun favori">Clique l’étoile d’une instance</SideEmpty>
-        ) : null}
         {favorites.map(({ loadout: l, short }) => (
           <LoadoutRow
             key={l.id}
             l={l}
-            current={l.id === activeLoadoutId}
+            current={l.instanceId === activeInstanceId}
             short={short}
             fav={isFavorite(l.id)}
             renaming={renamingId === l.id}
             draft={draft}
             onDraftChange={setDraft}
             onCommitRename={commitRename}
-            onCancelRename={() => setRenamingId(null)}
+            onCancelRename={cancelRename}
             onPick={() => onPickLoadout(l.id)}
             onToggleFav={() => onToggleFavorite(l.id)}
             onContextMenu={(e) => openLoadoutMenu(e, l.id)}
+            running={l.id === runningLoadoutId}
           />
         ))}
       </Accordion>
       <Accordion
         title="Jeux"
         count={games.length}
+        defaultOpen
         action={
           <IconButton
             name="plus"
@@ -255,65 +377,55 @@ export function ExplorerTree({
         ) : (
           games.map((g) => {
             const open = expanded.includes(g.id);
+            const gameLoadouts = (loadouts ?? []).filter((l) => l.gameId === g.id);
             return (
               <div key={g.id}>
-                <div
-                  className={`tr-row ${g.id === activeGameId ? "sel" : ""}`}
+                <SideRow
+                  className="explorer-line"
+                  icon={<GameFolderMark open={open} />}
+                  label={g.name}
+                  expanded={open}
+                  onClick={() => onToggleExpanded(g.id)}
                   onContextMenu={(e) => openGameMenu(e, g.id)}
-                >
-                  <button
-                    className="tr-chev"
-                    type="button"
-                    {...tip(open ? "Réduire" : "Déplier")}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onToggleExpanded(g.id);
-                    }}
-                  >
-                    <Ico name={open ? "chev" : "chevr"} className="sm" />
-                  </button>
-                  <button
-                    className="tr-label"
-                    type="button"
-                    onClick={() => onPickGame(g.id)}
-                  >
-                    <span className="lbl">{g.name}</span>
-                  </button>
-                </div>
-                {open ? (
-                  (() => {
-                    const gameLoadouts = (loadouts ?? []).filter(
-                      (l) => l.gameId === g.id,
-                    );
-
-                    return gameLoadouts.length === 0 ? (
-                      <button
-                        className="tr muted"
-                        type="button"
-                        data-d="2"
+                  trailing={
+                    <span className="side-row-trailing">
+                      <IconButton
+                        name="plus"
+                        title="Créer une instance"
                         onClick={() => onCreateLoadoutForGame(g.id)}
-                      >
-                        Aucune branche — créer
-                      </button>
-                    ) : (
-                      gameLoadouts.map((l) => (
-                        <LoadoutRow
-                          key={l.id}
-                          l={l}
-                          current={l.id === activeLoadoutId}
-                          fav={isFavorite(l.id)}
-                          renaming={renamingId === l.id}
-                          draft={draft}
-                          onDraftChange={setDraft}
-                          onCommitRename={commitRename}
-                          onCancelRename={() => setRenamingId(null)}
-                          onPick={() => onPickLoadout(l.id)}
-                          onToggleFav={() => onToggleFavorite(l.id)}
-                          onContextMenu={(e) => openLoadoutMenu(e, l.id)}
-                        />
-                      ))
-                    );
-                  })()
+                      />
+                    </span>
+                  }
+                />
+                {open ? (
+                  gameLoadouts.length === 0 ? (
+                    <button
+                      className="tr muted instance-empty explorer-line"
+                      type="button"
+                      onClick={() => onCreateLoadoutForGame(g.id)}
+                    >
+                      <RowMark />
+                      Aucune instance — créer
+                    </button>
+                  ) : (
+                    gameLoadouts.map((l) => (
+                      <LoadoutRow
+                        key={l.id}
+                        l={l}
+                        current={l.instanceId === activeInstanceId}
+                        fav={isFavorite(l.id)}
+                        renaming={renamingId === l.id}
+                        draft={draft}
+                        onDraftChange={setDraft}
+                        onCommitRename={commitRename}
+                        onCancelRename={cancelRename}
+                        onPick={() => onPickLoadout(l.id)}
+                        onToggleFav={() => onToggleFavorite(l.id)}
+                        onContextMenu={(e) => openLoadoutMenu(e, l.id)}
+                        running={l.id === runningLoadoutId}
+                      />
+                    ))
+                  )
                 ) : null}
               </div>
             );
@@ -321,36 +433,20 @@ export function ExplorerTree({
         )}
       </Accordion>
 
-      <Accordion
-        title="Catégories"
-        count={(categoryCounts ?? []).length}
-        defaultOpen={false}
-      >
-        {(categoryCounts ?? []).length === 0 ? (
-          <SideEmpty title="Aucune catégorie">Donne-en une à un mod depuis le tableau</SideEmpty>
-        ) : (
-          (categoryCounts ?? []).map((c) => (
-            <button
-              key={c.name}
-              className="tr"
-              type="button"
-              onClick={() => onPickCategory(c.name)}
-            >
-              <Ico name={categoryIcon(c.name)} />
-              <span className="lbl">{c.name}</span>
-              <span className="tail">{c.count}</span>
-            </button>
-          ))
-        )}
-      </Accordion>
-
       {ctx ? (
-        <MenuPicker
-          items={ctxMenuItems(ctx.target)}
+        <PopoverMenu
+          chrome="context"
           anchorPoint={{ x: ctx.x, y: ctx.y }}
           onClose={() => setCtx(null)}
-          onItemSelect={handleMenuSelect}
-        />
+        >
+          <PopoverMenuEntries
+            items={ctxMenuItems(ctx.target)}
+            onSelect={(item) => {
+              handleMenuSelect(item);
+              setCtx(null);
+            }}
+          />
+        </PopoverMenu>
       ) : null}
 
       {confirmDelete ? (

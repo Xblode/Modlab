@@ -3,9 +3,9 @@ import { Ico } from "../../../Ico";
 import { tip } from "../molecules/Tooltip";
 
 /**
- * `forwardRef` on purpose: a `Pop`/`MenuPicker` anchored to one of these
- * needs a real DOM node to measure, and a plain function component would
- * silently drop a `ref` passed to it rather than forward it to the button.
+ * `forwardRef` on purpose: a `PopoverMenu` anchored to one of these needs a
+ * real DOM node to measure, and a plain function component would silently
+ * drop a `ref` passed to it rather than forward it to the button.
  */
 export const IconButton = forwardRef<
   HTMLButtonElement,
@@ -15,14 +15,27 @@ export const IconButton = forwardRef<
     title?: string;
     /** Only when a real key handler exists in the code. */
     shortcut?: string;
+    /** The sidebar rail is the only current consumer of the larger size. */
+    size?: "md" | "sm";
     variant?: "sm" | "ghost" | "sm-ghost";
   }
 >(function IconButton(
-  { className, name, title, shortcut, "aria-label": ariaLabel, variant, ...props },
+  {
+    className,
+    name,
+    title,
+    shortcut,
+    size = "sm",
+    "aria-label": ariaLabel,
+    variant,
+    ...props
+  },
   ref,
 ) {
   const variants = variant ? [variant === "sm" ? "sm" : variant] : [];
-  const classNames = ["tb", ...variants, className ?? ""].filter(Boolean).join(" ");
+  const classNames = ["tb", "icon-button", `icon-button-${size}`, ...variants, className ?? ""]
+    .filter(Boolean)
+    .join(" ");
   return (
     <button
       ref={ref}
@@ -32,7 +45,7 @@ export const IconButton = forwardRef<
       {...(ariaLabel ? { "aria-label": ariaLabel } : {})}
       {...props}
     >
-      <Ico name={name} className={variant === "sm" ? "sm" : undefined} />
+      <Ico name={name} />
     </button>
   );
 });

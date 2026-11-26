@@ -88,18 +88,24 @@ impl<'a> Transaction<'a> {
 pub const SNAPSHOT_EVENT: &str = "loadout.snapshot";
 pub const ROLLBACK_EVENT: &str = "loadout.rollback";
 
+/// `(mod_id, enabled, position)` — the row a snapshot stores.
+type SnapshotEntry = (i64, bool, i64);
+
+/// Newest snapshot of one loadout: `(event_id, entries)`.
+type LatestSnapshot = (i64, Vec<SnapshotEntry>);
+
 #[derive(serde::Serialize)]
 struct SnapshotPayload<'a> {
     loadout_id: i64,
     count: usize,
-    entries: &'a [(i64, bool, i64)],
+    entries: &'a [SnapshotEntry],
 }
 
 #[derive(serde::Deserialize)]
 struct SnapshotPayloadOwned {
     loadout_id: i64,
     #[serde(default)]
-    entries: Vec<(i64, bool, i64)>,
+    entries: Vec<SnapshotEntry>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -135,7 +141,7 @@ const SNAPSHOT_SCAN_LIMIT: usize = 5000;
 /// a loadout's snapshots; `rollback_loadout`, `revision_count` and
 /// `dirty_summary` all go through this so they can never disagree about
 /// which snapshot is "latest".
-fn latest_snapshot(core: &Core, loadout_id: i64) -> Result<Option<(i64, Vec<(i64, bool, i64)>)>> {
+fn latest_snapshot(core: &Core, loadout_id: i64) -> Result<Option<LatestSnapshot>> {
     let events = core.select_events(&[SNAPSHOT_EVENT], SNAPSHOT_SCAN_LIMIT)?;
     for (id, _, _, payload) in events {
         let parsed = serde_json::from_str::<SnapshotPayloadOwned>(&payload)

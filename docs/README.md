@@ -3,7 +3,7 @@
 ## Ce qui fait foi
 
 - `01-architecture-decidee.md` : architecture verrouillée, référence unique. En cas de désaccord, ce document l'emporte.
-- `design/shell-maquette.html` : source de vérité visuelle de l'interface.
+- `ui/` : référence visuelle de l'interface. L'ancienne maquette HTML a été retirée, remplacée par `ui/`.
 
 ## Décisions
 
@@ -11,7 +11,7 @@
 
 ## Design
 
-- `design/` : maquette du shell, `plan-shell-v2.md`, `design-system.md` (tokens, composants), maquettes `.h2d` (dashboard, mods, réglages) et `img/`.
+- `design/` : `plan-shell-v2.md`, `design-system.md` (tokens, composants), maquettes `.h2d` (dashboard, mods, réglages) et `img/`. L'ancienne maquette HTML a été retirée, remplacée par `ui/`.
 - `design/regles-interface.md` : règles d'interface ModLab (décisions du 2026-11-24, consensus des références, études). Référence pour faire évoluer `ui/`.
 
 ## Détail vivant
@@ -25,6 +25,6 @@
 
 ## Archive
 
-- `archive/` : documents dépassés, conservés pour l'historique. Ne jamais les mettre en œuvre tels quels (voir `archive/README.md`).
+- `archive/` : documents dépassés, conservés pour l'historique humain. **Agents : hors périmètre par défaut** — ne pas ouvrir ni lire `archive/**` sauf demande explicite de l'humain. Ne jamais les mettre en œuvre tels quels (voir `archive/README.md`).
 
 Pilotage du projet (état, décisions, idées, tâches) : `.bframe/`

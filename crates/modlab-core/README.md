@@ -1,20 +1,26 @@
-# Moteur ModLab
+# Porte d'entrée — Core (`modlab-core`)
 
-Ce dossier contient le Core Rust, seul détenteur de l'état de ModLab. L'interface, la CLI et le MCP en sont des clients. Il ne connaît ni un jeu précis ni une plateforme de mods précise.
+## À quoi sert ce crate
 
-## Modules
+Moteur Rust unique de ModLab : **SQLite + journal d'événements = vérité**. UI, CLI et MCP n'écrivent l'état que via ce Core. Aucune logique Skyrim, Minecraft, Nexus ou CurseForge ici — seulement des primitives et des contrats (`GameAdapter`, transactions, loadouts).
 
-- `archive` : archives.
-- `conflicts` : conflits.
-- `download` : téléchargements.
-- `game_adapter` : contrat d'adaptateur de jeu.
-- `loadout` : loadouts.
-- `store` : stockage.
-- `transaction` : transactions.
-- `lib.rs` : base SQLite et journal d'événements.
+## Fichiers / modules clés
 
-## Tests
+- `store`, `transaction` : cycle plan → snapshot → apply → rollback.
+- `loadout`, `instance_root`, `install`, `archive`, `download` : profils, racines d'instance, installation, archives, téléchargements.
+- `game_adapter` : trait d'adaptateur de jeu (implémenté dans les crates `modlab-game-*`).
+- `conflicts`, `mod_meta`, `mod_config`, `files`, `data_root` : conflits, métadonnées, chemins, racine des données.
 
-Les tests de sécurité des fichiers sont non négociables. Les tests d'intégration utilisent `fixtures/`, jamais le vrai jeu.
+## Ne pas
 
-Référence : `docs/01-architecture-decidee.md` §3 et §5.
+- Ajouter de règles propres à un jeu ou à une plateforme.
+- Contourner le cycle transaction pour écrire sur disque ou en base.
+- Tester contre une installation réelle (utiliser `fixtures/`).
+
+## Ensuite
+
+- Adaptateurs jeu : `crates/modlab-game-skyrim`, `crates/modlab-game-minecraft`.
+- Shell Tauri / commandes : `crates/modlab-tauri` (si présent) et `ui/`.
+- Architecture verrouillée : `docs/01-architecture-decidee.md` §3 et §5.
+
+Tests : sécurité fichiers non négociable ; intégration sur fixtures uniquement.

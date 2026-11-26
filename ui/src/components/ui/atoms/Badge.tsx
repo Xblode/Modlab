@@ -1,38 +1,34 @@
 import type { ComponentProps } from "react";
 
 /**
- * The maquette's two pill families, as one primitive each. Both are pure
- * presentation: the caller decides *what* the pill says, the tone only picks
- * the colour rule already defined in `shell.css`.
+ * Status pellet (Flags / table). Soft dark fill: tint of the tone into `--c1`,
+ * foreground a lighter mix of the same hue — same recipe as `Chip`. No border.
+ *
+ * `variant="ghost"` is a quieter pellet for category icons and neutral markers.
  */
 
 /** One tone per `.badge.*` rule in `shell.css`. */
-export type BadgeTone = "win" | "lose" | "both" | "plug" | "upd" | "bad" | "root";
+export type BadgeTone =
+  | "win"
+  | "lose"
+  | "both"
+  | "plug"
+  | "upd"
+  | "bad"
+  | "root"
+  | "archived"
+  | "downloading";
+
+export type BadgeVariant = "ghost";
 
 export function Badge({
   tone,
+  variant,
   className,
   children,
   ...props
-}: ComponentProps<"span"> & { tone: BadgeTone }) {
-  const classNames = ["badge", tone, className ?? ""].filter(Boolean).join(" ");
-  return (
-    <span className={classNames} {...props}>
-      {children}
-    </span>
-  );
-}
-
-/** One channel per `.chan.*` rule in `shell.css`. */
-export type Channel = "stable" | "beta" | "alpha";
-
-export function ChannelBadge({
-  channel,
-  className,
-  children,
-  ...props
-}: ComponentProps<"span"> & { channel: Channel }) {
-  const classNames = ["chan", channel, className ?? ""].filter(Boolean).join(" ");
+}: ComponentProps<"span"> & { tone?: BadgeTone; variant?: BadgeVariant }) {
+  const classNames = ["badge", variant, tone, className ?? ""].filter(Boolean).join(" ");
   return (
     <span className={classNames} {...props}>
       {children}

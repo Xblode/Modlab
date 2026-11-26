@@ -4,14 +4,16 @@
 //! drive this as efficiently as a human — see
 //! docs/01-architecture-decidee.md §7.1.
 //!
-//! Data root: defaults to `.modlab-dev/` under the current directory (a
-//! local sandbox, gitignored) rather than the real `F:\ModLab` — this CLI
-//! is still a walking skeleton, not ready to touch real data yet. Pass
-//! `--data-root` to point it elsewhere once that changes.
+//! Data root: the same resolution as the UI (`modlab_core::resolve_data_root`).
+//! `MODLAB_DATA_ROOT` wins, otherwise `F:\ModLab` when that database or
+//! directory is present, otherwise `.modlab-dev`. Pass `--data-root` to
+//! point at somewhere else.
 
 use clap::{Parser, Subcommand};
 use modlab_core::game_adapter::GameAdapter;
-use modlab_core::{archive, conflicts, loadout, store::Store, transaction, Core};
+use modlab_core::{
+    archive, conflicts, loadout, open_at, resolve_data_root, store::Store, transaction,
+};
 use modlab_game_minecraft::{instance as mc_instance, MinecraftAdapter};
 use modlab_game_skyrim::{installer, mo2, usvfs, SkyrimAdapter};
 use std::path::PathBuf;
@@ -21,11 +23,11 @@ use std::time::Duration;
 #[derive(Parser)]
 #[command(name = "modlab", version, about = "ModLab engine CLI")]
 struct Cli {
-    /// Root directory for the engine's data (db, store). Defaults to a
-    /// local dev sandbox, never the real F:\ModLab, until the engine is
-    /// further along.
-    #[arg(long, default_value = ".modlab-dev")]
-    data_root: PathBuf,
+    /// Root directory for the engine's data (db, store). When omitted, the
+    /// shared resolver is used: `MODLAB_DATA_ROOT`, otherwise `F:\ModLab`
+    /// when it is present, otherwise `.modlab-dev`.
+    #[arg(long)]
+    data_root: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Commands,
@@ -145,9 +147,8 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
-    std::fs::create_dir_all(&cli.data_root)?;
-    let db_path = cli.data_root.join("modlab.db");
-    let core = Core::open(&db_path)?;
+    let data_root = cli.data_root.unwrap_or_else(resolve_data_root);
+    let core = open_at(&data_root)?;
     core.log_event("cli.invoked", "{}")?;
 
     match cli.command {
@@ -178,7 +179,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Commands::ModImport { path } => {
-            let store = Store::open(cli.data_root.join("store").join("blobs"))?;
+            let store = Store::open(data_root.join("store").join("blobs"))?;
             let hash = store.put_file(&path)?;
             let payload = serde_json::json!({
                 "source": path.display().to_string(),
@@ -241,7 +242,13 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             jar,
             instance_root,
         } => {
-            let installed = mc_instance::install_jar(&core, loadout_id, &jar, &instance_root)?;
+            let installed = mc_instance::install_jar(
+                &core,
+                loadout_id,
+                &jar,
+                &mc_instance::mods_dir(&instance_root),
+                &data_root,
+            )?;
             println!(
                 "'{}' {} installé dans {}",
                 installed.name,
@@ -250,8 +257,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         Commands::ArchiveInspect { path } => {
-            let staging = cli
-                .data_root
+            let staging = data_root
                 .join("staging")
                 .join(path.file_stem().unwrap_or_default());
             archive::extract(&path, &staging)?;
@@ -277,7 +283,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let mut vfs = usvfs::Vfs::create(&usvfs_dll, &vfs_instance_name)?;
             let linked = usvfs::deploy_enabled_mods(&vfs, &rows, &data_dir)?;
 
-            let staging = cli.data_root.join("staging");
+            let staging = data_root.join("staging");
             std::fs::create_dir_all(&staging)?;
             let out_file = staging.join("usvfs-check.txt");
             let cmd = format!(

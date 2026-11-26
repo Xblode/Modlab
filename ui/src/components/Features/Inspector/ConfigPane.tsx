@@ -1,33 +1,77 @@
-import type { ModRow } from "../../../api";
-import { Badge } from "../../ui";
+import { useEffect, useState } from "react";
+import { getModConfigFiles, type ModConfigFile, type ModRow } from "../../../api";
+import { Accordion } from "../../ui";
 
 /**
- * The right panel's Config tab: where a mod's own `.ini` and in-app settings
- * will eventually live, edited directly instead of leaving the shell.
- * Reading and writing real `.ini` files isn't wired to the Core yet — this
- * is the placeholder every other not-yet-wired screen in Réglages already
- * uses (`Badge tone="root"`), not a dead end.
+ * Config section at the bottom of the Info tab. Lists the config files that
+ * sit in the selected mod's own folder and, when the file is small text,
+ * shows the body. Read-only: nothing here writes to the mod folder or to
+ * the game directory.
  */
-export function ConfigPane({ mod }: { mod: ModRow | null }) {
+export function ConfigPane({
+  mod,
+  loadoutId,
+}: {
+  mod: ModRow | null;
+  loadoutId: number | null;
+}) {
+  const modId = mod?.modId ?? null;
+  const sourcePath = mod?.sourcePath ?? "";
+  const [files, setFiles] = useState<ModConfigFile[] | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (modId == null || loadoutId == null) {
+      setFiles([]);
+      setFailed(false);
+      return;
+    }
+    let cancelled = false;
+    setFiles(null);
+    setFailed(false);
+    getModConfigFiles(loadoutId, modId)
+      .then((list) => {
+        if (!cancelled) setFiles(list);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFiles([]);
+          setFailed(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [modId, sourcePath, loadoutId]);
+
+  if (!mod) return null;
+
+  const count = files?.length ?? 0;
   return (
-    <div className="rtitle">
-      <div className="eyebrow">Config</div>
-      {mod ? (
-        <>
-          <h2>{mod.name}</h2>
-          <p className="muted">
-            Accès direct au .ini et aux paramètres de ce mod — pas encore branché au Core.
-          </p>
-        </>
+    <Accordion variant="rsec" title="Config" count={count}>
+      {failed ? (
+        <span className="muted">Lecture impossible</span>
+      ) : files == null ? (
+        <span className="muted">Lecture…</span>
+      ) : files.length === 0 ? (
+        <span className="muted">Aucun fichier de config</span>
       ) : (
-        <>
-          <h2>Aucun mod sélectionné</h2>
-          <p className="muted">Clique une ligne de la table</p>
-        </>
+        <div className="cfg-list">
+          {files.map((file) => (
+            <div key={file.relativePath} className="cfg-file">
+              <div>{file.name}</div>
+              <div className="mono">{file.relativePath}</div>
+              {file.text != null ? (
+                <pre className="cfg-preview" title="Lecture seule">
+                  {file.text}
+                </pre>
+              ) : (
+                <p className="muted">Aperçu non affiché : fichier trop gros ou non textuel.</p>
+              )}
+            </div>
+          ))}
+        </div>
       )}
-      <div style={{ marginTop: 12 }}>
-        <Badge tone="root">Phase 3</Badge>
-      </div>
-    </div>
+    </Accordion>
   );
 }

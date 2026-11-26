@@ -604,6 +604,27 @@ pub fn find_game_plugins_txt() -> Option<PathBuf> {
     std::env::var_os("LOCALAPPDATA").map(|dir| game_plugins_txt_path(Path::new(&dir)))
 }
 
+/// Masters named by the plugin header.
+///
+/// `None` when the file cannot be read. The caller must not invent a list.
+#[must_use]
+pub(crate) fn read_masters(path: &Path) -> Option<Vec<String>> {
+    read_header(path).ok().map(|header| header.masters)
+}
+
+/// Plugin files directly inside `dir`. Same rule as the load order: the game
+/// does not load plugins from a subfolder.
+#[must_use]
+pub(crate) fn plugins_in(dir: &Path) -> Vec<(String, PathBuf)> {
+    plugin_files(dir)
+}
+
+/// The five base names, then `Skyrim.ccc` when that file can be read.
+#[must_use]
+pub(crate) fn official_plugin_names(install_root: Option<&Path>) -> Vec<String> {
+    official_names(install_root)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -658,6 +679,19 @@ mod tests {
             status: modlab_core::loadout::STATUS_INSTALLED.to_string(),
             category: None,
             archive_path: None,
+            source_host: None,
+            page_url: None,
+            game_versions: Vec::new(),
+            dependencies: Vec::new(),
+            loaders: Vec::new(),
+            category_raw: None,
+            category_nexus_id: None,
+            nexus_mod_id: None,
+            author: None,
+            website: None,
+            size_bytes: None,
+            installed_at: None,
+            downloaded_at: None,
         }
     }
 
@@ -683,6 +717,44 @@ mod tests {
             .iter()
             .find(|e| e.file_name == name)
             .unwrap_or_else(|| panic!("{name} not in {:?}", names(order)))
+    }
+
+    #[test]
+    fn an_enabled_installed_mod_is_an_active_plugin_and_a_disabled_one_is_absent() {
+        // A download that is a readme plus one folder used to be "unknown",
+        // so nothing was installed and enabling the row could not show a
+        // plugin. Once the folder is installed, only the enabled flag puts
+        // the plugin in the load order — this is not SKSE.
+        let staged = tempfile::tempdir().unwrap();
+        let esp = staged.path().join("Pack").join("Data").join("Alpha.esp");
+        fs::create_dir_all(esp.parent().unwrap()).unwrap();
+        fs::write(&esp, plugin_bytes(0, &[b"Skyrim.esm"])).unwrap();
+        fs::write(staged.path().join("readme.txt"), b"notes").unwrap();
+
+        let detected = crate::installer::detect_shape(staged.path()).unwrap();
+        let out = tempfile::tempdir().unwrap();
+        let dest = out.path().join("mod");
+        let keep = crate::engine::is_engine_content(&detected.content_root);
+        crate::installer::place_content(&detected.content_root, &dest, keep).unwrap();
+        assert!(dest.join("Alpha.esp").is_file());
+
+        let game = GameContext {
+            install_root: None,
+            data_dir: None,
+        };
+        let on = compute_load_order(&[row("Alpha", &dest, 1, true)], &game);
+        assert!(
+            entry(&on, "Alpha.esp").active,
+            "enabled mod must load: {:?}",
+            on.issues
+        );
+
+        let off = compute_load_order(&[row("Alpha", &dest, 1, false)], &game);
+        assert!(
+            off.entries.iter().all(|e| e.file_name != "Alpha.esp"),
+            "a disabled mod is not in the load order: {:?}",
+            names(&off)
+        );
     }
 
     #[test]

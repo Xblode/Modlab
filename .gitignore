@@ -9,9 +9,7 @@ dist/
 .vite/
 *.tsbuildinfo
 
-# Tauri
-src-tauri/target/
-src-tauri/gen/
+# Tauri (the shell lives in crates/modlab-ui, not a top-level src-tauri/)
 crates/modlab-ui/gen/
 
 # Env / secrets
@@ -34,8 +32,12 @@ Thumbs.db
 *.db-wal
 *.db-shm
 
-# Local CLI dev sandbox (modlab-cli's default --data-root) — never the real F:\ModLab
+# Local CLI / Tauri-cwd sandbox (default --data-root when F:\ModLab is absent)
 .modlab-dev/
+
+# Forge/NeoForge installer logs accidentally written under crates/modlab-ui cwd
+*-installer.jar.log
+crates/modlab-ui/*.log
 
 # Claude Code local scratch
 .claude/settings.local.json

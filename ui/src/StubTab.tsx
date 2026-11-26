@@ -7,22 +7,6 @@ import type { TabId } from "./gameChrome";
  * same convention the rest of the shell follows.
  */
 const COPY: Partial<Record<TabId, { title: string; body: string }>> = {
-  plugins: {
-    title: "Plugins indisponibles",
-    body: "Le Core n’expose pas encore l’ordre de chargement",
-  },
-  archives: {
-    title: "Archives indisponibles",
-    body: "Le Core ne lit pas encore les archives BSA et BA2",
-  },
-  repertoire: {
-    title: "Répertoire indisponible",
-    body: "Le Core n’expose pas encore l’arborescence vue par le jeu",
-  },
-  saves: {
-    title: "Sauvegardes indisponibles",
-    body: "Le Core ne lit pas encore les fichiers de sauvegarde",
-  },
   sante: {
     title: "Santé indisponible",
     body: "Le moteur de diagnostic n’existe pas encore",

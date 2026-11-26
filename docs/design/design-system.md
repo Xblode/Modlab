@@ -130,17 +130,17 @@ Ce qui est spécifique à **Cursor / VS Code** : barre d'activité à icônes, e
 
 ✅ **Le code est la source de vérité** : `ui/design/tokens.json` → CSS variables (+ thème clair par surcharge) → Storybook comme catalogue vivant. Figma/Pencil servent à **explorer** (MCP connectés).
 
-**Maquette interactive du shell** (données d'exemple) : `docs/design/shell-maquette.html` — publiée en artifact : https://claude.ai/code/artifact/102c90d8-0fb5-438f-a8fd-d08b4e16a928 (version 3 = cadre + feuille + flottants). À essayer : `Ctrl+K` (palette), `Ctrl+B` / `Ctrl+L` / `Ctrl+J` (zone gauche / panneau droit / panneau du bas), les compteurs de la barre du bas (ouvrent le panneau flottant ; 📌 pour l'ancrer), double-clic sur un mod (onglet), onglet **Claude** du panneau droit (plan #128), bouton **Jouer** (barre du bas en mode jeu), icône « palette » (tokens), thème clair, densité. Réduis la fenêtre pour voir le mode fenêtré.
+L'ancienne maquette HTML a été retirée, remplacée par `ui/`.
 
 💬 → **Q14–Q18**.
 
 ### 6.6 État d'implémentation (18 septembre 2026)
 
-Où en est ce design system dans le **shell réel** (`ui/`, React + Tauri) — la maquette reste la référence visuelle, le shell suit :
+Où en est ce design system dans le **shell réel** (`ui/`, React + Tauri). L'ancienne maquette HTML a été retirée, remplacée par `ui/` :
 
 | Élément du §6 | État dans le shell React |
 |---|---|
-| **Tokens** | Miroir des valeurs de cette section dans `ui/src/shell.css` (variables CSS `--c1…--c5`, `--t1…--t3`, sémantique identique). `ui/design/tokens.json` n'est **pas encore extrait** : en attendant, `shell.css` est la source de vérité pratique, la maquette reste la référence visuelle. |
+| **Tokens** | Miroir des valeurs de cette section dans `ui/src/shell.css` (variables CSS `--c1…--c5`, `--t1…--t3`, sémantique identique). `ui/design/tokens.json` n'est **pas encore extrait** : en attendant, `shell.css` est la source de vérité pratique. L'ancienne maquette HTML a été retirée, remplacée par `ui/`. |
 | **Structure « cadre, feuille, flottants »** | ✅ v2.0 : deux colonnes (panneau gauche `c1` + feuille centrale `c2`), flottants `c3` (panneau droit, menus, toasts). |
 | **Atomes** | ✅ `Button`, `IconButton`, `FavoriteButton` (`ui/src/components/ui/`), `Ico`, toast, `EmptyState` — + `MenuPicker` (popover multi-variantes Fichier/Loadout/Outils/Affichage). |
 | **Header unifié + onglets** | ✅ `GameDashboardHeader` + `tabsFor()` : les onglets viennent des `GameCapabilities` de l'adaptateur (ADR 0005), jamais codés par jeu. |

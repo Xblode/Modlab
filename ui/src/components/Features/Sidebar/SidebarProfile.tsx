@@ -1,3 +1,4 @@
+import { BROWSER_PREVIEW_DATA_ROOT } from "../../../api";
 import { Ico } from "../../../Ico";
 import { IconButton } from "../../ui";
 import type { SideAct } from "./Sidebar";
@@ -23,6 +24,7 @@ export function SidebarProfile({
   dataRoot: string | undefined;
   communityEnabled: boolean;
 }) {
+  const rootLabel = dataRoot === BROWSER_PREVIEW_DATA_ROOT ? null : (dataRoot ?? "—");
   return (
     <div className="side-profile">
       <button
@@ -37,7 +39,7 @@ export function SidebarProfile({
         </span>
         <div className="profile-text">
           <span className="profile-name">Profil local</span>
-          <span className="profile-sub muted">{dataRoot ?? "—"}</span>
+          {rootLabel ? <span className="profile-sub muted">{rootLabel}</span> : null}
         </div>
       </button>
       {communityEnabled ? (

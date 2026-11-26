@@ -4,13 +4,34 @@
 //! See `docs/01-architecture-decidee.md` §3.1.
 //!
 //! Detection lives here; reading and writing an instance's `mods/` folder
-//! lives in `instance`. Still deliberately absent, and tracked as such:
-//! the CurseForge/Modrinth Providers (need an official API key) and
-//! launching the game (needs a launcher decision) — neither is guessed at.
+//! lives in `instance`. Whether a jar *is* Fabric Loader, Forge or NeoForge
+//! — rather than a mod that only runs on one of them — lives in
+//! `tool_archive`. What a normal jar declares (name, version, game
+//! version, dependencies) is read locally in `archive_meta` — no
+//! CurseForge or Modrinth request. Still deliberately absent, and tracked
+//! as such: the CurseForge/Modrinth Providers (need an official API key).
+//! Play = in-process JVM (`launch`: ensure + spawn + wait). `official_launcher`
+//! (profile + open desktop launcher) is the secondary / rescue path.
+//! CurseForge/Modrinth Providers remain absent.
 
+pub mod archive_meta;
+pub mod branch_loader;
+pub mod categories;
+mod dependencies;
+pub mod filename;
+pub mod install;
 pub mod instance;
+pub mod launch;
+pub mod loader_install;
+pub mod msa;
+pub mod official_launcher;
+pub mod tool_archive;
 
-use modlab_core::game_adapter::{GameAdapter, GameInstall};
+use modlab_core::game_adapter::{
+    ArchiveMetadata, ArchiveSource, CategoryHint, ClassifiedTool, DependencyMod, GameAdapter,
+    GameCategory, GameInstall, InstanceRootPolicy, LocationQuery, ModDependencyReport,
+    PrepareInstall, PreparedMod, SlotPath, StagedMod, ToolClassifyQuery,
+};
 use std::path::{Path, PathBuf};
 
 pub struct MinecraftAdapter;
@@ -44,20 +65,30 @@ impl GameAdapter for MinecraftAdapter {
         })
     }
 
-    /// Minecraft is found from `%APPDATA%` (see `find_install`), not from a
-    /// game `.exe` — there is no single "Minecraft.exe" to anchor on the way
-    /// Skyrim's adapter anchors on `SkyrimSE.exe`. `mods_dir` only reports
-    /// detected once it actually exists — ModLab creating it on first
-    /// install is a mutation, not something detection should imply happened.
+    /// Path slots expose the desktop launcher (CurseForge Install or Mojang)
+    /// for Mon jeu overrides and the secondary « Ouvrir le launcher » path.
+    /// Jouer itself spawns Java via `launch` and does not need those slots.
+    /// `mods_dir` under vanilla `.minecraft` only reports once it exists.
     fn path_slots(&self) -> Vec<modlab_core::game_adapter::PathSlot> {
         use modlab_core::game_adapter::{PathKind, PathSlot};
-        let root = find_install();
+        let launcher = official_launcher::preferred_launcher();
+        let root = launcher
+            .as_ref()
+            .map(|i| i.data_dir.clone())
+            .or_else(find_install);
+        let exe = launcher.map(|i| i.exe);
         vec![
             PathSlot {
                 id: "root",
-                label: "Dossier .minecraft / launcher",
+                label: "Dossier du launcher Minecraft",
                 kind: PathKind::Dir,
                 detected: root.clone(),
+            },
+            PathSlot {
+                id: "launcher_exe",
+                label: "Exécutable du launcher Minecraft",
+                kind: PathKind::File,
+                detected: exe.filter(|p| p.is_file()),
             },
             PathSlot {
                 id: "mods_dir",
@@ -67,7 +98,88 @@ impl GameAdapter for MinecraftAdapter {
             },
         ]
     }
+
+    fn mods_location(&self, query: &LocationQuery<'_>) -> modlab_core::game_adapter::ModsLocation {
+        modlab_core::game_adapter::ModsLocation::InInstall(
+            query.instance_root.map(instance::mods_dir),
+        )
+    }
+
+    fn config_location(
+        &self,
+        query: &LocationQuery<'_>,
+    ) -> modlab_core::game_adapter::ConfigLocation {
+        modlab_core::game_adapter::ConfigLocation::InInstall(
+            query.instance_root.map(instance::config_dir),
+        )
+    }
+
+    fn instance_root_policy(&self) -> InstanceRootPolicy {
+        InstanceRootPolicy::PerInstanceRoot {
+            dir_name: "minecraft",
+            subdirs: LAYOUT,
+        }
+    }
+
+    fn instance_subdir(&self, slot_id: &str) -> Option<&'static str> {
+        match slot_id {
+            "mods_dir" => Some("mods"),
+            "config_dir" => Some("config"),
+            "resourcepacks" => Some("resourcepacks"),
+            "shaderpacks" => Some("shaderpacks"),
+            _ => None,
+        }
+    }
+
+    fn classify_tool(&self, query: &ToolClassifyQuery<'_>) -> Option<ClassifiedTool> {
+        branch_loader::classify_token(query.source_path)
+            .or_else(|| tool_archive::classify_tool(query))
+    }
+
+    fn read_archive_metadata(&self, path: &Path) -> Option<ArchiveMetadata> {
+        archive_meta::read_path(path)
+    }
+
+    fn filename_metadata(&self, file_name: &str) -> Option<ArchiveMetadata> {
+        filename::parse(file_name)
+    }
+
+    fn categories(&self) -> &'static [GameCategory] {
+        categories::CATEGORIES
+    }
+
+    fn resolve_category(&self, hint: &CategoryHint<'_>) -> Option<&'static str> {
+        categories::resolve(hint)
+    }
+
+    fn resolve_dependencies(
+        &self,
+        mods: &[DependencyMod],
+        _paths: &[SlotPath],
+    ) -> Vec<ModDependencyReport> {
+        dependencies::resolve(mods)
+    }
+
+    fn stage_archive(
+        &self,
+        data_root: &Path,
+        mod_id: i64,
+        source: &ArchiveSource<'_>,
+    ) -> Result<StagedMod, String> {
+        install::stage(data_root, mod_id, source)
+    }
+
+    fn prepare_install(&self, job: &PrepareInstall<'_>) -> Result<PreparedMod, String> {
+        install::prepare(job)
+    }
+
+    fn retract_files(&self, data_root: &Path, mod_id: i64, source: &Path) -> Option<Vec<PathBuf>> {
+        install::retract(data_root, mod_id, source)
+    }
 }
+
+/// Empty directories created with a new Minecraft instance folder.
+const LAYOUT: &[&str] = &["mods", "config", "resourcepacks", "shaderpacks", "saves"];
 
 /// Vanilla `.minecraft`, then common Prism / Modrinth / CurseForge app
 /// data folders. Same "guess likely paths" approach as the Skyrim adapter
@@ -139,7 +251,7 @@ mod tests {
     fn path_slots_declare_the_expected_ids() {
         let slots = MinecraftAdapter.path_slots();
         let ids: Vec<&str> = slots.iter().map(|s| s.id).collect();
-        assert_eq!(ids, ["root", "mods_dir"]);
+        assert_eq!(ids, ["root", "launcher_exe", "mods_dir"]);
         for slot in &slots {
             if let Some(p) = &slot.detected {
                 assert!(

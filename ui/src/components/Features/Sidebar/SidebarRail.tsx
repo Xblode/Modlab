@@ -5,7 +5,7 @@ import type { SideAct } from "./Sidebar";
 const ACTIVITIES = [
   ["explorer", "Explorateur", "layers"],
   ["search", "Recherche", "search"],
-  ["history", "Historique", "branch"],
+  ["history", "Branches", "branch"],
   ["tools", "Outils", "tool"],
 ] as const;
 
@@ -28,6 +28,7 @@ export function SidebarRail({
     <div className="side-tools">
       <IconButton
         name="menu"
+        size="md"
         title="Menu"
         ref={menuButtonRef}
         aria-pressed={menuOpen}
@@ -35,7 +36,14 @@ export function SidebarRail({
       />
       <div className="hact">
         {ACTIVITIES.map(([id, title, icon]) => (
-          <IconButton key={id} name={icon} title={title} aria-pressed={act === id} onClick={() => onAct(id)} />
+          <IconButton
+            key={id}
+            name={icon}
+            size="md"
+            title={title}
+            aria-pressed={act === id}
+            onClick={() => onAct(id)}
+          />
         ))}
       </div>
     </div>

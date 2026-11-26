@@ -24,7 +24,7 @@ L'idée : « Cursor pour le game modding ».
 ## Ce qui fait foi
 
 - Architecture : `docs/01-architecture-decidee.md`
-- Interface : `docs/design/shell-maquette.html`
+- Interface : `ui/`. L'ancienne maquette HTML a été retirée, remplacée par `ui/`.
 
 ## Lancer et tester
 
@@ -54,19 +54,14 @@ npm --prefix ui run tauri:dev
 - `npm --prefix ui run tauri:dev` compile l'hôte Tauri et ouvre la fenêtre ModLab, avec l'interface qui se recharge à chaque modification. La première compilation est longue.
 - Toujours lancer ces commandes dans le dossier ModLab : ailleurs, npm peut tomber sur un autre projet.
 
-### Lancer seulement l'interface ou la maquette
+### Lancer seulement l'interface
 
 ```powershell
 npm --prefix ui run dev
 ```
 
 - La commande ci-dessus, depuis la racine du dépôt, sert l'interface seule dans le navigateur sur `http://localhost:1420` (sans le moteur : les appels à l'hôte Tauri ne répondent pas). Arrêt avec `Ctrl+C`.
-
-```powershell
-python -m http.server 5502
-```
-
-- La commande ci-dessus, depuis la racine du dépôt, sert la maquette sur `http://localhost:5502/docs/design/shell-maquette.html` (c'est le serveur `maquette` de `.claude/launch.json`). Arrêt avec `Ctrl+C`.
+- L'ancienne maquette HTML a été retirée, remplacée par `ui/`.
 
 ### La CLI
 

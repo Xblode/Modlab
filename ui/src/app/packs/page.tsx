@@ -1,4 +1,4 @@
-import { FolderList } from "../../components/Features/Minecraft/FolderList";
+import { InstanceFolderTable } from "../../components/Features/Minecraft/InstanceFolderTable";
 import { useMinecraftContent } from "../../hooks/useMinecraftContent";
 import { Ico } from "../../Ico";
 
@@ -26,23 +26,23 @@ export default function PacksPage() {
   }
 
   return (
-    <div className="content">
-      <div className="dash dpad">
-        <FolderList
-          title="Resource packs"
-          icon="image"
-          names={content?.resourcePacks ?? null}
-          emptyLabel="Aucun resource pack"
-          emptyHint="Rien dans resourcepacks/"
-        />
-        <FolderList
-          title="Shader packs"
-          icon="sparkle"
-          names={content?.shaderPacks ?? null}
-          emptyLabel="Aucun shader pack"
-          emptyHint="Rien dans shaderpacks/"
-        />
-      </div>
-    </div>
+    <InstanceFolderTable
+      sections={[
+        {
+          title: "Resource packs",
+          icon: "image",
+          names: content?.resourcePacks ?? null,
+          emptyTitle: "Aucun resource pack",
+          emptyHint: "Rien dans resourcepacks/",
+        },
+        {
+          title: "Shader packs",
+          icon: "sparkle",
+          names: content?.shaderPacks ?? null,
+          emptyTitle: "Aucun shader pack",
+          emptyHint: "Rien dans shaderpacks/",
+        },
+      ]}
+    />
   );
 }

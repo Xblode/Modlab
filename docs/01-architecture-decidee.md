@@ -10,7 +10,7 @@
 
 > **Statut : verrouillé le 15 septembre 2026.** Ce document est la référence unique pour démarrer l'implémentation.
 >
-> **Ce qu'il remplace :** `docs/archive/00-cadrage-technique.md` et `docs/archive/Modlab — Document de cadrage & architecture.md` sur toute décision structurante (stack, architecture, permissions, roadmap). Les deux restent dans `docs/archive/` comme historique de la réflexion — ce document-ci synthétise et tranche, il ne les répète pas en entier.
+> **Ce qu'il remplace :** les anciens documents de cadrage (désormais dans `docs/archive/`, **historique humain uniquement — les agents ne les lisent pas en session**) sur toute décision structurante (stack, architecture, permissions, roadmap). Ce document-ci synthétise et tranche.
 >
 > **Ce qui ne change pas :** `.bframe/IDEES.md` (parking d'idées) et `docs/faisabilite.md` (notes de faisabilité), `docs/design/shell-maquette.html` (la maquette — **source de vérité visuelle**, activement itérée en parallèle de ce document).
 >
@@ -33,7 +33,7 @@ Pas un MO2 plus joli, pas un Vortex plus ouvert : un **environnement de travail*
 
 Trois niveaux d'usage cohabitent dans la même app : **Débutant** (Installer / Mettre à jour / Lancer / Réparer, rien d'autre à comprendre), **Avancé** (conflits, dépendances, load order, logs), **Expert** (filesystem, graphe de dépendances/conflits, console, API, MCP, commandes avancées). L'automatisation ne doit **jamais devenir une boîte noire** : chaque action explique quoi, pourquoi, quels fichiers, et comment revenir en arrière.
 
-Les 10 lignes conductrices du cadrage d'origine (personnel d'abord, MO2 = référence de maîtrise, GitHub/Claude Code/Cursor = référence d'interface, réversibilité totale, vérité par les faits, le créatif tient le volant…) restent valables telles quelles — voir `docs/archive/00-cadrage-technique.md` §1.2 pour le détail.
+Les lignes conductrices du cadrage d'origine restent valables : personnel d'abord, MO2 comme référence de maîtrise, interface type IDE (GitHub / Claude Code / Cursor), réversibilité totale, vérité par les faits, le créatif garde le volant, pas de boîte noire.
 
 ---
 
@@ -135,7 +135,7 @@ Identification (détecter le jeu, l'édition, la version) · Structure (où sont
 
 ## 5. Modèle de données & transactions
 
-*(Conceptuellement inchangé depuis `docs/archive/00-cadrage-technique.md` §4.3/§4.6 — juste porté en Rust : SQLite reste la base, un seul processus Rust en est le seul écrivain.)*
+*(Conceptuellement inchangé depuis le cadrage d'origine (sept. 2026) — porté en Rust : SQLite reste la base, un seul processus Rust en est le seul écrivain.)*
 
 **Sur disque**, racine `F:\ModLab\` :
 
@@ -254,26 +254,15 @@ Minecraft (Phase 2) : Java, Fabric/Forge/NeoForge/Quilt, `.jar`, CurseForge Prov
 
 ---
 
-## 11. L'équipe virtuelle → agents Claude Code (mis à jour pour Rust)
+## 11. L'équipe virtuelle
 
-| Agent | Poste | Mission | Modèle |
-|---|---|---|---|
-| `pm` | Chef·fe de projet | ClickUp, jalons, décisions à trancher, point hebdo | Sonnet |
-| `architect` | Architecte / tech lead | Contrats Rust, ADR, revue de PR, garde-fou "base top" | Opus |
-| `core-dev` | Dev moteur **Rust** | Store, transactions, révisions, backends de déploiement, API | Opus |
-| `skyrim-dev` | Dev intégration jeu & outils | Adaptateur Skyrim, orchestration xEdit/LOOT/Nemesis/DynDOLOD, FFI USVFS | Opus |
-| `mcp-dev` | Dev MCP & automatisation | Serveur MCP, permissions 3-niveaux, recettes | Opus |
-| `ui-designer` | Designer UI/UX | Maquette HTML, tokens, revue visuelle | Opus |
-| `frontend-dev` | Dev front | React/TS, composants, IPC Tauri, tests | Opus |
-| `qa` | QA / test | Fixtures "faux Skyrim", tests moteur Rust | Sonnet (Opus si dur) |
-
-Optionnels plus tard : `devops`, `scribe`. Budget modèles confirmé : **gros blocs en Opus**, Sonnet pour `pm`/`qa`.
+Depuis le 24 novembre 2026, le travail passe par bFrame : l'orchestrateur (la conversation) et trois workers (`worker-sonnet`, `worker-haiku`, `worker-web`). Les huit fiches spécialisées (`pm`, `architect`, `core-dev`, `skyrim-dev`, `mcp-dev`, `ui-designer`, `frontend-dev`, `qa`) ont été retirées (historique conservé dans `docs/archive/`, lecture réservée à l'humain).
 
 ---
 
 ## 12. Suivi de projet : ClickUp (confirmé)
 
-Plan gratuit, compte déjà existant, connecté. Distinction par **tags** (`pm`, `arch`, `core`, `game`, `mcp`, `design`, `front`, `qa`), pas par champ personnalisé (limite 60 utilisations du plan gratuit). Granularité : **tâches "features" grosses + quelques sous-tâches + jalons**, point hebdo écrit par `pm`. Structure ClickUp inchangée depuis `docs/archive/00-cadrage-technique.md` §10.3 (Décisions & jalons, Roadmap, Phases, Bugs, Idées).
+Plan gratuit, compte déjà existant, connecté. Distinction par **tags** (`pm`, `arch`, `core`, `game`, `mcp`, `design`, `front`, `qa`), pas par champ personnalisé (limite 60 utilisations du plan gratuit). Granularité : **tâches "features" grosses + quelques sous-tâches + jalons**, point hebdo écrit par `pm`. *(Depuis novembre 2026 le suivi vivant est `.bframe/TACHES.md` — ClickUp arrêté ; voir l'encadré en tête de ce document.)*
 
 ---
 
@@ -341,7 +330,7 @@ Plan gratuit, compte déjà existant, connecté. Distinction par **tags** (`pm`,
 
 ## Annexe B — Glossaire
 
-Voir `docs/archive/00-cadrage-technique.md` Annexe A pour les termes déjà définis (ESP/ESM/ESL, Master, Load order, Record, BSA/BA2, FOMOD, VFS/USVFS, CAS, Loadout, Révision, Transaction…) et pour GGUF/Quantization/VRAM/GBNF (ajoutés le 15 septembre). Nouveaux termes :
+Termes modding usuels (ESP/ESM/ESL, Master, Load order, Record, BSA/BA2, FOMOD, VFS/USVFS, CAS, Loadout, Révision, Transaction…) et termes IA (GGUF, quantization, VRAM, GBNF) sont employés dans ce document et les ADR ; l'ancienne annexe détaillée reste dans `docs/archive/` sans lecture agent. Nouveaux termes :
 
 | Terme | Définition |
 |---|---|
@@ -354,9 +343,8 @@ Voir `docs/archive/00-cadrage-technique.md` Annexe A pour les termes déjà déf
 
 ## Annexe C — Sources
 
-Cumul de `docs/archive/00-cadrage-technique.md` Annexe B et des sources IA locale ajoutées le 15 septembre 2026, plus :
+Bibliographie vivante (les listes complètes du cadrage d'origine sont archivées, sans lecture agent) :
 
-- `docs/archive/Modlab — Document de cadrage & architecture.md` (document de réflexion, 15 septembre 2026)
 - esplugin (Rust, lecture de plugins Bethesda) : https://github.com/loot/esplugin
 - libloot réécrit en Rust (2025) : https://blog.ortham.net/posts/2025-04-24-porting-libloot-to-rust/
 - sevenz-rust : https://github.com/dyz1990/sevenz-rust

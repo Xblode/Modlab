@@ -2,12 +2,12 @@
 
 Date : 2026-11-24
 
-L'appli React `ui/` est la référence visuelle (décision du 24 nov.). Ce document dit comment la faire évoluer. Il prime sur la maquette `docs/design/shell-maquette.html`, qui est un historique.
+L'appli React `ui/` est la référence visuelle (décision du 24 nov.). Ce document dit comment la faire évoluer. L'ancienne maquette HTML a été retirée, remplacée par `ui/`.
 
 ## Décisions validées par Benjamin (2026-11-24)
 
 - **Densité** : « Confortable » par défaut (lignes de liste et de table à 32 px, boutons et champs à 36 px). Réglage Compact / Confortable dans les Réglages (Compact : lignes à 28 px, contrôles à 32 px).
-- **Texte** : corps à 14 px, petits libellés à 12 px, rien sous 12 px. Graisses 400 et 500, 600 pour les titres.
+- **Texte** : corps à 13 px (lignes de barre, boutons, onglets), titres de section à 11 px, titre de page à 20 px. Rien sous 11 px. Graisses 400 et 500, 600 pour les titres. Exemple mesuré : Cursor.
 - **Finitions type shadcn** :
   - arrondis de 8 px pour les contrôles, 12 px pour les cartes, panneaux et dialogues, 4 à 6 px pour les étiquettes ;
   - bordures à 10 % d'opacité (15 % pour les champs) ;
@@ -37,6 +37,8 @@ L'appli React `ui/` est la référence visuelle (décision du 24 nov.). Ce docum
   - animations limitées à couleur, fond, bordure, opacité et transform, avec une seule courbe.
 
 ## Ce que disent les références (consensus)
+
+Les tailles de texte de ModLab sont celles de la décision ci-dessus.
 
 1. Grille de 4 px, base 8 (Fluent, Atlassian, Primer, shadcn).
 2. Texte courant à 14 px, petits libellés à 12 px, rien sous 12 px (Fluent typographie : corps 14/20, légende 12/16 ; shadcn `text-sm`).

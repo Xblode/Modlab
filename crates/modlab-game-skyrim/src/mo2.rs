@@ -156,7 +156,59 @@ pub fn import_into(
     let created = loadout::create(core, crate::SkyrimAdapter.id(), loadout_name)
         .map_err(|e| e.to_string())?;
     let imported = loadout::import_mods(core, created.id, &entries).map_err(|e| e.to_string())?;
+    remember_known_archives(core, profile_dir, &entries)?;
     Ok((created, imported))
+}
+
+/// `meta.ini`'s `installationFile`, when that path is a real file: the
+/// archive itself, a file next to the mod, or MO2's `downloads/` folder
+/// (sibling of `profiles/`). Anything else is left empty — Info can sum the
+/// installed folder later.
+fn remember_known_archives(
+    core: &Core,
+    profile_dir: &Path,
+    entries: &[modlab_core::loadout::ImportEntry],
+) -> Result<(), String> {
+    for entry in entries {
+        let Some(len) = installation_file_len(&entry.source_path, profile_dir) else {
+            continue;
+        };
+        modlab_core::mod_measure::set_size_for_source(core, &entry.source_path, len)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn installation_file_len(mod_dir: &Path, profile_dir: &Path) -> Option<i64> {
+    let text = fs::read_to_string(mod_dir.join("meta.ini")).ok()?;
+    let named = text.lines().find_map(|line| {
+        let line = line.trim();
+        if line.starts_with('[') || line.starts_with('#') || line.starts_with(';') {
+            return None;
+        }
+        let (key, value) = line.split_once('=')?;
+        if !key.trim().eq_ignore_ascii_case("installationFile") {
+            return None;
+        }
+        let value = value.trim().trim_matches('"').trim();
+        if value.is_empty() {
+            None
+        } else {
+            Some(value.to_string())
+        }
+    })?;
+    let file = Path::new(&named);
+    let mut candidates = vec![file.to_path_buf(), mod_dir.join(file)];
+    if let Some(root) = profile_dir.parent().and_then(|profiles| profiles.parent()) {
+        candidates.push(root.join("downloads").join(file));
+    }
+    candidates.iter().find_map(|path| {
+        if !path.is_file() {
+            return None;
+        }
+        let len = fs::metadata(path).ok()?.len();
+        i64::try_from(len).ok()
+    })
 }
 
 /// Read a full MO2 profile directory. Missing individual files are treated
@@ -309,6 +361,31 @@ mod tests {
             mods.path().join("SkyUI"),
             "mods point at MO2's folders in place — never copied"
         );
+        assert!(rows[1].installed_at.is_some(), "import date stands in");
+        assert_eq!(rows[1].size_bytes, None);
+    }
+
+    #[test]
+    fn import_records_the_size_of_a_known_installation_file() {
+        let core = Core::open_in_memory().unwrap();
+        let (profile, mods) = fake_instance();
+        let archive = profile.path().join("SkyUI.7z");
+        fs::write(&archive, b"0123456789").unwrap();
+        fs::write(
+            mods.path().join("SkyUI").join("meta.ini"),
+            format!("installationFile={}\n", archive.display()),
+        )
+        .unwrap();
+
+        let (created, _) = import_into(&core, profile.path(), mods.path(), "Main").unwrap();
+        let rows = loadout::entries(&core, created.id).unwrap();
+        let skyui = rows.iter().find(|row| row.name == "SkyUI").unwrap();
+        assert_eq!(skyui.size_bytes, Some(10));
+        let other = rows
+            .iter()
+            .find(|row| row.name == "Address Library All in One")
+            .unwrap();
+        assert_eq!(other.size_bytes, None);
     }
 
     #[test]

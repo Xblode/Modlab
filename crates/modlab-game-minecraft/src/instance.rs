@@ -253,7 +253,7 @@ pub fn scan_dir(mods_dir: &Path) -> io::Result<InstanceMods> {
             });
         }
     }
-    mods.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    mods.sort_by_key(|m| m.name.to_lowercase());
     let loader = mods
         .iter()
         .map(|m| m.loader)
@@ -267,6 +267,14 @@ pub fn scan_dir(mods_dir: &Path) -> io::Result<InstanceMods> {
 #[must_use]
 pub fn mods_dir(instance_root: &Path) -> PathBuf {
     instance_root.join("mods")
+}
+
+/// `<instance root>/config` — loader config (Forge, Fabric, NeoForge).
+/// Same anchoring as `mods_dir`: derived from the instance root, not a
+/// second detection pass.
+#[must_use]
+pub fn config_dir(instance_root: &Path) -> PathBuf {
+    instance_root.join("config")
 }
 
 /// Import an existing modded instance into a new ModLab loadout: scan
@@ -298,41 +306,19 @@ pub fn import_instance(
     Ok((created, imported))
 }
 
-/// Copy one `.jar` into an instance's `mods/` folder and register it in a
-/// loadout.
+/// Copy one file into `dest_dir` under its own name.
 ///
-/// This is a **real write into the game's own folder** — the one thing
-/// Skyrim's USVFS backend never does (ADR 0001) — so it is deliberately
-/// careful:
-/// - the copy lands on a temp name in the *same* directory and is renamed
-///   into place only once complete, so a crash mid-copy can never leave a
-///   half-written jar that Minecraft would try to load (same
-///   write-then-rename rule as `modlab_core::store`);
-/// - it refuses rather than overwriting an existing jar of the same name —
-///   silently replacing a mod the human installed is exactly the kind of
-///   loss the transaction cycle exists to prevent (§5);
-/// - if registering the mod in the database fails *after* the copy landed,
-///   the copied file is removed again, so a failed install leaves nothing
-///   behind. `modlab_core::transaction`'s rollback restores database state
-///   only (ADR 0003), so this file-level undo has to be explicit here.
-pub fn install_jar(
-    core: &Core,
-    loadout_id: i64,
-    source_jar: &Path,
-    instance_root: &Path,
-) -> Result<InstalledMod, String> {
-    if jar_state(source_jar) != Some(true) {
-        return Err(format!("ce n'est pas un .jar : {}", source_jar.display()));
+/// The copy lands on a temporary name in the same directory and is renamed
+/// into place. An existing file of the same name is refused. A failed copy
+/// moves the temporary file to the trash instead of deleting it.
+pub fn place_file(data_root: &Path, source: &Path, dest_dir: &Path) -> Result<PathBuf, String> {
+    if !source.is_file() {
+        return Err(format!("fichier introuvable : {}", source.display()));
     }
-    if !source_jar.is_file() {
-        return Err(format!("fichier introuvable : {}", source_jar.display()));
-    }
-    let dest_dir = mods_dir(instance_root);
-    fs::create_dir_all(&dest_dir).map_err(|e| e.to_string())?;
-
-    let file_name = source_jar
+    fs::create_dir_all(dest_dir).map_err(|e| e.to_string())?;
+    let file_name = source
         .file_name()
-        .ok_or_else(|| format!("chemin sans nom de fichier : {}", source_jar.display()))?;
+        .ok_or_else(|| format!("chemin sans nom de fichier : {}", source.display()))?;
     let dest = dest_dir.join(file_name);
     if dest.exists() {
         return Err(format!(
@@ -340,43 +326,313 @@ pub fn install_jar(
             dest.display()
         ));
     }
-
     let staging = dest_dir.join(format!(
         ".modlab-installing-{}",
         file_name.to_string_lossy()
     ));
-    let _ = fs::remove_file(&staging);
-    fs::copy(source_jar, &staging).map_err(|e| e.to_string())?;
-    if let Err(e) = fs::rename(&staging, &dest) {
-        let _ = fs::remove_file(&staging);
-        return Err(e.to_string());
+    if staging.exists() {
+        let _ = modlab_core::files::move_to_trash(data_root, &staging);
     }
+    fs::copy(source, &staging).map_err(|e| e.to_string())?;
+    if let Err(err) = fs::rename(&staging, &dest) {
+        let _ = modlab_core::files::move_to_trash(data_root, &staging);
+        return Err(err.to_string());
+    }
+    Ok(dest)
+}
 
-    let found = read_jar(&dest).ok().flatten();
+/// Copy one `.jar` into `mods_dir` and register it in a loadout.
+///
+/// Same staging rename as [`place_file`]. If the database write fails, the
+/// copied jar goes to the trash — it is not deleted. `mods_dir` is the
+/// instance's mods folder, not a game install root. The new row is marked
+/// `source_host = manual` (disk add, no platform page).
+pub fn install_jar(
+    core: &Core,
+    loadout_id: i64,
+    source_jar: &Path,
+    mods_dir: &Path,
+    data_root: &Path,
+) -> Result<InstalledMod, String> {
+    if jar_state(source_jar) != Some(true) {
+        return Err(format!("ce n'est pas un .jar : {}", source_jar.display()));
+    }
+    let dest = place_file(data_root, source_jar, mods_dir)?;
+
+    match register_jar_at(core, loadout_id, &dest) {
+        Ok(installed) => Ok(installed),
+        Err(e) => {
+            // The database never learned about this jar, so leaving it in
+            // `mods/` would mean Minecraft loads a mod ModLab doesn't know it
+            // installed. Undo the one thing that did land.
+            let _ = modlab_core::files::move_to_trash(data_root, &dest);
+            Err(e)
+        }
+    }
+}
+
+/// Register a `.jar` that already sits in the instance `mods/` folder.
+/// No copy. Refuses a path that is not a jar (or `.jar.disabled`), and skips
+/// (`Ok(None)`) when this loadout already lists that path. Marked as a
+/// manual source.
+pub fn register_existing_jar(
+    core: &Core,
+    loadout_id: i64,
+    jar_path: &Path,
+) -> Result<Option<InstalledMod>, String> {
+    if jar_state(jar_path).is_none() {
+        return Err(format!("ce n'est pas un .jar : {}", jar_path.display()));
+    }
+    if loadout_has_source(core, loadout_id, jar_path)? {
+        return Ok(None);
+    }
+    register_jar_at(core, loadout_id, jar_path).map(Some)
+}
+
+/// Scan `mods_dir` and register every jar this loadout does not yet list.
+/// Jars stay where they are — same read-only-on-disk idea as
+/// [`import_instance`], but for an existing loadout. Returns how many rows
+/// were added.
+pub fn sync_mods_dir(core: &Core, loadout_id: i64, mods_dir: &Path) -> Result<usize, String> {
+    let scanned = scan_dir(mods_dir).map_err(|e| e.to_string())?;
+    let mut added = 0;
+    for found in scanned.mods {
+        if loadout_has_source(core, loadout_id, &found.jar_path)? {
+            continue;
+        }
+        register_jar_at(core, loadout_id, &found.jar_path)?;
+        added += 1;
+    }
+    Ok(added)
+}
+
+fn register_jar_at(core: &Core, loadout_id: i64, jar_path: &Path) -> Result<InstalledMod, String> {
+    let found = read_jar(jar_path).ok().flatten();
     let (loader, name, version) =
-        found.unwrap_or_else(|| (ModLoader::Unknown, jar_stem(&dest), None));
+        found.unwrap_or_else(|| (ModLoader::Unknown, jar_stem(jar_path), None));
+    let enabled = jar_state(jar_path) == Some(true);
     let installed = InstalledMod {
         name: name.clone(),
         version: version.clone(),
-        jar_path: dest.clone(),
+        jar_path: jar_path.to_path_buf(),
         loader,
-        enabled: true,
+        enabled,
     };
-
     let entry = loadout::ImportEntry {
         name,
-        source_path: dest.clone(),
-        enabled: true,
+        source_path: jar_path.to_path_buf(),
+        enabled,
         version,
     };
-    if let Err(e) = loadout::import_mods(core, loadout_id, &[entry]) {
-        // The database never learned about this jar, so leaving it in
-        // `mods/` would mean Minecraft loads a mod ModLab doesn't know it
-        // installed. Undo the one thing that did land.
-        let _ = fs::remove_file(&dest);
-        return Err(e.to_string());
-    }
+    loadout::import_mods(core, loadout_id, &[entry]).map_err(|e| e.to_string())?;
+    let mod_id = entries_mod_id_for(core, loadout_id, jar_path)?;
+    loadout::mark_manual_source(core, mod_id).map_err(|e| e.to_string())?;
     Ok(installed)
+}
+
+fn loadout_has_source(core: &Core, loadout_id: i64, path: &Path) -> Result<bool, String> {
+    let want = path_key(path);
+    let rows = loadout::entries(core, loadout_id).map_err(|e| e.to_string())?;
+    Ok(rows.iter().any(|row| path_key(&row.source_path) == want))
+}
+
+fn entries_mod_id_for(core: &Core, loadout_id: i64, path: &Path) -> Result<i64, String> {
+    let want = path_key(path);
+    loadout::entries(core, loadout_id)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|row| path_key(&row.source_path) == want)
+        .map(|row| row.mod_id)
+        .ok_or_else(|| format!("mod introuvable après import : {}", path.display()))
+}
+
+fn path_key(path: &Path) -> String {
+    path.display()
+        .to_string()
+        .replace('\\', "/")
+        .to_ascii_lowercase()
+}
+
+/// Suffix launchers use for a disabled mod jar — Prism, CurseForge, MultiMC.
+/// Already the convention in this crate's scanner; keep it (not `.jardisabled`).
+const JAR_DISABLED_SUFFIX: &str = ".jar.disabled";
+
+/// `foo.jar` → `foo.jar.disabled`. Idempotent when already disabled.
+fn disabled_jar_path(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if name.to_ascii_lowercase().ends_with(JAR_DISABLED_SUFFIX) {
+        path.to_path_buf()
+    } else {
+        path.with_file_name(format!("{name}.disabled"))
+    }
+}
+
+/// `foo.jar.disabled` → `foo.jar`. Idempotent when already enabled.
+fn enabled_jar_path(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".disabled") {
+        let keep = name.len().saturating_sub(".disabled".len());
+        path.with_file_name(&name[..keep])
+    } else {
+        path.to_path_buf()
+    }
+}
+
+/// Find the jar on disk for a stored path, tolerating a prior desync
+/// (DB says `.jar` while the file is already `.jar.disabled`, or the reverse).
+fn resolve_existing_jar(stored: &Path) -> io::Result<PathBuf> {
+    if stored.is_file() {
+        return Ok(stored.to_path_buf());
+    }
+    let alt = match jar_state(stored) {
+        Some(true) => disabled_jar_path(stored),
+        Some(false) => enabled_jar_path(stored),
+        None => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("ce n'est pas un .jar : {}", stored.display()),
+            ));
+        }
+    };
+    if alt.is_file() {
+        Ok(alt)
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("fichier introuvable : {}", stored.display()),
+        ))
+    }
+}
+
+/// Rename one jar on disk: `foo.jar` ↔ `foo.jar.disabled` to match `enabled`.
+/// Returns the path that exists after the call. Idempotent when already right.
+pub fn set_jar_enabled(jar_path: &Path, enabled: bool) -> io::Result<PathBuf> {
+    let current = resolve_existing_jar(jar_path)?;
+    let currently_enabled = jar_state(&current) == Some(true);
+    if currently_enabled == enabled {
+        return Ok(current);
+    }
+    let target = if enabled {
+        enabled_jar_path(&current)
+    } else {
+        disabled_jar_path(&current)
+    };
+    if target.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!(
+                "{} existe déjà — impossible de {}",
+                target.display(),
+                if enabled {
+                    "réactiver le mod"
+                } else {
+                    "désactiver le mod"
+                }
+            ),
+        ));
+    }
+    fs::rename(&current, &target)?;
+    Ok(target)
+}
+
+/// Enable or disable a Minecraft mod: rename the jar on disk, update
+/// `source_path`, then flip the loadout flag through the Core cycle.
+/// Virtual loader rows (`modlab:branch-mc-loader:…`) only flip the DB flag.
+pub fn set_mod_enabled(
+    core: &Core,
+    loadout_id: i64,
+    mod_id: i64,
+    enabled: bool,
+) -> Result<bool, String> {
+    let rows = loadout::entries(core, loadout_id).map_err(|e| e.to_string())?;
+    let Some(row) = rows.into_iter().find(|r| r.mod_id == mod_id) else {
+        return loadout::set_enabled(core, loadout_id, mod_id, enabled).map_err(|e| e.to_string());
+    };
+
+    let path_text = row.source_path.to_string_lossy();
+    if path_text.starts_with(crate::branch_loader::SOURCE_PREFIX) {
+        return loadout::set_enabled(core, loadout_id, mod_id, enabled).map_err(|e| e.to_string());
+    }
+    if jar_state(&row.source_path).is_none() {
+        return loadout::set_enabled(core, loadout_id, mod_id, enabled).map_err(|e| e.to_string());
+    }
+
+    let new_path = set_jar_enabled(&row.source_path, enabled).map_err(|e| e.to_string())?;
+    if path_key(&new_path) != path_key(&row.source_path) {
+        modlab_core::download::relocate_source(core, mod_id, &new_path)
+            .map_err(|e| e.to_string())?;
+    }
+    loadout::set_enabled(core, loadout_id, mod_id, enabled).map_err(|e| e.to_string())
+}
+
+/// Remove a Minecraft mod from the loadout **and** from the instance `mods/`
+/// folder. The jar (`.jar` or `.jar.disabled`) and any companion files the
+/// adapter recorded are moved to the data-root trash — never deleted outright.
+/// If the soft-delete fails, trash guards restore the files. Virtual loader
+/// rows only leave the list (no disk path).
+pub fn remove_mod(
+    core: &Core,
+    data_root: &Path,
+    loadout_id: i64,
+    mod_id: i64,
+) -> Result<(), String> {
+    let rows = loadout::entries(core, loadout_id).map_err(|e| e.to_string())?;
+    let Some(row) = rows.into_iter().find(|r| r.mod_id == mod_id) else {
+        return modlab_core::download::remove(core, mod_id).map_err(|e| e.to_string());
+    };
+
+    let path_text = row.source_path.to_string_lossy();
+    if path_text.starts_with(crate::branch_loader::SOURCE_PREFIX) {
+        return modlab_core::download::remove(core, mod_id).map_err(|e| e.to_string());
+    }
+
+    let mut to_trash: Vec<PathBuf> = Vec::new();
+    if jar_state(&row.source_path).is_some() {
+        match resolve_existing_jar(&row.source_path) {
+            Ok(path) => to_trash.push(path),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.to_string()),
+        }
+    }
+    if let Some(extra) = crate::install::retract(data_root, mod_id, &row.source_path) {
+        for path in extra {
+            if !to_trash
+                .iter()
+                .any(|kept| path_key(kept) == path_key(&path))
+            {
+                to_trash.push(path);
+            }
+        }
+    }
+
+    let mut guards = Vec::new();
+    for path in &to_trash {
+        if let Some(guard) = modlab_core::files::trash_for_rollback(data_root, path)
+            .map_err(|e| e.to_string())?
+        {
+            guards.push(guard);
+        }
+    }
+
+    match modlab_core::download::remove(core, mod_id) {
+        Ok(()) => {
+            for guard in guards {
+                guard.commit();
+            }
+            Ok(())
+        }
+        Err(err) => {
+            drop(guards);
+            Err(err.to_string())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -384,6 +640,13 @@ mod tests {
     use super::*;
     use std::io::Write;
     use zip::write::SimpleFileOptions;
+
+    #[test]
+    fn mods_and_config_are_children_of_the_instance_root() {
+        let root = Path::new(r"F:\instances\fabric");
+        assert_eq!(mods_dir(root), root.join("mods"));
+        assert_eq!(config_dir(root), root.join("config"));
+    }
 
     /// Real, minimal zip fixtures built at test time — `fixtures/README.md`
     /// explains why these are not checked in as binary files: a format that
@@ -585,7 +848,14 @@ mod tests {
         let source = fabric_jar(downloads.path(), "sodium.jar", "sodium", "Sodium", "0.5.8");
         let lo = loadout::create(&core, "minecraft", "Survie").unwrap();
 
-        let installed = install_jar(&core, lo.id, &source, instance.path()).unwrap();
+        let installed = install_jar(
+            &core,
+            lo.id,
+            &source,
+            &mods_dir(instance.path()),
+            instance.path(),
+        )
+        .unwrap();
 
         assert_eq!(installed.name, "Sodium");
         assert_eq!(installed.version.as_deref(), Some("0.5.8"));
@@ -597,6 +867,16 @@ mod tests {
         let rows = loadout::entries(&core, lo.id).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].version.as_deref(), Some("0.5.8"));
+        assert_eq!(
+            rows[0].source_host.as_deref(),
+            Some(loadout::SOURCE_HOST_MANUAL)
+        );
+        let jar = mods_dir(instance.path()).join("sodium.jar");
+        assert_eq!(
+            rows[0].size_bytes,
+            Some(i64::try_from(fs::metadata(&jar).unwrap().len()).unwrap())
+        );
+        assert!(rows[0].installed_at.is_some());
         // No staging leftovers.
         let strays: Vec<_> = fs::read_dir(mods_dir(instance.path()))
             .unwrap()
@@ -604,6 +884,27 @@ mod tests {
             .filter(|n| n.starts_with(".modlab-"))
             .collect();
         assert!(strays.is_empty(), "staging file left behind: {strays:?}");
+    }
+
+    #[test]
+    fn sync_registers_loose_jars_already_in_mods() {
+        let core = Core::open_in_memory().unwrap();
+        let instance = tempfile::tempdir().unwrap();
+        let mods = mods_dir(instance.path());
+        fs::create_dir_all(&mods).unwrap();
+        let _ = fabric_jar(&mods, "sodium.jar", "sodium", "Sodium", "0.5.8");
+        let lo = loadout::create(&core, "minecraft", "Survie").unwrap();
+
+        let added = sync_mods_dir(&core, lo.id, &mods).unwrap();
+        assert_eq!(added, 1);
+        assert_eq!(sync_mods_dir(&core, lo.id, &mods).unwrap(), 0, "idempotent");
+        let rows = loadout::entries(&core, lo.id).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].name, "Sodium");
+        assert_eq!(
+            rows[0].source_host.as_deref(),
+            Some(loadout::SOURCE_HOST_MANUAL)
+        );
     }
 
     #[test]
@@ -617,13 +918,202 @@ mod tests {
         let source = fabric_jar(downloads.path(), "sodium.jar", "sodium", "Sodium", "0.5.8");
         let lo = loadout::create(&core, "minecraft", "Survie").unwrap();
 
-        let err = install_jar(&core, lo.id, &source, instance.path()).unwrap_err();
+        let err = install_jar(
+            &core,
+            lo.id,
+            &source,
+            &mods_dir(instance.path()),
+            instance.path(),
+        )
+        .unwrap_err();
 
         assert!(err.contains("déjà installé"), "the refusal says why: {err}");
         assert_eq!(
             fs::read(mods.join("sodium.jar")).unwrap(),
             b"the human's own copy",
             "the existing file is untouched"
+        );
+    }
+
+    #[test]
+    fn set_jar_enabled_renames_jar_to_jar_disabled_and_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let mods = dir.path().join("mods");
+        fs::create_dir_all(&mods).unwrap();
+        let jar = fabric_jar(&mods, "sodium.jar", "sodium", "Sodium", "0.5.8");
+
+        let disabled = set_jar_enabled(&jar, false).unwrap();
+        assert_eq!(disabled, mods.join("sodium.jar.disabled"));
+        assert!(disabled.is_file());
+        assert!(!jar.is_file());
+        assert_eq!(jar_state(&disabled), Some(false));
+
+        let enabled = set_jar_enabled(&disabled, true).unwrap();
+        assert_eq!(enabled, mods.join("sodium.jar"));
+        assert!(enabled.is_file());
+        assert!(!disabled.is_file());
+        assert_eq!(jar_state(&enabled), Some(true));
+
+        // Idempotent when already in the requested state.
+        assert_eq!(set_jar_enabled(&enabled, true).unwrap(), enabled);
+    }
+
+    #[test]
+    fn set_mod_enabled_renames_disk_and_updates_source_path() {
+        let core = Core::open_in_memory().unwrap();
+        let instance = tempfile::tempdir().unwrap();
+        let mods = mods_dir(instance.path());
+        fs::create_dir_all(&mods).unwrap();
+        let _ = fabric_jar(&mods, "sodium.jar", "sodium", "Sodium", "0.5.8");
+        let lo = loadout::create(&core, "minecraft", "Survie").unwrap();
+        assert_eq!(sync_mods_dir(&core, lo.id, &mods).unwrap(), 1);
+        let mod_id = loadout::entries(&core, lo.id).unwrap()[0].mod_id;
+
+        assert!(set_mod_enabled(&core, lo.id, mod_id, false).unwrap());
+        let rows = loadout::entries(&core, lo.id).unwrap();
+        assert!(!rows[0].enabled);
+        assert!(
+            rows[0]
+                .source_path
+                .to_string_lossy()
+                .ends_with("sodium.jar.disabled"),
+            "source_path must track the rename: {:?}",
+            rows[0].source_path
+        );
+        assert!(mods.join("sodium.jar.disabled").is_file());
+        assert!(!mods.join("sodium.jar").exists());
+
+        assert!(set_mod_enabled(&core, lo.id, mod_id, true).unwrap());
+        let rows = loadout::entries(&core, lo.id).unwrap();
+        assert!(rows[0].enabled);
+        assert!(
+            rows[0]
+                .source_path
+                .to_string_lossy()
+                .ends_with("sodium.jar"),
+            "source_path restored: {:?}",
+            rows[0].source_path
+        );
+        assert!(mods.join("sodium.jar").is_file());
+
+        let scanned = scan_dir(&mods).unwrap();
+        assert_eq!(scanned.mods.len(), 1);
+        assert!(scanned.mods[0].enabled);
+    }
+
+    #[test]
+    fn set_mod_enabled_is_a_noop_on_disk_for_virtual_loader_rows() {
+        let core = Core::open_in_memory().unwrap();
+        let lo = loadout::create(&core, "minecraft", "Survie").unwrap();
+        let token = crate::branch_loader::source_token("neoforge", "26.3", Some("1.0"));
+        loadout::import_mods(
+            &core,
+            lo.id,
+            &[loadout::ImportEntry {
+                name: "NeoForge".into(),
+                source_path: PathBuf::from(&token),
+                enabled: true,
+                version: Some("1.0".into()),
+            }],
+        )
+        .unwrap();
+        let mod_id = loadout::entries(&core, lo.id).unwrap()[0].mod_id;
+
+        assert!(set_mod_enabled(&core, lo.id, mod_id, false).unwrap());
+        let rows = loadout::entries(&core, lo.id).unwrap();
+        assert!(!rows[0].enabled);
+        assert_eq!(
+            rows[0].source_path.to_string_lossy(),
+            token,
+            "virtual token must not be rewritten"
+        );
+    }
+
+    #[test]
+    fn remove_mod_trashes_enabled_jar_out_of_mods() {
+        let data = tempfile::tempdir().unwrap();
+        let core = Core::open_in_memory().unwrap();
+        let instance = tempfile::tempdir().unwrap();
+        let mods = mods_dir(instance.path());
+        fs::create_dir_all(&mods).unwrap();
+        let _ = fabric_jar(&mods, "sodium.jar", "sodium", "Sodium", "0.5.8");
+        let lo = loadout::create(&core, "minecraft", "Survie").unwrap();
+        assert_eq!(sync_mods_dir(&core, lo.id, &mods).unwrap(), 1);
+        let mod_id = loadout::entries(&core, lo.id).unwrap()[0].mod_id;
+
+        remove_mod(&core, data.path(), lo.id, mod_id).unwrap();
+
+        assert!(
+            !mods.join("sodium.jar").exists(),
+            "enabled jar must leave mods/"
+        );
+        assert!(
+            !mods.join("sodium.jar.disabled").exists(),
+            "no disabled sibling either"
+        );
+        assert!(
+            loadout::entries(&core, lo.id).unwrap().is_empty(),
+            "row soft-deleted from the table"
+        );
+        let trash = data.path().join("trash");
+        assert!(
+            trash.is_dir()
+                && fs::read_dir(&trash)
+                    .unwrap()
+                    .any(|e| e.unwrap().file_name().to_string_lossy().contains("sodium")),
+            "jar must sit in the data-root trash, not be deleted"
+        );
+    }
+
+    #[test]
+    fn remove_mod_trashes_disabled_jar_out_of_mods() {
+        let data = tempfile::tempdir().unwrap();
+        let core = Core::open_in_memory().unwrap();
+        let instance = tempfile::tempdir().unwrap();
+        let mods = mods_dir(instance.path());
+        fs::create_dir_all(&mods).unwrap();
+        let _ = fabric_jar(&mods, "lithium.jar", "lithium", "Lithium", "0.12");
+        let lo = loadout::create(&core, "minecraft", "Survie").unwrap();
+        assert_eq!(sync_mods_dir(&core, lo.id, &mods).unwrap(), 1);
+        let mod_id = loadout::entries(&core, lo.id).unwrap()[0].mod_id;
+        assert!(set_mod_enabled(&core, lo.id, mod_id, false).unwrap());
+        assert!(mods.join("lithium.jar.disabled").is_file());
+
+        remove_mod(&core, data.path(), lo.id, mod_id).unwrap();
+
+        assert!(!mods.join("lithium.jar").exists());
+        assert!(
+            !mods.join("lithium.jar.disabled").exists(),
+            "disabled jar must leave mods/"
+        );
+        assert!(loadout::entries(&core, lo.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn remove_mod_is_a_noop_on_disk_for_virtual_loader_rows() {
+        let data = tempfile::tempdir().unwrap();
+        let core = Core::open_in_memory().unwrap();
+        let lo = loadout::create(&core, "minecraft", "Survie").unwrap();
+        let token = crate::branch_loader::source_token("neoforge", "26.3", Some("1.0"));
+        loadout::import_mods(
+            &core,
+            lo.id,
+            &[loadout::ImportEntry {
+                name: "NeoForge".into(),
+                source_path: PathBuf::from(&token),
+                enabled: true,
+                version: Some("1.0".into()),
+            }],
+        )
+        .unwrap();
+        let mod_id = loadout::entries(&core, lo.id).unwrap()[0].mod_id;
+
+        remove_mod(&core, data.path(), lo.id, mod_id).unwrap();
+
+        assert!(loadout::entries(&core, lo.id).unwrap().is_empty());
+        assert!(
+            !data.path().join("trash").exists(),
+            "virtual loader has no jar to trash"
         );
     }
 }

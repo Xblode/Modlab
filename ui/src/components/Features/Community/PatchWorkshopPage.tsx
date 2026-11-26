@@ -1,4 +1,4 @@
-import { Crumbs, Panel } from "../../ui";
+import { Button, Crumbs, Panel } from "../../ui";
 
 const PATCHES: readonly {
   mod: string;
@@ -57,14 +57,13 @@ export function PatchWorkshopPage({ onUnwired }: { onUnwired: (label: string) =>
                     par {p.author} · {p.summary}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  className="btn ghost"
+                <Button
+                  variant="ghost"
                   title="Pas encore branché au Core"
                   onClick={() => onUnwired(`Appliquer le patch « ${p.mod} »`)}
                 >
                   Appliquer
-                </button>
+                </Button>
               </div>
               <code className="patch-diff">{p.diff}</code>
             </div>

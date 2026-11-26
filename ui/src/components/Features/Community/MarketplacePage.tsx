@@ -1,5 +1,5 @@
 import { Ico } from "../../../Ico";
-import { Badge, Crumbs, Panel } from "../../ui";
+import { Badge, Button, Crumbs, Panel } from "../../ui";
 
 const MARKET_ITEMS: readonly {
   name: string;
@@ -49,16 +49,15 @@ export function MarketplacePage({ onUnwired }: { onUnwired: (label: string) => v
                       {item.price} MP
                     </span>
                   )}
-                  <button
-                    type="button"
-                    className="btn ghost"
+                  <Button
+                    variant="ghost"
                     title="Pas encore branché au Core"
                     onClick={() =>
                       onUnwired(item.owned ? `Équiper « ${item.name} »` : `Acheter « ${item.name} »`)
                     }
                   >
                     {item.owned ? "Équiper" : "Acheter"}
-                  </button>
+                  </Button>
                 </div>
               </div>
             ))}

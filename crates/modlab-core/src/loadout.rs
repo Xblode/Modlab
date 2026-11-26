@@ -14,7 +14,16 @@ use std::path::PathBuf;
 pub struct Loadout {
     pub id: i64,
     pub name: String,
+    /// The instance this branch belongs to. Branches are not shared across
+    /// instances.
+    pub instance_id: i64,
+    pub instance_name: String,
 }
+
+/// Name of the first branch when the UI creates an instance. French, because
+/// it is a label the human reads. Existing loadouts migrated in place keep
+/// their own name instead of being renamed to this.
+pub const INITIAL_BRANCH_NAME: &str = "principale";
 
 /// A loadout as listed for UI/CLI clients — includes the game id so a
 /// client can group without knowing how the row was stored.
@@ -28,42 +37,39 @@ pub struct LoadoutSummary {
     /// fresh, empty loadout is actually battle-tested — just this module's
     /// starting point until a human says otherwise.
     pub channel: String,
+    /// Parent instance. Every branch of one instance shares this id, and no
+    /// branch of another instance does.
+    pub instance_id: i64,
+    pub instance_name: String,
+    pub mc_loader: Option<String>,
+    pub mc_game_version: Option<String>,
+    pub mc_loader_version: Option<String>,
 }
 
-/// List every loadout in the engine database, oldest first.
+fn summary_from(record: crate::LoadoutRecord) -> LoadoutSummary {
+    LoadoutSummary {
+        id: record.id,
+        game_id: record.game_id,
+        name: record.name,
+        channel: record.channel,
+        instance_id: record.instance_id,
+        instance_name: record.instance_name,
+        mc_loader: record.mc_loader,
+        mc_game_version: record.mc_game_version,
+        mc_loader_version: record.mc_loader_version,
+    }
+}
+
+/// List every live branch, oldest first.
 pub fn list(core: &Core) -> Result<Vec<LoadoutSummary>> {
     Ok(core
         .select_loadouts()?
         .into_iter()
-        .map(|(id, game_id, name, channel)| LoadoutSummary {
-            id,
-            game_id,
-            name,
-            channel,
-        })
+        .map(summary_from)
         .collect())
 }
 
-/// Create a new, empty loadout and journal it as a transaction.
-pub fn create(core: &Core, game_id: &str, name: &str) -> Result<Loadout> {
-    let id = core.insert_loadout(game_id, name)?;
-
-    let mut tx = Transaction::new(core, "loadout.create");
-    tx.step(format!(
-        "created empty loadout '{name}' (id {id}) for game '{game_id}'"
-    ));
-    tx.commit()?;
-
-    Ok(Loadout {
-        id,
-        name: name.to_string(),
-    })
-}
-
-/// Rename a loadout. A metadata edit, not a configuration change — nothing
-/// about which mods are enabled is at stake, so this journals like `create`
-/// rather than going through the snapshot/verify cycle `set_enabled` does.
-pub fn rename(core: &Core, loadout_id: i64, name: &str) -> Result<()> {
+fn validate_name(name: &str) -> Result<String> {
     let name = name.trim();
     if name.is_empty() {
         return Err(CoreError::Message(
@@ -75,9 +81,161 @@ pub fn rename(core: &Core, loadout_id: i64, name: &str) -> Result<()> {
             "le nom ne peut pas dépasser 100 caractères".to_string(),
         ));
     }
-    core.set_loadout_name(loadout_id, name)?;
+    Ok(name.to_string())
+}
+
+/// Whether another live instance of `game_id` already uses this name
+/// (case-insensitive). `except_instance_id` skips one instance (rename).
+fn instance_name_taken(
+    core: &Core,
+    game_id: &str,
+    name: &str,
+    except_instance_id: Option<i64>,
+) -> Result<bool> {
+    let needle = name.trim().to_lowercase();
+    let mut seen = std::collections::HashSet::new();
+    for summary in list(core)? {
+        if summary.game_id != game_id {
+            continue;
+        }
+        if !seen.insert(summary.instance_id) {
+            continue;
+        }
+        if except_instance_id == Some(summary.instance_id) {
+            continue;
+        }
+        if summary.instance_name.to_lowercase() == needle {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn loadout_from(id: i64, name: &str, instance_id: i64, instance_name: &str) -> Loadout {
+    Loadout {
+        id,
+        name: name.to_string(),
+        instance_id,
+        instance_name: instance_name.to_string(),
+    }
+}
+
+/// Create an independent instance whose initial branch keeps `name`.
+///
+/// CLI, MO2 import, Minecraft import and tests call this. Each call is its
+/// own instance, so two calls for the same game never share branches or
+/// snapshot history. The UI's "Créer une instance" uses `create_instance`
+/// instead, which names the first branch [`INITIAL_BRANCH_NAME`].
+pub fn create(core: &Core, game_id: &str, name: &str) -> Result<Loadout> {
+    let instance_id = core.insert_instance(game_id, name)?;
+    let id = core.insert_loadout(game_id, name, instance_id)?;
+
+    let mut tx = Transaction::new(core, "loadout.create");
+    tx.step(format!(
+        "created empty loadout '{name}' (id {id}) for game '{game_id}'"
+    ));
+    tx.commit()?;
+
+    Ok(loadout_from(id, name, instance_id, name))
+}
+
+/// Create an independent instance named `name`, with an empty initial branch
+/// called [`INITIAL_BRANCH_NAME`]. Does not attach that branch to any
+/// instance that already exists.
+pub fn create_instance(core: &Core, game_id: &str, name: &str) -> Result<Loadout> {
+    let instance_name = validate_name(name)?;
+    if instance_name_taken(core, game_id, &instance_name, None)? {
+        return Err(CoreError::Message(
+            "une instance porte déjà ce nom pour ce jeu".to_string(),
+        ));
+    }
+    let instance_id = core.insert_instance(game_id, &instance_name)?;
+    let id = core.insert_loadout(game_id, INITIAL_BRANCH_NAME, instance_id)?;
+
+    let mut tx = Transaction::new(core, "loadout.create");
+    tx.step(format!(
+        "created instance '{instance_name}' with branch '{INITIAL_BRANCH_NAME}' (id {id}) for game '{game_id}'"
+    ));
+    tx.commit()?;
+
+    Ok(loadout_from(
+        id,
+        INITIAL_BRANCH_NAME,
+        instance_id,
+        &instance_name,
+    ))
+}
+
+/// Create a branch of the instance that owns `from_loadout_id`.
+///
+/// Copies that branch's mod list (membership, enabled, order) onto a new
+/// loadout row. Snapshots are not copied: the new branch starts at revision
+/// 0, and Enregistrer / Annuler on the source branch keep using the source
+/// id. The new branch is invisible to every other instance.
+pub fn create_branch(core: &Core, from_loadout_id: i64, name: &str) -> Result<Loadout> {
+    let name = validate_name(name)?;
+    let source = core
+        .select_loadout(from_loadout_id)?
+        .ok_or_else(|| CoreError::Message(format!("branche {from_loadout_id} introuvable")))?;
+    let taken = list(core)?
+        .into_iter()
+        .any(|branch| branch.instance_id == source.instance_id && branch.name == name);
+    if taken {
+        return Err(CoreError::Message(
+            "une branche porte déjà ce nom dans cette instance".to_string(),
+        ));
+    }
+    let id = core.insert_loadout(&source.game_id, &name, source.instance_id)?;
+    core.copy_loadout_entries(from_loadout_id, id)?;
+    if source.channel != "stable" {
+        core.set_loadout_channel(id, &source.channel)?;
+    }
+
+    let mut tx = Transaction::new(core, "loadout.create_branch");
+    tx.step(format!(
+        "created branch '{name}' (id {id}) of instance {} from loadout {from_loadout_id}",
+        source.instance_id
+    ));
+    tx.commit()?;
+
+    Ok(loadout_from(
+        id,
+        &name,
+        source.instance_id,
+        &source.instance_name,
+    ))
+}
+
+/// Rename a loadout. A metadata edit, not a configuration change — nothing
+/// about which mods are enabled is at stake, so this journals like `create`
+/// rather than going through the snapshot/verify cycle `set_enabled` does.
+pub fn rename(core: &Core, loadout_id: i64, name: &str) -> Result<()> {
+    let name = validate_name(name)?;
+    core.set_loadout_name(loadout_id, &name)?;
     let mut tx = Transaction::new(core, "loadout.rename");
     tx.step(format!("loadout {loadout_id} renommé en « {name} »"));
+    tx.commit()?;
+    Ok(())
+}
+
+/// Rename the instance that owns `loadout_id`. The branch's own name stays.
+/// The sidebar renames instances; the branch selector shows branch names.
+pub fn rename_instance_of_loadout(core: &Core, loadout_id: i64, name: &str) -> Result<()> {
+    let name = validate_name(name)?;
+    let record = core.select_loadout(loadout_id)?.ok_or_else(|| {
+        CoreError::Message(format!("instance de la branche {loadout_id} introuvable"))
+    })?;
+    if instance_name_taken(core, &record.game_id, &name, Some(record.instance_id))? {
+        return Err(CoreError::Message(
+            "une instance porte déjà ce nom pour ce jeu".to_string(),
+        ));
+    }
+    core.set_instance_name(record.instance_id, &name)?;
+    let mut tx = Transaction::new(core, "instance.rename");
+    tx.step(format!(
+        "instance {} renommée en « {name} »",
+        record.instance_id
+    ));
     tx.commit()?;
     Ok(())
 }
@@ -86,6 +244,87 @@ pub fn rename(core: &Core, loadout_id: i64, name: &str) -> Result<()> {
 /// loadout's maturity ("does this build still move?") is generic across
 /// every game, same as the transaction cycle itself.
 pub const CHANNELS: [&str; 3] = ["stable", "beta", "alpha"];
+
+/// Minecraft loader ids the UI may store on a branch.
+pub const MC_LOADERS: [&str; 5] = ["vanilla", "fabric", "forge", "neoforge", "quilt"];
+
+fn normalize_mc_loader(loader: &str) -> Result<String> {
+    let loader = loader.trim().to_lowercase();
+    if loader.is_empty() {
+        return Err(CoreError::Message("loader requis".to_string()));
+    }
+    if MC_LOADERS.iter().any(|id| *id == loader) {
+        Ok(loader)
+    } else {
+        Err(CoreError::Message(format!("loader inconnu : {loader}")))
+    }
+}
+
+fn validate_mc_version(value: &str) -> Result<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(CoreError::Message("version Minecraft requise".to_string()));
+    }
+    if value.chars().count() > 32 {
+        return Err(CoreError::Message(
+            "version Minecraft trop longue".to_string(),
+        ));
+    }
+    Ok(value.to_string())
+}
+
+/// Set which Minecraft loader this branch targets.
+pub fn set_mc_loader(core: &Core, loadout_id: i64, loader: &str) -> Result<()> {
+    let loader = normalize_mc_loader(loader)?;
+    core.set_loadout_mc_loader(loadout_id, Some(&loader))?;
+    core.set_loadout_mc_loader_version(loadout_id, None)?;
+    let mut tx = Transaction::new(core, "loadout.set_mc_loader");
+    tx.step(format!("loadout {loadout_id} → loader {loader}"));
+    tx.commit()?;
+    Ok(())
+}
+
+/// Set the Minecraft game version for this branch.
+///
+/// Changing the game version clears the loader choice and its version — the
+/// human must pick again (except vanilla, which needs no loader version).
+pub fn set_mc_game_version(core: &Core, loadout_id: i64, version: &str) -> Result<()> {
+    let version = validate_mc_version(version)?;
+    let record = core
+        .select_loadout(loadout_id)?
+        .ok_or_else(|| CoreError::Message("branche introuvable".to_string()))?;
+    let version_changed = record.mc_game_version.as_deref() != Some(version.as_str());
+    core.set_loadout_mc_game_version(loadout_id, Some(&version))?;
+    if version_changed {
+        core.set_loadout_mc_loader(loadout_id, None)?;
+        core.set_loadout_mc_loader_version(loadout_id, None)?;
+    }
+    let mut tx = Transaction::new(core, "loadout.set_mc_game_version");
+    tx.step(format!("loadout {loadout_id} → Minecraft {version}"));
+    tx.commit()?;
+    Ok(())
+}
+
+/// Set the mod-loader version (Fabric, Forge, …). Cleared when loader is vanilla.
+pub fn set_mc_loader_version(core: &Core, loadout_id: i64, version: &str) -> Result<()> {
+    let version = version.trim();
+    if version.is_empty() {
+        return Err(CoreError::Message("version du loader requise".to_string()));
+    }
+    let record = core
+        .select_loadout(loadout_id)?
+        .ok_or_else(|| CoreError::Message("branche introuvable".to_string()))?;
+    if record.mc_loader.as_deref() == Some("vanilla") {
+        return Err(CoreError::Message(
+            "Vanilla n'a pas de version de loader".to_string(),
+        ));
+    }
+    core.set_loadout_mc_loader_version(loadout_id, Some(version))?;
+    let mut tx = Transaction::new(core, "loadout.set_mc_loader_version");
+    tx.step(format!("loadout {loadout_id} → loader {version}"));
+    tx.commit()?;
+    Ok(())
+}
 
 /// Set a loadout's channel. Refuses anything outside `CHANNELS` rather than
 /// storing it: the UI's channel picker and the `.chan.*`/`ChannelBadge`
@@ -108,12 +347,7 @@ pub fn list_trash(core: &Core) -> Result<Vec<LoadoutSummary>> {
     Ok(core
         .select_deleted_loadouts()?
         .into_iter()
-        .map(|(id, game_id, name, channel)| LoadoutSummary {
-            id,
-            game_id,
-            name,
-            channel,
-        })
+        .map(summary_from)
         .collect())
 }
 
@@ -156,23 +390,25 @@ pub struct ImportEntry {
 
 /// Import a batch of mods into a loadout, preserving the order they were
 /// given in. Each becomes a new `mod_` row (no dedup against mods already
-/// imported elsewhere — see `Core::insert_mod`) plus a `loadout_entry` row.
-/// The whole batch is journaled as one transaction. Returns how many were
-/// imported.
+/// imported elsewhere — see `Core::insert_mod`) plus a `loadout_entry` row
+/// appended after any entries already present. The whole batch is journaled
+/// as one transaction. Returns how many were imported.
 pub fn import_mods(core: &Core, loadout_id: i64, entries: &[ImportEntry]) -> Result<usize> {
     let mut tx = Transaction::new(core, "loadout.import_mods");
-    for (position, entry) in entries.iter().enumerate() {
+    let base = core.loadout_entry_count(loadout_id)?;
+    for (offset, entry) in entries.iter().enumerate() {
         let mod_id = core.insert_mod(
             &entry.name,
             &entry.source_path.display().to_string(),
             entry.version.as_deref(),
         )?;
-        core.insert_loadout_entry(
-            loadout_id,
-            mod_id,
-            entry.enabled,
-            i64::try_from(position).expect("position fits in i64: no loadout has billions of mods"),
-        )?;
+        // An import lands the mod already installed. The clock is the import
+        // time when the source has no older install date to offer. A file
+        // (a Minecraft jar) also records its length; a folder does not.
+        crate::mod_measure::note_imported(core, mod_id, &entry.source_path)?;
+        let position = base
+            + i64::try_from(offset).expect("position fits in i64: no loadout has billions of mods");
+        core.insert_loadout_entry(loadout_id, mod_id, entry.enabled, position)?;
         tx.step(format!(
             "imported '{}' ({})",
             entry.name,
@@ -181,6 +417,16 @@ pub fn import_mods(core: &Core, loadout_id: i64, entries: &[ImportEntry]) -> Res
     }
     tx.commit()?;
     Ok(entries.len())
+}
+
+/// Host token for a mod the human added from disk (file picker or a jar
+/// already sitting in `mods/`), with no platform page.
+pub const SOURCE_HOST_MANUAL: &str = "manual";
+
+/// Mark one mod as a manual disk add. Does not blank a host or page already
+/// stored by a higher layer.
+pub fn mark_manual_source(core: &Core, mod_id: i64) -> Result<()> {
+    core.set_mod_source(mod_id, Some(SOURCE_HOST_MANUAL), None, None)
 }
 
 /// One mod as attached to a loadout, read back from storage.
@@ -198,17 +444,44 @@ pub struct LoadoutEntryRow {
     /// Whatever version the mod was imported/installed with, if its source
     /// declared one — `None` when it didn't (most Skyrim imports today).
     pub version: Option<String>,
-    /// `"archived"` — captured by the browser, archive not extracted yet, so
-    /// the mod cannot be enabled — or `"installed"`. See `ModStatus`.
+    /// `"downloading"` — the browser has started the transfer, the file is
+    /// not here yet — `"archived"` once it has landed and not been extracted,
+    /// or `"installed"`. A downloading or archived mod cannot be enabled.
     pub status: String,
     /// A free tag the human typed, `None` until they do.
     pub category: Option<String>,
     /// Where the source archive sits, for anything that came from a capture.
     pub archive_path: Option<PathBuf>,
+    /// Opaque host token stored at download (`nexus`, `curseforge`, …).
+    pub source_host: Option<String>,
+    /// Page to reopen in the embedded browser. Not the file URL.
+    pub page_url: Option<String>,
+    /// Game versions the file declared. Empty when it declared none.
+    pub game_versions: Vec<String>,
+    /// Dependencies the file declared.
+    pub dependencies: Vec<crate::game_adapter::DeclaredDependency>,
+    /// Loader ids the file or its name stated. Empty when none were stated.
+    pub loaders: Vec<String>,
+    /// Category text as the file wrote it, before any game list translates it.
+    pub category_raw: Option<String>,
+    /// Nexus category number when the file had one.
+    pub category_nexus_id: Option<String>,
+    /// Remote mod id read from the file name or from `meta.ini`.
+    pub nexus_mod_id: Option<String>,
+    pub author: Option<String>,
+    pub website: Option<String>,
+    /// Byte length of the mod file (archive or jar). `None` until known.
+    pub size_bytes: Option<i64>,
+    /// When the mod became installed, ISO 8601 UTC. `None` before that.
+    pub installed_at: Option<String>,
+    /// When the mod was downloaded or otherwise obtained, ISO 8601 UTC.
+    /// `None` when it could not be recovered. Stays after the archive goes.
+    pub downloaded_at: Option<String>,
 }
 
-/// The two states a mod row can be in. Stored as text so a future third
-/// state doesn't need a migration of existing rows.
+/// States a mod row can be in. Stored as text so another state doesn't need
+/// a migration of existing rows.
+pub const STATUS_DOWNLOADING: &str = "downloading";
 pub const STATUS_ARCHIVED: &str = "archived";
 pub const STATUS_INSTALLED: &str = "installed";
 
@@ -227,6 +500,19 @@ pub fn entries(core: &Core, loadout_id: i64) -> Result<Vec<LoadoutEntryRow>> {
             status: r.status,
             category: r.category,
             archive_path: r.archive_path.map(PathBuf::from),
+            source_host: r.source_host,
+            page_url: r.page_url,
+            game_versions: r.game_versions,
+            dependencies: r.dependencies,
+            loaders: r.loaders,
+            category_raw: r.category_raw,
+            category_nexus_id: r.category_nexus_id,
+            nexus_mod_id: r.nexus_mod_id,
+            author: r.author,
+            website: r.website,
+            size_bytes: r.size_bytes,
+            installed_at: r.installed_at,
+            downloaded_at: r.downloaded_at,
         })
         .collect())
 }
@@ -421,6 +707,40 @@ mod tests {
 
         assert_eq!(imported, 2);
         assert_eq!(core.loadout_entry_count(loadout.id).unwrap(), 2);
+    }
+
+    #[test]
+    fn import_appends_after_existing_entries() {
+        let core = Core::open_in_memory().unwrap();
+        let loadout = create(&core, "skyrimse", "Main 2026").unwrap();
+        import_mods(
+            &core,
+            loadout.id,
+            &[ImportEntry {
+                name: "First".into(),
+                source_path: "F:/mods/First".into(),
+                enabled: true,
+                version: None,
+            }],
+        )
+        .unwrap();
+        import_mods(
+            &core,
+            loadout.id,
+            &[ImportEntry {
+                name: "Second".into(),
+                source_path: "F:/mods/Second".into(),
+                enabled: true,
+                version: None,
+            }],
+        )
+        .unwrap();
+        let rows = entries(&core, loadout.id).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].name, "First");
+        assert_eq!(rows[0].position, 0);
+        assert_eq!(rows[1].name, "Second");
+        assert_eq!(rows[1].position, 1);
     }
 
     #[test]
@@ -780,5 +1100,121 @@ mod tests {
 
         crate::transaction::rollback_loadout(&core, lo).unwrap();
         assert_eq!(names(&core, lo), "ABCDE");
+    }
+
+    #[test]
+    fn create_instance_is_independent_and_starts_on_principale() {
+        let core = Core::open_in_memory().unwrap();
+        let first = create(&core, "skyrimse", "Déjà là").unwrap();
+        let created = create_instance(&core, "skyrimse", "Labo météo").unwrap();
+
+        assert_eq!(created.name, INITIAL_BRANCH_NAME);
+        assert_eq!(created.instance_name, "Labo météo");
+        assert_ne!(created.instance_id, first.instance_id);
+
+        let branches = list(&core).unwrap();
+        let own: Vec<_> = branches
+            .iter()
+            .filter(|b| b.instance_id == created.instance_id)
+            .collect();
+        assert_eq!(own.len(), 1);
+        assert_eq!(own[0].name, "principale");
+    }
+
+    #[test]
+    fn create_instance_rejects_duplicate_name_same_game() {
+        let core = Core::open_in_memory().unwrap();
+        create_instance(&core, "minecraft", "Nouvelle instance").unwrap();
+        let err = create_instance(&core, "minecraft", "nouvelle instance").unwrap_err();
+        assert!(
+            err.to_string().contains("déjà ce nom"),
+            "expected duplicate name error, got {err}"
+        );
+        // Same label is fine on another game.
+        create_instance(&core, "skyrimse", "Nouvelle instance").unwrap();
+    }
+
+    #[test]
+    fn changing_mc_game_version_clears_loader_choice() {
+        let core = Core::open_in_memory().unwrap();
+        let created = create_instance(&core, "minecraft", "Labo").unwrap();
+        set_mc_game_version(&core, created.id, "1.21.1").unwrap();
+        set_mc_loader(&core, created.id, "fabric").unwrap();
+        set_mc_loader_version(&core, created.id, "0.16.0").unwrap();
+
+        set_mc_game_version(&core, created.id, "1.20.1").unwrap();
+        let row = list(&core)
+            .unwrap()
+            .into_iter()
+            .find(|b| b.id == created.id)
+            .unwrap();
+        assert_eq!(row.mc_game_version.as_deref(), Some("1.20.1"));
+        assert!(row.mc_loader.is_none());
+        assert!(row.mc_loader_version.is_none());
+    }
+
+    #[test]
+    fn a_branch_stays_inside_its_instance_and_keeps_histories_apart() {
+        let core = Core::open_in_memory().unwrap();
+        let origin = create(&core, "skyrimse", "Main").unwrap();
+        let other = create(&core, "skyrimse", "Autre").unwrap();
+        import_mods(
+            &core,
+            origin.id,
+            &[ImportEntry {
+                name: "SkyUI".into(),
+                source_path: "F:/mods/SkyUI".into(),
+                enabled: true,
+                version: None,
+            }],
+        )
+        .unwrap();
+
+        let branched = create_branch(&core, origin.id, "essai").unwrap();
+
+        assert_eq!(branched.instance_id, origin.instance_id);
+        assert_ne!(branched.instance_id, other.instance_id);
+        assert_eq!(entries(&core, branched.id).unwrap().len(), 1);
+        assert_eq!(entries(&core, other.id).unwrap().len(), 0);
+
+        crate::transaction::snapshot_loadout(&core, origin.id).unwrap();
+        assert_eq!(
+            crate::transaction::revision_count(&core, origin.id).unwrap(),
+            1
+        );
+        assert_eq!(
+            crate::transaction::revision_count(&core, branched.id).unwrap(),
+            0,
+            "the new branch does not inherit the source snapshots"
+        );
+
+        set_enabled(
+            &core,
+            branched.id,
+            entries(&core, branched.id).unwrap()[0].mod_id,
+            false,
+        )
+        .unwrap();
+        assert!(
+            entries(&core, origin.id).unwrap()[0].enabled,
+            "toggling the branch does not change the source branch"
+        );
+
+        delete(&core, origin.id).unwrap();
+        let left = list(&core).unwrap();
+        assert!(left.iter().all(|b| b.instance_id == other.instance_id));
+        assert_eq!(
+            left.len(),
+            1,
+            "both branches of the deleted instance are gone"
+        );
+    }
+
+    #[test]
+    fn refuses_a_second_branch_with_the_same_name() {
+        let core = Core::open_in_memory().unwrap();
+        let origin = create(&core, "skyrimse", "Main").unwrap();
+        let err = create_branch(&core, origin.id, "Main").unwrap_err();
+        assert!(err.to_string().contains("déjà ce nom"));
     }
 }

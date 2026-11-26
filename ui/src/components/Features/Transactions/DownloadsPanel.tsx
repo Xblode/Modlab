@@ -1,14 +1,9 @@
 import type { DetectedGame, Download, LoadoutDto } from "../../../api";
+import { formatDownloadProgress, type DownloadBytes } from "../../../downloadProgress";
+import { formatBytes } from "../../../formatBytes";
 import { Ico } from "../../../Ico";
 import { IconButton, SideEmpty } from "../../ui";
 import type { BottomTab } from "./BottomTab";
-
-function formatSize(bytes: number | null): string {
-  if (bytes == null) return "—";
-  if (bytes < 1024) return `${bytes} o`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} Ko`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
-}
 
 type Group = {
   key: string;
@@ -59,6 +54,7 @@ function groupByLoadout(
  */
 export function DownloadsPanel({
   downloads,
+  progressById,
   loadouts,
   games,
   onClose,
@@ -66,6 +62,8 @@ export function DownloadsPanel({
   onOpenLoadout,
 }: {
   downloads: Download[] | null;
+  /** Live byte counts keyed by download id. Absent once the file has landed. */
+  progressById?: ReadonlyMap<number, DownloadBytes>;
   loadouts: LoadoutDto[];
   games: DetectedGame[];
   onClose: () => void;
@@ -119,16 +117,21 @@ export function DownloadsPanel({
               )}
             </div>
             <div className="d">
-              {group.downloads.map((d) => (
-                <div key={d.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <Ico name="box" className="sm" />
-                  <span style={{ flex: 1 }}>{d.fileName}</span>
-                  <span className="muted">{formatSize(d.sizeBytes)}</span>
-                  <span className="muted">
-                    {new Date(d.capturedAt).toLocaleString("fr-FR")}
-                  </span>
-                </div>
-              ))}
+              {group.downloads.map((d) => {
+                const live = d.sizeBytes == null ? progressById?.get(d.id) : undefined;
+                return (
+                  <div key={d.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <Ico name="box" className="sm" />
+                    <span style={{ flex: 1 }}>{d.fileName}</span>
+                    <span className="muted num">
+                      {live ? formatDownloadProgress(live) : formatBytes(d.sizeBytes)}
+                    </span>
+                    <span className="muted">
+                      {new Date(d.capturedAt).toLocaleString("fr-FR")}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         ))}

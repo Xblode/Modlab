@@ -1,0 +1,23 @@
+/* Title-bar tools (browser, IA, console, search). Same footprint as IconButton size md. */
+.titlebar .tb-actions > .tb-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--ctl-sm);
+  height: var(--ctl-sm);
+  padding: 0;
+  border-radius: var(--r-ctl);
+  color: var(--t2);
+}
+
+.titlebar .tb-actions > .tb-tool:hover,
+.titlebar .tb-actions > .tb-tool[aria-pressed="true"] {
+  background: var(--c3);
+  color: var(--t1);
+}
+
+.titlebar .tb-actions > .tb-tool > .ico {
+  width: 18px;
+  height: 18px;
+}

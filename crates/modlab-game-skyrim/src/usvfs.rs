@@ -38,6 +38,7 @@
 
 use std::ffi::{c_void, CString};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use libloading::{Library, Symbol};
@@ -80,6 +81,8 @@ pub enum UsvfsError {
     GetProcessListFailed,
     #[error("no process ever registered with the VFS — the launch likely failed silently")]
     NeverRegistered,
+    #[error("session end was requested before the game exited")]
+    SessionStopRequested,
     #[error(
         "usvfs instance '{instance}' disconnect could not be confirmed — {remaining} process(es) still registered"
     )]
@@ -394,7 +397,7 @@ impl Vfs {
     /// anything either of those spawns in turn. `GetVFSProcessList` fills a
     /// caller-provided buffer; 256 slots is far more than any real modded
     /// Skyrim session needs (loader + game + maybe a launcher helper).
-    fn registered_process_count(&self) -> Result<usize, UsvfsError> {
+    fn registered_pids(&self) -> Result<Vec<u32>, UsvfsError> {
         let mut pids = [0u32; 256];
         let mut count = pids.len();
 
@@ -406,7 +409,16 @@ impl Vfs {
         if ok == 0 {
             return Err(UsvfsError::GetProcessListFailed);
         }
-        Ok(count)
+        Ok(pids[..count].to_vec())
+    }
+
+    fn registered_process_count(&self) -> Result<usize, UsvfsError> {
+        Ok(self.registered_pids()?.len())
+    }
+
+    /// PIDs USVFS still tracks for this instance (loader, game, children).
+    pub fn tracked_pids(&self) -> Result<Vec<u32>, UsvfsError> {
+        self.registered_pids()
     }
 
     /// Block until no process is registered against this VFS instance any
@@ -426,8 +438,24 @@ impl Vfs {
         poll_interval: Duration,
         startup_timeout: Duration,
     ) -> Result<(), UsvfsError> {
+        self.wait_for_session_end_cancellable(poll_interval, startup_timeout, None)
+    }
+
+    /// Like `wait_for_session_end`, but aborts when `stop` is set, and treats
+    /// stale VFS registrations (tracked PIDs no longer alive) as session end.
+    pub fn wait_for_session_end_cancellable(
+        &self,
+        poll_interval: Duration,
+        startup_timeout: Duration,
+        stop: Option<&AtomicBool>,
+    ) -> Result<(), UsvfsError> {
+        let stop_requested = || stop.is_some_and(|f| f.load(Ordering::SeqCst));
+
         let start = std::time::Instant::now();
         loop {
+            if stop_requested() {
+                return Err(UsvfsError::SessionStopRequested);
+            }
             if self.registered_process_count()? > 0 {
                 break;
             }
@@ -438,8 +466,15 @@ impl Vfs {
         }
 
         loop {
+            if stop_requested() {
+                return Err(UsvfsError::SessionStopRequested);
+            }
             std::thread::sleep(poll_interval);
-            if self.registered_process_count()? == 0 {
+            let pids = self.registered_pids()?;
+            if pids.is_empty() {
+                return Ok(());
+            }
+            if pids.iter().all(|pid| !process_alive(*pid)) {
                 return Ok(());
             }
         }
@@ -565,9 +600,56 @@ impl Drop for Vfs {
     }
 }
 
+/// Absolute path for a USVFS link.
+///
+/// The DLL keeps the path it is given. A relative one is resolved later
+/// inside the hooked process, whose current directory is the game's install
+/// root — not ModLab's. Mod folders are often stored that way
+/// (`.modlab-dev\mods\10`), so a relative link points at a folder that does
+/// not exist next to `SkyrimSE.exe` and SKSE scans an empty
+/// `Data\SKSE\Plugins`.
+/// Whether Windows still has a process with this PID (used to detect stale
+/// USVFS registrations after the game was closed outside ModLab).
+#[cfg(windows)]
+pub fn process_pid_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    const ERROR_ACCESS_DENIED: u32 = 5;
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return windows_sys::Win32::Foundation::GetLastError() == ERROR_ACCESS_DENIED;
+        }
+        CloseHandle(handle);
+        true
+    }
+}
+
+#[cfg(not(windows))]
+pub fn process_pid_alive(_pid: u32) -> bool {
+    false
+}
+
+#[cfg(windows)]
+fn process_alive(pid: u32) -> bool {
+    process_pid_alive(pid)
+}
+
+#[cfg(not(windows))]
+fn process_alive(pid: u32) -> bool {
+    process_pid_alive(pid)
+}
+
+fn path_for_vfs(path: &Path) -> PathBuf {
+    std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 fn to_wide(path: &Path) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
-    path.as_os_str()
+    path_for_vfs(path)
+        .as_os_str()
         .encode_wide()
         .chain(std::iter::once(0))
         .collect()
@@ -595,8 +677,19 @@ mod tests {
     /// Benjamin's real MO2 install — every test here is a no-op (silently
     /// skipped) on a machine without it, same pattern used throughout this
     /// project for real-data tests (see `mo2.rs`, `installer.rs`).
+    /// The folder on this machine is `Skyrim\Mod Organazer`, not the older
+    /// `Skyrim Modding\...` spelling still kept as a fallback.
     fn real_dll_path() -> PathBuf {
-        PathBuf::from(r"F:\_Modding\Skyrim Modding\Mod Organazer\usvfs_x64.dll")
+        for candidate in [
+            r"F:\_Modding\Skyrim\Mod Organazer\usvfs_x64.dll",
+            r"F:\_Modding\Skyrim Modding\Mod Organazer\usvfs_x64.dll",
+        ] {
+            let path = PathBuf::from(candidate);
+            if path.is_file() {
+                return path;
+            }
+        }
+        PathBuf::from(r"F:\_Modding\Skyrim\Mod Organazer\usvfs_x64.dll")
     }
 
     #[test]
@@ -737,6 +830,19 @@ mod tests {
             status: modlab_core::loadout::STATUS_INSTALLED.to_string(),
             category: None,
             archive_path: None,
+            source_host: None,
+            page_url: None,
+            game_versions: Vec::new(),
+            dependencies: Vec::new(),
+            loaders: Vec::new(),
+            category_raw: None,
+            category_nexus_id: None,
+            nexus_mod_id: None,
+            author: None,
+            website: None,
+            size_bytes: None,
+            installed_at: None,
+            downloaded_at: None,
         }
     }
 
@@ -924,5 +1030,150 @@ mod tests {
             "patched-by-mod",
             "a mod's file must still win over a same-named base-game file"
         );
+    }
+
+    /// What a hooked process sees in `directory` when its current directory
+    /// is `cwd` — the game's install root, not ModLab's. `cmd dir` ends up
+    /// in `NtQueryDirectoryFile`, the same call SKSE's plugin scan reaches.
+    fn hooked_listing(vfs: &Vfs, directory: &Path, cwd: &Path) -> String {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{WaitForSingleObject, CREATE_NO_WINDOW};
+
+        let out_dir = tempfile::tempdir().expect("out dir");
+        let out_file = out_dir.path().join("listing.txt");
+        let cmd = format!(
+            "cmd.exe /c dir /b \"{}\" > \"{}\" 2>&1",
+            directory.display(),
+            out_file.display()
+        );
+        let process = match vfs.spawn_hooked(&cmd, Some(cwd), CREATE_NO_WINDOW) {
+            Ok(process) => process,
+            Err(e) => return format!("launch error: {e}"),
+        };
+        let wait = unsafe { WaitForSingleObject(process.hProcess, 15_000) };
+        unsafe {
+            CloseHandle(process.hProcess);
+            CloseHandle(process.hThread);
+        }
+        if wait != 0 {
+            return format!("wait failed ({wait})");
+        }
+        // `dir` writes errors in the console code page, not UTF-8.
+        match fs::read(&out_file) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(e) => format!("read error: {e}"),
+        }
+    }
+
+    fn write_engine_fixes(mod_dir: &Path) {
+        fs::create_dir_all(mod_dir.join("SKSE/Plugins")).unwrap();
+        fs::write(mod_dir.join("SKSE/Plugins/EngineFixes.dll"), b"fake dll").unwrap();
+    }
+
+    /// SKSE only loads `Data\SKSE\Plugins\*.dll`. A mod that ships
+    /// `SKSE\Plugins\EngineFixes.dll` must show up there for the hooked
+    /// game, including when the mod's folder is stored as a path relative
+    /// to ModLab (`.modlab-dev\mods\10`) while the game's own current
+    /// directory is the install root — the layout of a real launch.
+    #[test]
+    fn deployed_skse_plugins_are_visible_to_the_hooked_process() {
+        let dll = real_dll_path();
+        if !dll.is_file() {
+            return;
+        }
+
+        let game = tempfile::tempdir().unwrap();
+        let data = game.path().join("Data");
+        fs::create_dir_all(&data).unwrap();
+        fs::write(data.join("Skyrim.esm"), b"base").unwrap();
+
+        let abs_mod = tempfile::tempdir().unwrap();
+        write_engine_fixes(abs_mod.path());
+
+        let rel_root = std::env::current_dir().unwrap().join(".skse-rel-probe");
+        let _cleanup = RelCleanup(rel_root.clone());
+        let rel_mod = rel_root.join("mod");
+        write_engine_fixes(&rel_mod);
+        // Same shape as a row stored from `resolve_data_root()` when the
+        // data root is the `.modlab-dev` sandbox: not absolute.
+        let rel_source = PathBuf::from(r".skse-rel-probe\mod");
+
+        let work_plugins = |root: &Path| root.join("SKSE").join("Plugins");
+
+        let _guard = VFS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let vfs = Vfs::create(&dll, "modlab_test_skse_plugins").expect("should connect to usvfs");
+
+        deploy_enabled_mods(
+            &vfs,
+            &[entry("Engine Fixes", abs_mod.path().to_path_buf(), 1)],
+            &data,
+        )
+        .expect("absolute deploy");
+        let absolute = hooked_listing(&vfs, &data.join("SKSE").join("Plugins"), game.path());
+
+        // Fresh destination so the absolute link above cannot hide a miss.
+        let game_rel = tempfile::tempdir().unwrap();
+        let data_rel = game_rel.path().join("Data");
+        fs::create_dir_all(&data_rel).unwrap();
+        fs::write(data_rel.join("Skyrim.esm"), b"base").unwrap();
+        deploy_enabled_mods(&vfs, &[entry("Engine Fixes", rel_source, 1)], &data_rel)
+            .expect("relative deploy");
+        let relative = hooked_listing(
+            &vfs,
+            &data_rel.join("SKSE").join("Plugins"),
+            game_rel.path(),
+        );
+
+        // The loader is the hooked process; the game is its child. SKSE
+        // scans plugins in that child (`CreateProcessA` in skse64_loader).
+        let child_out = tempfile::tempdir().unwrap();
+        let child_listing = child_out.path().join("listing.txt");
+        let bat = child_out.path().join("child.bat");
+        fs::write(
+            &bat,
+            format!(
+                "@echo off\r\ncmd.exe /c dir /b \"{}\" > \"{}\" 2>&1\r\n",
+                data.join("SKSE").join("Plugins").display(),
+                child_listing.display()
+            ),
+        )
+        .unwrap();
+        let child_cmd = format!("cmd.exe /c \"{}\"", bat.display());
+        let child_proc = vfs
+            .spawn_hooked(&child_cmd, Some(game.path()), CREATE_NO_WINDOW_TEST)
+            .expect("child launch");
+        unsafe {
+            windows_sys::Win32::System::Threading::WaitForSingleObject(child_proc.hProcess, 15_000);
+            windows_sys::Win32::Foundation::CloseHandle(child_proc.hProcess);
+            windows_sys::Win32::Foundation::CloseHandle(child_proc.hThread);
+        }
+        let grandchild =
+            fs::read_to_string(&child_listing).unwrap_or_else(|e| format!("read error: {e}"));
+
+        let sees = |listing: &str| listing.to_ascii_lowercase().contains("enginefixes.dll");
+        assert!(
+            sees(&absolute) && sees(&relative) && sees(&grandchild),
+            "SKSE plugin folder not visible\nabsolute deploy:\n{absolute}\nrelative deploy:\n{relative}\ngrandchild of the hooked loader:\n{grandchild}\nmods rooted at {}",
+            work_plugins(abs_mod.path()).display()
+        );
+    }
+
+    /// `CREATE_NO_WINDOW` for the grandchild probe. Re-imported here because
+    /// the parent module's import is private to it.
+    const CREATE_NO_WINDOW_TEST: u32 = 0x0800_0000;
+
+    #[test]
+    fn a_relative_mod_path_is_absolute_before_it_reaches_usvfs() {
+        let rel = Path::new(r".modlab-dev\mods\10");
+        let abs = super::path_for_vfs(rel);
+        assert!(abs.is_absolute(), "{abs:?}");
+        assert!(abs.ends_with(Path::new("mods").join("10")), "{abs:?}");
+    }
+
+    struct RelCleanup(PathBuf);
+    impl Drop for RelCleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
     }
 }

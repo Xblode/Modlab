@@ -323,7 +323,9 @@ pub fn find_log_dir() -> Option<PathBuf> {
     Some(PathBuf::from(profile).join(r"Documents\My Games\Skyrim Special Edition\SKSE"))
 }
 
-/// One SKSE plugin the game refused (or failed) to load, with SKSE's own words.
+/// One SKSE plugin the game refused (or failed) to load.
+/// `reason` is French when the journal line is one SKSE's own messages we
+/// know (`explain_rejection`); otherwise it is SKSE's words unchanged.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RejectedPlugin {
     pub name: String,
@@ -342,6 +344,9 @@ pub struct SessionReport {
     pub skse_version: Option<String>,
     /// `init complete` was reached.
     pub init_complete: bool,
+    /// `productVersionStr` from `skse64_loader.log` (`1.7.104`), when that
+    /// journal belongs to this session. Used only to phrase a rejection.
+    pub game_version: Option<String>,
     /// Plugin DLLs that reported `loaded correctly`.
     pub loaded: Vec<String>,
     pub rejected: Vec<RejectedPlugin>,
@@ -471,12 +476,69 @@ fn parse_loader_log(text: &str, report: &mut SessionReport) {
     for line in text.lines().map(str::trim) {
         if line == "launching" {
             report.loader_launched = true;
+        } else if let Some(version) = line.strip_prefix("productVersionStr = ") {
+            report.game_version = Some(short_product_version(version.trim()));
         }
         let lower = line.to_ascii_lowercase();
         if LOADER_PROBLEM_WORDS.iter().any(|w| lower.contains(w)) {
             report.loader_notes.push(line.to_string());
         }
     }
+}
+
+/// `1.7.104.0` → `1.7.104`. A non-zero fourth component is kept.
+fn short_product_version(raw: &str) -> String {
+    let mut parts: Vec<&str> = raw.split('.').collect();
+    if parts.len() == 4 && parts[3] == "0" {
+        parts.pop();
+    }
+    parts.join(".")
+}
+
+/// SKSE writes English. The balance sheet is French. Unknown lines stay as
+/// SKSE wrote them — inventing a cause would be worse than showing the journal.
+fn explain_rejection(reason: &str, game_version: Option<&str>) -> String {
+    let lower = reason.to_ascii_lowercase();
+    let game = game_version.unwrap_or("ce jeu");
+    if lower.starts_with("no version data") {
+        let yours = match game_version {
+            Some(v) => format!("Ton jeu est en {v}."),
+            None => "La version du jeu n'a pas pu être lue.".to_string(),
+        };
+        return format!(
+            "mauvaise version du jeu : SKSE a ouvert ce fichier, mais il n'a pas de données de version (SKSEPlugin_Version). Ce n'est pas une dépendance manquante : le plugin est trop ancien, ou c'est la variante pour un autre Skyrim (souvent 1.5.97). {yours} Réinstalle le mod et choisis la variante Anniversary Edition, pas celle pour 1.5.97."
+        );
+    }
+    if lower.contains("address library needs to be updated") {
+        return format!(
+            "manque Address Library : SKSE ne trouve pas Data\\SKSE\\Plugins\\versionlib pour {game}, ou ce fichier est trop ancien. Installe « Address Library for SKSE Plugins » pour cette version du jeu, et laisse-la activée."
+        );
+    }
+    if lower.contains("must be recompiled for new address library") {
+        return format!(
+            "mauvaise version du jeu : ce plugin doit être recompilé pour l'Address Library de {game} (à partir de 1.7.99). Installe une version du mod faite pour ce jeu."
+        );
+    }
+    if lower.contains("incompatible with current version of the game") {
+        return format!(
+            "mauvaise version du jeu : ce plugin ne déclare pas {game} parmi ses versions compatibles."
+        );
+    }
+    if lower.contains("only compatible with versions earlier than") {
+        return "mauvaise version du jeu : ce plugin ne va qu'avec Skyrim avant 1.6.629."
+            .to_string();
+    }
+    if lower.contains("requires newer script extender") {
+        return "ce plugin demande un SKSE plus récent que celui qui est installé.".to_string();
+    }
+    if lower.contains("le plugin cannot be used") {
+        return "ce plugin est fait pour Skyrim Legendary Edition, pas pour Special Edition."
+            .to_string();
+    }
+    if lower.contains("win32 error 126") || lower.contains("couldn't load plugin 126") {
+        return "Windows n'a pas pu charger cette DLL : un fichier dont elle dépend est introuvable (souvent le redistribuable Visual C++).".to_string();
+    }
+    reason.to_string()
 }
 
 /// Read what SKSE wrote during the session that started at `session_start`.
@@ -508,6 +570,10 @@ pub fn read_session_report(
     if let Some(text) = text {
         report.loader_log_fresh = true;
         parse_loader_log(&text, &mut report);
+    }
+    let game = report.game_version.clone();
+    for plugin in &mut report.rejected {
+        plugin.reason = explain_rejection(&plugin.reason, game.as_deref());
     }
     report
 }
@@ -778,12 +844,56 @@ init complete
                 },
                 RejectedPlugin {
                     name: "Broken.dll".into(),
-                    reason: "(Win32 error 126)".into()
+                    reason: "Windows n'a pas pu charger cette DLL : un fichier dont elle dépend est introuvable (souvent le redistribuable Visual C++).".into()
                 },
             ]
         );
         assert_eq!(report.not_seen, ["Never.dll"]);
         assert_eq!(report.skse_version.as_deref(), Some("2.2.8"));
+        assert_eq!(report.game_version.as_deref(), Some("1.7.104"));
+    }
+
+    /// The line SKSE 2.3.1 writes when `LoadLibraryEx` succeeds but the DLL
+    /// does not export `SKSEPlugin_Version` (handle 0 is SKSE's internal
+    /// plugin id, which is still 0 during the scan).
+    #[test]
+    fn no_version_data_is_a_wrong_game_build_not_a_missing_library() {
+        let log = "\
+SKSE64 runtime: initialize (version = 2.3.1 01070680 01DD7C5F5A13130A, os = 6.2 (9200))
+checking plugin EngineFixes.dll
+plugin EngineFixes.dll (00000000  00000000) no version data 0 (handle 0)
+init complete
+";
+        let dir = session_files(log, REAL_LOADER_LOG);
+        let report =
+            read_session_report(dir.path(), just_before_now(), &["EngineFixes.dll".into()]);
+        assert_eq!(report.rejected.len(), 1);
+        assert_eq!(report.rejected[0].name, "EngineFixes.dll");
+        let reason = &report.rejected[0].reason;
+        assert!(reason.contains("mauvaise version du jeu"), "{reason}");
+        assert!(reason.contains("1.7.104"), "{reason}");
+        assert!(reason.contains("SKSEPlugin_Version"), "{reason}");
+        assert!(reason.contains("1.5.97"), "{reason}");
+        assert!(
+            !reason.to_ascii_lowercase().contains("address library"),
+            "{reason}"
+        );
+        assert!(report.not_seen.is_empty(), "{:?}", report.not_seen);
+    }
+
+    #[test]
+    fn a_missing_address_library_is_named_as_such() {
+        let log = "\
+SKSE64 runtime: initialize (version = 2.3.1 01070680 01DD7C5F5A13130A, os = 6.2 (9200))
+checking plugin EngineFixes.dll
+plugin EngineFixes.dll (00000001 EngineFixes 07000000) disabled, address library needs to be updated 0 (handle 0)
+init complete
+";
+        let dir = session_files(log, REAL_LOADER_LOG);
+        let report = read_session_report(dir.path(), just_before_now(), &[]);
+        let reason = &report.rejected[0].reason;
+        assert!(reason.contains("manque Address Library"), "{reason}");
+        assert!(reason.contains("1.7.104"), "{reason}");
     }
 
     #[test]
@@ -1020,6 +1130,19 @@ init complete
             status: STATUS_INSTALLED.to_string(),
             category: None,
             archive_path: None,
+            source_host: None,
+            page_url: None,
+            game_versions: Vec::new(),
+            dependencies: Vec::new(),
+            loaders: Vec::new(),
+            category_raw: None,
+            category_nexus_id: None,
+            nexus_mod_id: None,
+            author: None,
+            website: None,
+            size_bytes: None,
+            installed_at: None,
+            downloaded_at: None,
         }
     }
 

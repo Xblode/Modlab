@@ -4,21 +4,50 @@ import {
   clearGamePathOverride,
   downloadsDirSetting,
   getGamePathSlots,
+  msaAccountStatus,
+  msaBeginLogin,
+  msaCancelLogin,
+  msaDisconnect,
+  msaPollLogin,
+  onMsaLoginFinished,
+  openExternalUrl,
   setDownloadsDirOverride,
   setGamePathOverride,
   type DetectedGame,
   type DownloadsDirSetting,
+  type GameCategory,
   type GamePathSlot,
+  type MsaAccountStatus,
+  type MsaLoginStart,
 } from "../../../api";
 import { Ico } from "../../../Ico";
-import { Badge, IconButton, Input, Panel, Switch } from "../../ui";
+import { useGamePaths } from "../../../hooks/useGamePaths";
+import { Badge, Button, Dialog, Input, Panel, SettingsRow, Switch } from "../../ui";
+import { GamePathRows, slotIdsInGamePaths } from "../Dashboard/GamePathsSection";
+import { PathRow } from "../Dashboard/PathRow";
 import type { Density } from "../../../density";
+import {
+  readUiMemory,
+  rememberWebHomepage,
+  webHomepageSetting,
+  writeUiMemory,
+} from "../../../uiMemory";
+import {
+  WEB_HOMEPAGE_OPTIONS,
+  type WebHomepage,
+  type WebHomepageKind,
+} from "../../../webHomepage";
+import { DesignSystemPage } from "./DesignSystemPage";
 
 export type SettingsMenu =
   | "general"
+  | "account"
   | "appearance"
+  | "browser"
   | "notifications"
+  | "designsystem"
   | "games"
+  | "categories"
   | "models"
   | "mcp"
   | "privacy";
@@ -34,243 +63,511 @@ function SettingsGroup({ title, children }: { title?: string; children: ReactNod
   );
 }
 
-/** One label/description row with a control (or note) pinned to the right —
- * the shape every non-list settings page uses. */
-function SettingsRow({
-  title,
-  desc,
-  control,
-}: {
-  title: ReactNode;
-  desc?: ReactNode;
-  control?: ReactNode;
-}) {
-  return (
-    <div className="settings-row">
-      <div className="settings-row-text">
-        <div className="settings-row-title">{title}</div>
-        {desc ? <div className="settings-row-desc">{desc}</div> : null}
-      </div>
-      {control ? <div className="settings-row-control">{control}</div> : null}
-    </div>
-  );
+/** Adapter slots that `game_paths` does not already draw. */
+const EXTRA_SLOT_COPY: Record<string, string> = {
+  launcher_exe:
+    "Fichier lancé par Jouer (minecraft.exe CurseForge ou MinecraftLauncher.exe). Sans CurseForge, parcourez jusqu’à votre launcher.",
+  exe: "Exécutable du jeu.",
+  data_dir: "Dossier Data lu par le jeu.",
+  usvfs_dll: "Bibliothèque USVFS de Mod Organizer 2.",
+  saves_dir: "Dossier des sauvegardes.",
+};
+
+function extraSlotDescription(id: string): string {
+  return EXTRA_SLOT_COPY[id] ?? "Chemin déclaré par ce jeu, en plus des dossiers principaux.";
 }
 
 /**
- * The folders/executables one game's adapter cares about (§3.1 — each
- * adapter decides its own list and how it finds them: Skyrim from its own
- * `.exe`, Minecraft from `%APPDATA%`), each editable in place. Rows are
- * returned flat (a `Fragment`, no wrapping element) so they stay direct
- * children of the surrounding `SettingsGroup` and inherit its row borders.
+ * Same path rows as Mon jeu (`getGamePaths`), plus any adapter slot that
+ * list does not cover (exe, Data, USVFS, saves).
  */
 function GamePathList({
   gameId,
+  loadoutId,
   onUnwired,
 }: {
   gameId: string;
+  loadoutId: number | null;
   onUnwired: (label: string) => void;
 }) {
+  const { paths, error, saveManaged, resetManaged, saveIni, resetIni } = useGamePaths(
+    gameId,
+    loadoutId,
+  );
   const [slots, setSlots] = useState<GamePathSlot[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
+  const [slotsError, setSlotsError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setSlots(null);
-    setError(null);
+    setSlotsError(null);
     getGamePathSlots(gameId)
-      .then((s) => {
-        if (!cancelled) setSlots(s);
+      .then((next) => {
+        if (!cancelled) setSlots(next);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) setSlotsError(e instanceof Error ? e.message : String(e));
       });
     return () => {
       cancelled = true;
     };
   }, [gameId]);
 
-  async function save(slotId: string) {
-    const value = draft.trim();
-    if (!value) {
-      setEditing(null);
-      return;
-    }
-    try {
-      setSlots(await setGamePathOverride(gameId, slotId, value));
-      setEditing(null);
-    } catch (e) {
-      onUnwired(e instanceof Error ? e.message : String(e));
-    }
+  if (!paths && !error) {
+    return <SettingsRow title="Chemins" desc="Lecture des chemins…" />;
   }
 
-  async function reset(slotId: string) {
-    try {
-      setSlots(await clearGamePathOverride(gameId, slotId));
-    } catch (e) {
-      onUnwired(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  if (error) {
-    return <SettingsRow title="Chemins" desc={error} />;
-  }
-  if (!slots) {
-    return <SettingsRow title="Chemins" desc="Détection en cours…" />;
-  }
+  const covered = paths ? slotIdsInGamePaths(paths) : new Set<string>();
+  const extras = (slots ?? []).filter((slot) => !covered.has(slot.id));
 
   return (
-    <>
-      {slots.map((slot) => (
-        <div className="settings-row indent" key={slot.id}>
-          <div className="settings-row-text">
-            <div className="settings-row-title">{slot.label}</div>
-            {editing === slot.id ? (
-              <Input
-                variant="field"
-                autoFocus
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void save(slot.id);
-                  if (e.key === "Escape") setEditing(null);
-                }}
-                onBlur={() => void save(slot.id)}
-                style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 12 }}
-              />
-            ) : (
-              <div
-                className="settings-row-desc"
-                style={{ fontFamily: "var(--font-mono)", maxWidth: "none", wordBreak: "break-all" }}
-              >
-                {slot.effective ?? "Non détecté sur cette machine"}
-              </div>
-            )}
-          </div>
-          {editing === slot.id ? null : (
-            <div className="settings-row-control">
-              <Badge tone={slot.overridePath ? "root" : slot.detected ? "root" : "bad"}>
-                {slot.overridePath ? "personnalisé" : slot.detected ? "détecté" : "introuvable"}
-              </Badge>
-              <IconButton
-                name="edit"
-                title="Modifier le chemin"
-                onClick={() => {
-                  setEditing(slot.id);
-                  setDraft(slot.effective ?? "");
-                }}
-              />
-              {slot.overridePath ? (
-                <IconButton
-                  name="refresh"
-                  title="Revenir à la détection automatique"
-                  onClick={() => void reset(slot.id)}
-                />
-              ) : null}
-            </div>
-          )}
+    <div className="dash-paths">
+      {error ? (
+        <div className="settings-group">
+          <SettingsRow title="Lecture impossible" desc={error} />
         </div>
-      ))}
-    </>
+      ) : null}
+      {paths ? (
+        <GamePathRows
+          gameId={gameId}
+          paths={paths}
+          saveManaged={saveManaged}
+          resetManaged={resetManaged}
+          saveIni={saveIni}
+          resetIni={resetIni}
+          onError={onUnwired}
+        />
+      ) : null}
+      {slotsError ? (
+        <div className="settings-group">
+          <SettingsRow title="Autres chemins" desc={slotsError} />
+        </div>
+      ) : null}
+      {extras.length > 0 ? (
+        <div className="settings-group">
+          <div className="settings-group-title">Autres chemins</div>
+          {extras.map((slot) => (
+            <PathRow
+              key={slot.id}
+              epoch={`${gameId}:${slot.id}:${slot.overridePath ?? ""}:${slot.effective ?? ""}`}
+              label={slot.label}
+              description={extraSlotDescription(slot.id)}
+              path={slot.effective}
+              canEdit
+              pickKind={slot.kind}
+              startPath={slot.effective}
+              editValue={slot.effective ?? ""}
+              canReset={Boolean(slot.overridePath)}
+              onSave={async (value) => {
+                setSlots(await setGamePathOverride(gameId, slot.id, value));
+              }}
+              onReset={async () => {
+                setSlots(await clearGamePathOverride(gameId, slot.id));
+              }}
+              onError={onUnwired}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
 /**
- * The one global downloads-folder setting — same edit-in-place shape as a
- * `GamePathList` row (pencil → input → save/cancel, reset button once
- * overridden), just for a single path rather than a per-game list.
+ * The shared downloads root. Same field as the other path rows: the path
+ * stays visible, Enter or blur writes the override, Parcourir picks a folder.
  */
 function DownloadsDirRow({ onUnwired }: { onUnwired: (label: string) => void }) {
   const [setting, setSetting] = useState<DownloadsDirSetting | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
+  const [pending, setPending] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     downloadsDirSetting()
-      .then((s) => {
-        if (!cancelled) setSetting(s);
+      .then((next) => {
+        if (!cancelled) setSetting(next);
       })
-      .catch((e: unknown) => onUnwired(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => onUnwired(e instanceof Error ? e.message : String(e)))
+      .finally(() => {
+        if (!cancelled) setPending(false);
+      });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function save() {
-    const value = draft.trim();
-    if (!value) {
-      setEditing(false);
-      return;
-    }
-    try {
-      setSetting(await setDownloadsDirOverride(value));
-      setEditing(false);
-    } catch (e) {
-      onUnwired(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  async function reset() {
-    try {
-      setSetting(await clearDownloadsDirOverride());
-    } catch (e) {
-      onUnwired(e instanceof Error ? e.message : String(e));
-    }
+  if (pending || !setting) {
+    return (
+      <SettingsRow
+        title="Dossier de téléchargement"
+        desc={pending ? "Détection en cours…" : "Les archives y sont rangées par jeu."}
+      />
+    );
   }
 
   return (
-    <div className="settings-row">
-      <div className="settings-row-text">
-        <div className="settings-row-title">Dossier de téléchargement</div>
-        {editing ? (
-          <Input
-            variant="field"
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void save();
-              if (e.key === "Escape") setEditing(false);
-            }}
-            onBlur={() => void save()}
-            style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 12 }}
-          />
-        ) : (
-          <div
-            className="settings-row-desc"
-            style={{ fontFamily: "var(--font-mono)", maxWidth: "none", wordBreak: "break-all" }}
-          >
-            {setting ? setting.effective : "Détection en cours…"} — les archives y sont rangées
-            par jeu.
-          </div>
-        )}
-      </div>
-      {editing || !setting ? null : (
-        <div className="settings-row-control">
-          <Badge tone={setting.overridePath ? "root" : "root"}>
-            {setting.overridePath ? "personnalisé" : "défaut"}
-          </Badge>
-          <IconButton
-            name="edit"
-            title="Modifier le dossier"
-            onClick={() => {
-              setEditing(true);
-              setDraft(setting.effective);
-            }}
-          />
-          {setting.overridePath ? (
-            <IconButton
-              name="refresh"
-              title="Revenir au dossier par défaut"
-              onClick={() => void reset()}
+    <PathRow
+      epoch={`${setting.effective}:${setting.overridePath ?? ""}`}
+      label="Dossier de téléchargement"
+      description="Les archives y sont rangées par jeu."
+      path={setting.effective}
+      canEdit
+      pickKind="dir"
+      startPath={setting.effective}
+      editValue={setting.effective}
+      canReset={setting.overridePath !== null}
+      resetTitle="Revenir au dossier par défaut"
+      onSave={async (value) => {
+        setSetting(await setDownloadsDirOverride(value));
+      }}
+      onReset={async () => {
+        setSetting(await clearDownloadsDirOverride());
+      }}
+      onError={onUnwired}
+    />
+  );
+}
+
+/**
+ * Minecraft identity: local offline pseudo + optional Microsoft (auth-code + PKCE).
+ * Jouer uses MSA online when connected; otherwise the offline pseudo.
+ */
+function AccountSettingsPage() {
+  const [player, setPlayer] = useState(() => readUiMemory().minecraftPlayer);
+  const [msa, setMsa] = useState<MsaAccountStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [login, setLogin] = useState<MsaLoginStart | null>(null);
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    msaAccountStatus()
+      .then((s) => {
+        if (!cancelled) setMsa(s);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setMsa({
+            connected: false,
+            username: null,
+            uuid: null,
+            clientConfigured: false,
+            clientId: null,
+            clientIdSource: null,
+            clientIdOverride: null,
+            mode: "error",
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Lives for the whole Compte page so closing the dialog mid-exchange still
+  // refreshes the badge when the loopback thread finishes.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void onMsaLoginFinished((ev) => {
+      if (cancelled) return;
+      setLogin(null);
+      if (ev.status === "connected") {
+        setLoginError(null);
+      } else if (ev.error) {
+        setLoginError(ev.error);
+      }
+      void msaAccountStatus()
+        .then((next) => {
+          if (!cancelled) setMsa(next);
+        })
+        .catch((e: unknown) => {
+          if (!cancelled) {
+            setLoginError(e instanceof Error ? e.message : String(e));
+          }
+        });
+    }).then((off) => {
+      if (cancelled) off();
+      else unlisten = off;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!login) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const intervalMs = Math.max(1, login.interval) * 1000;
+
+    async function applyFinished(status: string, error: string | null) {
+      if (cancelled) return;
+      setLogin(null);
+      if (status === "connected") {
+        setLoginError(null);
+      } else {
+        setLoginError(error ?? "Connexion Microsoft interrompue.");
+      }
+      try {
+        const next = await msaAccountStatus();
+        if (!cancelled) setMsa(next);
+      } catch (e: unknown) {
+        if (!cancelled) {
+          setLoginError(e instanceof Error ? e.message : String(e));
+        }
+      }
+    }
+
+    async function tick() {
+      if (cancelled) return;
+      try {
+        const poll = await msaPollLogin();
+        if (cancelled) return;
+        if (poll.status === "pending" || poll.status === "slow_down") {
+          const wait = poll.status === "slow_down" ? intervalMs + 2000 : intervalMs;
+          timer = window.setTimeout(() => {
+            void tick();
+          }, wait);
+          return;
+        }
+        await applyFinished(poll.status, poll.error);
+      } catch (e: unknown) {
+        if (cancelled) return;
+        setLogin(null);
+        setLoginError(e instanceof Error ? e.message : String(e));
+        try {
+          const next = await msaAccountStatus();
+          if (!cancelled) setMsa(next);
+        } catch {
+          /* status refresh best-effort */
+        }
+      }
+    }
+
+    // First poll immediately — don't wait a full interval after the redirect.
+    timer = window.setTimeout(() => {
+      void tick();
+    }, 0);
+    return () => {
+      cancelled = true;
+      if (timer != null) window.clearTimeout(timer);
+    };
+  }, [login]);
+
+  function savePlayer(next: string) {
+    const trimmed = next.trim() || "Player";
+    setPlayer(trimmed);
+    writeUiMemory({ minecraftPlayer: trimmed });
+  }
+
+  async function connect() {
+    setBusy(true);
+    setLoginError(null);
+    try {
+      const start = await msaBeginLogin();
+      setLogin(start);
+      try {
+        await openExternalUrl(start.authUrl);
+      } catch {
+        /* human can open the URL from the dialog */
+      }
+    } catch (e: unknown) {
+      // Real MSA errors — never route through onUnwired (« pas encore branché au Core »).
+      setLoginError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelLogin() {
+    setLogin(null);
+    try {
+      await msaCancelLogin();
+    } catch {
+      /* ignore */
+    }
+    // Exchange may have finished (and saved) after Annuler — refresh badge.
+    try {
+      setMsa(await msaAccountStatus());
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function disconnect() {
+    setBusy(true);
+    setLoginError(null);
+    try {
+      const next = await msaDisconnect();
+      setMsa(next);
+    } catch (e: unknown) {
+      setLoginError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const modeBadge =
+    msa?.mode === "online" ? (
+      <Badge tone="win">en ligne</Badge>
+    ) : msa?.mode === "error" ? (
+      <Badge tone="bad">erreur</Badge>
+    ) : (
+      <Badge tone="root">hors-ligne</Badge>
+    );
+
+  return (
+    <Page title="Compte">
+      <SettingsGroup title="Minecraft — hors-ligne">
+        <SettingsRow
+          title="Pseudo local"
+          desc="Utilisé pour Jouer quand aucun compte Microsoft n’est connecté (UUID dérivé du pseudo)."
+          control={
+            <Input
+              variant="field"
+              value={player}
+              onChange={(e) => setPlayer(e.target.value)}
+              onBlur={() => savePlayer(player)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+              aria-label="Pseudo Minecraft hors-ligne"
+              style={{ width: 160 }}
             />
-          ) : null}
-        </div>
-      )}
-    </div>
+          }
+        />
+        <SettingsRow
+          title="Mode Jouer"
+          desc={
+            msa?.connected
+              ? `Session Microsoft active (${msa.username ?? "—"}) — Jouer utilise l’auth en ligne.`
+              : "Sans compte Microsoft, Jouer reste en solo hors-ligne avec le pseudo local."
+          }
+          control={modeBadge}
+        />
+      </SettingsGroup>
+      <SettingsGroup title="Microsoft">
+        <SettingsRow
+          title="Compte Microsoft"
+          desc={
+            msa?.connected
+              ? `Connecté en tant que ${msa.username ?? "—"}. Serveurs officiels et skin premium.`
+              : "Connexion via le navigateur (OAuth + PKCE). Requis pour les serveurs officiels ; le solo hors-ligne reste possible sans."
+          }
+          control={
+            msa?.connected ? (
+              <Button type="button" variant="ghost" disabled={busy} onClick={() => void disconnect()}>
+                Déconnecter
+              </Button>
+            ) : (
+              <Button type="button" disabled={busy} onClick={() => void connect()}>
+                {busy ? "…" : "Connecter…"}
+              </Button>
+            )
+          }
+        />
+        <SettingsRow
+          title="État"
+          desc={
+            loginError ??
+            msa?.error ??
+            (msa?.connected
+              ? "Jetons chiffrés côté application (DPAPI) — absents du Core."
+              : "Aucun compte Microsoft lié.")
+          }
+          control={
+            msa?.connected ? (
+              <Badge tone="win">{msa.username ?? "connecté"}</Badge>
+            ) : (
+              <Badge tone="root">aucun compte</Badge>
+            )
+          }
+        />
+      </SettingsGroup>
+      {login ? (
+        <Dialog
+          titleId="msa-pkce-login"
+          title="Connexion Microsoft"
+          eyebrow="Minecraft Java"
+          onClose={() => void cancelLogin()}
+          dismissOnBackdrop={false}
+          actions={
+            <>
+              <Button type="button" variant="ghost" onClick={() => void cancelLogin()}>
+                Annuler
+              </Button>
+              <Button type="button" onClick={() => void openExternalUrl(login.authUrl)}>
+                Rouvrir la page
+              </Button>
+            </>
+          }
+        >
+          <p style={{ margin: "0 0 12px", maxWidth: 420 }}>
+            Une page Microsoft s’ouvre dans le navigateur. Connectez-vous avec votre compte. La page
+            « Connexion réussie » n’apparaît qu’après l’enregistrement de la session — gardez cette
+            fenêtre ouverte jusqu’à la confirmation ici.
+          </p>
+          <p style={{ margin: 0, opacity: 0.75, fontSize: 13 }}>{login.message}</p>
+        </Dialog>
+      ) : null}
+    </Page>
+  );
+}
+
+function BrowserSettingsPage() {
+  const [homepage, setHomepage] = useState<WebHomepage>(() => webHomepageSetting());
+
+  function pick(kind: WebHomepageKind) {
+    const next: WebHomepage = { ...homepage, kind };
+    setHomepage(next);
+    rememberWebHomepage(next);
+  }
+
+  function setCustomUrl(customUrl: string) {
+    const next: WebHomepage = { kind: "custom", customUrl };
+    setHomepage(next);
+    rememberWebHomepage(next);
+  }
+
+  return (
+    <Page title="Navigateur">
+      <SettingsGroup title="Page d’accueil">
+        {WEB_HOMEPAGE_OPTIONS.map(({ kind, label }) => (
+          <button
+            key={kind}
+            type="button"
+            className={`tr ${homepage.kind === kind ? "sel" : ""}`}
+            aria-pressed={homepage.kind === kind}
+            onClick={() => pick(kind)}
+          >
+            <Ico name={homepage.kind === kind ? "check" : "globe"} />
+            <span className="lbl">{label}</span>
+          </button>
+        ))}
+        {homepage.kind === "custom" ? (
+          <SettingsRow
+            title="Adresse"
+            desc="URL libre. Pour un moteur, utilise %s à la place de la requête."
+            control={
+              <Input
+                value={homepage.customUrl}
+                onChange={(e) => setCustomUrl(e.target.value)}
+                placeholder="https://…"
+                spellCheck={false}
+                autoComplete="off"
+                aria-label="Adresse de la page d’accueil"
+              />
+            }
+          />
+        ) : null}
+      </SettingsGroup>
+    </Page>
   );
 }
 
@@ -295,6 +592,8 @@ function Page({ title, children }: { title: string; children: ReactNode }) {
 export function SettingsPane({
   menu,
   games,
+  activeGame,
+  categoryCatalog,
   llm,
   llmModels,
   dataRoot,
@@ -304,9 +603,15 @@ export function SettingsPane({
   density,
   onDensityChange,
   onUnwired,
+  loadoutId,
 }: {
   menu: SettingsMenu;
   games: DetectedGame[];
+  /** Game whose category list is shown on the Catégorie page — the shell's
+   * active game, not a separate picker. */
+  activeGame: DetectedGame | undefined;
+  /** Fixed list from `game_categories` for `activeGame`. */
+  categoryCatalog: GameCategory[];
   llm: string;
   llmModels: readonly (readonly [string, string, string])[];
   dataRoot: string | undefined;
@@ -320,7 +625,12 @@ export function SettingsPane({
   density: Density;
   onDensityChange: (density: Density) => void;
   onUnwired: (label: string) => void;
+  loadoutId: number | null;
 }) {
+  if (menu === "designsystem") {
+    return <DesignSystemPage />;
+  }
+
   if (menu === "appearance") {
     return (
       <Page title="Apparence">
@@ -367,6 +677,14 @@ export function SettingsPane({
     );
   }
 
+  if (menu === "browser") {
+    return <BrowserSettingsPage />;
+  }
+
+  if (menu === "account") {
+    return <AccountSettingsPage />;
+  }
+
   if (menu === "models") {
     return (
       <Page title="Modèles">
@@ -401,6 +719,55 @@ export function SettingsPane({
     );
   }
 
+  if (menu === "categories") {
+    return (
+      <Page title="Catégorie">
+        {!activeGame ? (
+          <SettingsGroup>
+            <SettingsRow
+              title="Aucun jeu actif"
+              desc="Choisis une instance dans l’Explorateur pour voir la liste des catégories de ce jeu."
+            />
+          </SettingsGroup>
+        ) : (
+          <>
+            <SettingsGroup title={`${activeGame.name} — ${categoryCatalog.length} catégorie${categoryCatalog.length === 1 ? "" : "s"}`}>
+              {categoryCatalog.length === 0 ? (
+                <SettingsRow
+                  title="Liste vide"
+                  desc="L’adaptateur de ce jeu n’a pas encore publié de catégories, ou le Core n’a pas répondu."
+                />
+              ) : (
+                categoryCatalog.map((c) => (
+                  <SettingsRow
+                    key={c.id}
+                    title={
+                      <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <Ico name={c.icon || "box"} />
+                        {c.label}
+                      </span>
+                    }
+                    desc={`Identifiant : ${c.id}`}
+                  />
+                ))
+              )}
+            </SettingsGroup>
+            <Panel
+              icon="info"
+              title="Liste fixe par jeu"
+              bodyClassName="why"
+            >
+              Ces catégories viennent de l’adaptateur du jeu (commande Core{" "}
+              <code>game_categories</code>). Tu les assignes aux mods depuis la
+              fiche ou la colonne Catégorie. Le Core ne propose pas encore de les
+              créer, renommer ou masquer ici — lecture seule pour l’instant.
+            </Panel>
+          </>
+        )}
+      </Page>
+    );
+  }
+
   if (menu === "games") {
     return (
       <Page title="Jeux">
@@ -422,7 +789,7 @@ export function SettingsPane({
                   }
                   control={<Badge tone="root">détecté</Badge>}
                 />
-                <GamePathList gameId={g.id} onUnwired={onUnwired} />
+                <GamePathList gameId={g.id} loadoutId={loadoutId} onUnwired={onUnwired} />
               </Fragment>
             ))
           )}
@@ -432,9 +799,9 @@ export function SettingsPane({
             title="Dossier de jeu manuel"
             desc="L'ajout manuel d'un dossier de jeu n'existe pas encore côté Core."
             control={
-              <button type="button" className="btn ghost" onClick={() => onUnwired("Ajouter un jeu")}>
+              <Button variant="ghost" onClick={() => onUnwired("Ajouter un jeu")}>
                 Ajouter
-              </button>
+              </Button>
             }
           />
         </SettingsGroup>

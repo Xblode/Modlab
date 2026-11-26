@@ -31,8 +31,10 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// The file whose presence at the top of a mod folder makes it the engine mod.
-pub const LOADER_FILE: &str = "skse64_loader.exe";
+/// SE loader exe. The string is `tool_archive::SE_LOADER_FILE`, the `skse64`
+/// row of the same table `recognize` uses. VR and classic loaders are on
+/// that table too; only this one is copied beside `SkyrimSE.exe`.
+pub const LOADER_FILE: &str = crate::tool_archive::SE_LOADER_FILE;
 
 const MANIFEST_FILE: &str = "engine-files.tsv";
 const BACKUP_DIR: &str = "backup";
@@ -46,10 +48,9 @@ pub fn is_engine_content(dir: &Path) -> bool {
 
 /// A top-level file that belongs beside `SkyrimSE.exe`: the loader, the
 /// version-bound `skse64_X_Y_Z.dll`, `skse64_steam_loader.dll`. Readmes and
-/// the like stay in the mod folder.
+/// the like stay in the mod folder. The prefix is `tool_archive::SE_NAME_PREFIX`.
 fn is_engine_root_file(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    lower.starts_with("skse64_") && (lower.ends_with(".dll") || lower.ends_with(".exe"))
+    crate::tool_archive::is_se_root_file(name)
 }
 
 /// Names of the engine mod's root files — the only ones copied for real.
@@ -70,7 +71,7 @@ pub fn engine_root_files(source: &Path) -> io::Result<Vec<String>> {
 }
 
 /// The `Data` folder inside a mod folder, whatever its capitalization.
-fn data_subdir(dir: &Path) -> Option<PathBuf> {
+pub(crate) fn data_subdir(dir: &Path) -> Option<PathBuf> {
     fs::read_dir(dir)
         .ok()?
         .filter_map(|e| e.ok())
@@ -437,6 +438,19 @@ mod tests {
             status: STATUS_INSTALLED.to_string(),
             category: None,
             archive_path: None,
+            source_host: None,
+            page_url: None,
+            game_versions: Vec::new(),
+            dependencies: Vec::new(),
+            loaders: Vec::new(),
+            category_raw: None,
+            category_nexus_id: None,
+            nexus_mod_id: None,
+            author: None,
+            website: None,
+            size_bytes: None,
+            installed_at: None,
+            downloaded_at: None,
         }
     }
 

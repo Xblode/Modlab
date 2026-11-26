@@ -1,0 +1,8 @@
+# Runtime sandbox under the Tauri crate (F:\ModLab absent → .modlab-dev here).
+# Writes during Minecraft loader install must NOT trigger `tauri:dev` rebuilds.
+.modlab-dev/
+
+# Forge/NeoForge installer logs (written next to cwd; kept out of the crate root).
+*.log
+*-installer.jar.log
+*-installer.jar

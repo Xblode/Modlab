@@ -4,11 +4,17 @@ Personal, Skyrim-first, multi-game mod manager — positioned as "Cursor for gam
 
 ## Source of truth — read before doing anything structural
 
-1. **`docs/01-architecture-decidee.md`** — the locked architecture. Supersedes `docs/archive/00-cadrage-technique.md` and `docs/archive/Modlab — Document de cadrage & architecture.md` on every structural decision (stack, permissions, roadmap). Those two stay only as background/detail — **never implement either of them blindly**; if they disagree with `01-architecture-decidee.md`, the locked doc wins.
-2. **`ui/`** (styles in `ui/src/shell.css`) — the visual reference for the UI since 2026-11-24. `docs/design/shell-maquette.html` is a historical prototype, no longer kept in sync: don't match it, and don't redesign on the fly either — visual changes go through the user first.
-3. **`.bframe/`** — project steering memory: state, decisions, ideas, tasks (`ETAT.md`, `DECISIONS.md`, `IDEES.md`, `TACHES.md`). Read `.bframe/ETAT.md` first. Parked ideas live in `.bframe/IDEES.md`.
+1. **`docs/01-architecture-decidee.md`** — the locked architecture. Supersedes everything in `docs/archive/` on structural decisions. Archived files are **human-only history** — **do not open or read `docs/archive/**` unless the user explicitly asks**. Never implement archive docs; if anything disagrees with `01-architecture-decidee.md`, the locked doc wins.
+2. **`ui/`** (styles in `ui/src/shell.css`) — the visual reference for the UI since 2026-11-24. The old HTML mockup was removed, replaced by `ui/`. Don't redesign on the fly — visual changes go through the user first.
+3. **`.bframe/`** — project steering memory: state, decisions, ideas, tasks (`ETAT.md`, `DECISIONS.md`, `IDEES.md`, `TACHES.md`). Read `.bframe/ETAT.md` first. Parked ideas live in `.bframe/IDEES.md`. After any material progress (worker delivery, structural fix), the orchestrator **updates `.bframe/ETAT.md` in the same turn** (subject line + `prochaine_action` if needed) — do not duplicate project state in chat.
 4. **`docs/faisabilite.md`** — feasibility notes (the A-parts of the former `idees.md`).
 5. **`docs/README.md`** — map of `docs/`.
+
+### Code entry doors (read these instead of wandering the tree)
+
+- **Core:** `crates/modlab-core/README.md`
+- **Minecraft adapter:** `crates/modlab-game-minecraft/README.md`
+- **UI shell:** `ui/src/shell/README.md`
 
 ## Stack (locked)
 
@@ -38,11 +44,11 @@ Engine-first: xUnit-equivalent Rust integration tests against fixtures (a "fake 
 
 ## What we never do
 
-- Never implement `docs/archive/00-cadrage-technique.md` or `docs/archive/Modlab — Document de cadrage & architecture.md` as if they were final — they're superseded background, `01-architecture-decidee.md` is the answer.
+- Never open, read, or cite `docs/archive/**` for decisions or implementation — superseded background reserved for the human on request. Never implement archive docs as if they were final; `01-architecture-decidee.md` is the answer.
 - Never push to GitHub, never install/upgrade global tooling, never touch anything outside this repo or `F:\ModLab` without asking first.
 - Never bypass Nexus's protections (automated downloads without Premium, scraping) — fragile and gets accounts banned, not just a policy nicety.
 - Never give the AI/MCP layer direct filesystem or shell access — always `AI → MCP → ModLab permission tiers → Core`, per the 3-tier model in `01-architecture-decidee.md` §7.2.
 
 ## Team
 
-Eight specialized agents live in `.claude/agents/`: `pm`, `architect`, `core-dev`, `skyrim-dev`, `mcp-dev`, `ui-designer`, `frontend-dev`, `qa`. See `01-architecture-decidee.md` §11 for the full role table. Tasks are tracked in `.bframe/TACHES.md`.
+bFrame runs the work. This conversation is the orchestrator and delegates to three workers: `worker-sonnet`, `worker-haiku`, `worker-web`. The eight specialist prompts (`pm`, `architect`, `core-dev`, `skyrim-dev`, `mcp-dev`, `ui-designer`, `frontend-dev`, `qa`) were removed on 2026-11-24. Tasks are tracked in `.bframe/TACHES.md`.

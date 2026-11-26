@@ -7,7 +7,7 @@ import { getLoadoutVersion, type LoadoutVersion } from "../api";
  * anything that could move either number (a mod toggle, a snapshot, a
  * rollback), the same "recompute on demand" rule `useConflicts` follows
  * rather than trying to keep a cache in sync by hand. `null` is "not loaded
- * yet", not "no revisions" — `ActiveInstanceCard` renders those differently.
+ * yet", not "no revisions". The footer and the history list print it once loaded.
  */
 export function useLoadoutVersion(
   loadoutId: number | undefined,

@@ -1,14 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /**
- * Tooltips for icon-only controls, with no dependency and no wrapper element
- * (a wrapper would change the layout of every toolbar it touches).
+ * Tooltips for controls (`IconButton`, `Button`, `Select`, …), with no dependency and no
+ * wrapper element (a wrapper would change the layout of every toolbar it touches).
  *
  * A control opts in with `data-tip` (the short French label) and, only when a
  * real key handler exists in the code, `data-tip-key` (e.g. "Ctrl J"). One
  * `<TooltipLayer />` mounted once listens at the document level and draws the
  * bubble. Use `tip()` to spread the right attributes — it also sets the
- * `aria-label`, since an icon-only button has no other accessible name.
+ * `aria-label` (needed for icon-only buttons; labeled `Button`s may override).
  */
 export function tip(text: string, shortcut?: string) {
   return { "data-tip": text, "data-tip-key": shortcut, "aria-label": text } as const;

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Button, IconButton, Input } from "../../ui";
+import { Button, Dialog, Input } from "../../ui";
 
 /**
  * Migration entry point for an existing Mod Organizer 2 instance. Path
@@ -35,20 +35,28 @@ export function Mo2ImportDialog({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <form
-        className="modal"
-        aria-labelledby="mo2-import-title"
-        onSubmit={(e) => void submit(e)}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="modal-head">
-          <div>
-            <div className="eyebrow">Importer depuis MO2</div>
-            <h2 id="mo2-import-title">{gameName}</h2>
-          </div>
-          <IconButton name="x" title="Fermer" onClick={onClose} />
-        </div>
+    <Dialog
+      as="form"
+      titleId="mo2-import-title"
+      eyebrow="Importer depuis MO2"
+      title={gameName}
+      onClose={onClose}
+      onSubmit={(e) => void submit(e)}
+      actions={
+        <>
+          <Button variant="sm-ghost" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button
+            variant="sm"
+            type="submit"
+            disabled={busy || !profile.trim() || !modsDir.trim() || !name.trim()}
+          >
+            {busy ? "Import…" : "Importer"}
+          </Button>
+        </>
+      }
+    >
         <label className="modal-label" htmlFor="mo2-profile">
           Dossier de profil MO2
         </label>
@@ -90,19 +98,6 @@ export function Mo2ImportDialog({
           sont ignorés.
         </p>
         {message ? <p className="modal-error">{message}</p> : null}
-        <div className="modal-actions">
-          <Button variant="sm-ghost" onClick={onClose}>
-            Annuler
-          </Button>
-          <Button
-            variant="sm"
-            type="submit"
-            disabled={busy || !profile.trim() || !modsDir.trim() || !name.trim()}
-          >
-            {busy ? "Import…" : "Importer"}
-          </Button>
-        </div>
-      </form>
-    </div>
+    </Dialog>
   );
 }

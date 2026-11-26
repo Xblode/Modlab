@@ -1,5 +1,4 @@
 import { useState, type ReactNode } from "react";
-import { Ico } from "../../../Ico";
 
 /**
  * The maquette's `.sec` — a titled, collapsible section with a count. Open by
@@ -12,6 +11,7 @@ export function Accordion({
   action,
   variant,
   defaultOpen = true,
+  collapsible = true,
   children,
 }: {
   title: string;
@@ -23,19 +23,22 @@ export function Accordion({
   /** Sections like Catégories/Outils start collapsed — everything else keeps
    * the historical "open by default" behavior. */
   defaultOpen?: boolean;
+  /** When false the body stays visible and the title row does not toggle. */
+  collapsible?: boolean;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const expanded = collapsible ? open : true;
   return (
-    <div className={`sec ${variant ?? ""} ${open ? "" : "closed"}`}>
+    <div className={`sec ${variant ?? ""} ${expanded ? "" : "closed"}`}>
       <div className="sec-h">
         <button
           className="sec-t"
           type="button"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
+          aria-expanded={expanded}
+          onClick={collapsible ? () => setOpen((v) => !v) : undefined}
+          disabled={!collapsible}
         >
-          <Ico name="chev" />
           <span className="u">{title}</span>
           <span className="cnt">({count})</span>
         </button>

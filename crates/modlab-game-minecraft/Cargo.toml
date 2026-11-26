@@ -7,10 +7,16 @@ description = "The Minecraft Game Adapter — loaders, jars and providers live h
 
 [dependencies]
 modlab-core = { path = "../modlab-core" }
-zip = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+zip = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 toml = "0.8"
+reqwest = { version = "0.13", features = ["blocking", "json", "form"] }
+sha1 = "0.10"
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.2"
+md5 = "0.7"
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }

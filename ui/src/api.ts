@@ -46,7 +46,11 @@ export type Channel = "stable" | "beta" | "alpha";
 export type LoadoutDto = {
   id: number;
   gameId: string;
+  /** Branch name. The sidebar shows `instanceName`. */
   name: string;
+  /** Parent instance. Only branches with this id belong to it. */
+  instanceId: number;
+  instanceName: string;
   /** Real count from the Core. Last-played has no Core backing yet. */
   modCount: number;
   channel: Channel;
@@ -54,6 +58,16 @@ export type LoadoutDto = {
    * carried on every listed loadout so a card can show `r.N` without its
    * own `getLoadoutVersion` round-trip. */
   revision: number;
+  mcLoader: string | null;
+  mcGameVersion: string | null;
+  mcLoaderVersion: string | null;
+};
+
+export type McLoaderId = "vanilla" | "fabric" | "forge" | "neoforge" | "quilt";
+
+export type McLoaderStatus = {
+  state: string;
+  message: string;
 };
 
 export type ModRow = {
@@ -69,17 +83,79 @@ export type ModRow = {
    */
   version: string | null;
   /**
-   * `"archived"` — captured by the browser, archive not unpacked yet, so it
-   * cannot be enabled — or `"installed"`. The table shows the difference
-   * instead of offering a checkbox that would do nothing.
+   * `"downloading"` — the transfer has started and the file is not here yet.
+   * `"archived"` — it landed, not unpacked yet, so it cannot be enabled.
+   * `"installed"` — unpacked. The table shows the difference instead of
+   * offering a checkbox that would do nothing.
    */
   status: ModStatus;
   /** The human's own free tag, `null` until they type one. */
   category: string | null;
   archivePath: string | null;
+  /**
+   * Free loader id from the game adapter (`"skse"`, `"skse-vr"`, `"forge"`,
+   * `"fabric"`, `"neoforge"`, …). `null` when this row is not that loader.
+   * The UI does not re-decide from the name, and this flag does not add a
+   * metadata cell.
+   */
+  tool: string | null;
+  /** Version that goes with `tool`. `null` when the adapter has none. */
+  toolVersion: string | null;
+  /**
+   * Host token stored on the mod (`nexus`, `curseforge`, `modrinth`,
+   * `silverlock`, `manual`, `other`, `unknown`). `null` when the row
+   * predates it — the UI treats that like a manual disk add.
+   */
+  sourceHost: string | null;
+  /** Page to reopen in the embedded browser. Not the file URL. */
+  pageUrl: string | null;
+  /** Game versions the file declared. Empty when it declared none. */
+  gameVersions: string[];
+  /**
+   * Loader ids the file declared (`fabric`, `forge`, `neoforge`, `quilt`).
+   * Empty when unknown, or when the game has no loader.
+   */
+  loaders: string[];
+  /** Dependency names or ids the file declared. */
+  dependencies: string[];
+  /**
+   * True when the human chose the category. Provenance `user` on the fiche:
+   * a later automatic fill does not replace it.
+   */
+  categoryUserSet: boolean;
+  /** Category text as the file wrote it, before the game list translates it. */
+  categoryRaw: string | null;
+  /** Nexus category number when the file had one. */
+  categoryNexusId: string | null;
+  nexusModId: string | null;
+  author: string | null;
+  website: string | null;
+  /**
+   * Length of the mod file (archive or jar), in bytes. `null` until known.
+   * Stays set after the file is removed.
+   */
+  sizeBytes: number | null;
+  /**
+   * When the mod became installed, ISO 8601 UTC. `null` for a download or
+   * an archive, and when the date could not be recovered.
+   */
+  installedAt: string | null;
+  /**
+   * When the mod was downloaded or otherwise obtained, ISO 8601 UTC.
+   * Set as soon as a download starts. Stays after the file is removed.
+   * `null` when it could not be recovered.
+   */
+  downloadedAt: string | null;
 };
 
-export type ModStatus = "archived" | "installed";
+/** One entry of a game's fixed category list. The shell asks the Core for it. */
+export type GameCategory = {
+  id: string;
+  label: string;
+  icon: string;
+};
+
+export type ModStatus = "downloading" | "archived" | "installed";
 
 export type ShellSnapshot = {
   dataRoot: string;
@@ -94,8 +170,14 @@ function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+export type ShellSnapshotOpts = {
+  /** When false, skip archive/metadata hydration — for fast instance switches. */
+  hydrateMetadata?: boolean;
+};
+
 export async function getShellSnapshot(
   loadoutId?: number | null,
+  opts?: ShellSnapshotOpts,
 ): Promise<ShellSnapshot> {
   if (!isTauri()) {
     return mockSnapshot();
@@ -103,6 +185,7 @@ export async function getShellSnapshot(
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<ShellSnapshot>("get_shell_snapshot", {
     loadoutId: loadoutId ?? null,
+    hydrateMetadata: opts?.hydrateMetadata ?? null,
   });
 }
 
@@ -165,17 +248,47 @@ export async function createLoadout(
   const cleanName = name.trim();
   if (!cleanName) throw new Error("Donne un nom à l’instance.");
   if (!isTauri()) {
+    const id = Math.floor(Date.now() / 1000);
     return {
-      id: Math.floor(Date.now() / 1000),
+      id,
       gameId,
-      name: cleanName,
+      name: "principale",
+      instanceId: id,
+      instanceName: cleanName,
       modCount: 0,
       channel: "stable",
       revision: 0,
+      mcLoader: null,
+      mcGameVersion: null,
+      mcLoaderVersion: null,
     };
   }
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<LoadoutDto>("create_loadout", { gameId, name: cleanName });
+}
+
+/** Create a branch of the instance that owns `loadoutId`. Not a new instance. */
+export async function createBranch(loadoutId: number, name: string): Promise<LoadoutDto> {
+  const cleanName = name.trim();
+  if (!cleanName) throw new Error("Donne un nom à la branche.");
+  if (!isTauri()) {
+    const source = mockSnapshot().loadouts.find((l) => l.id === loadoutId);
+    return {
+      id: Math.floor(Date.now() / 1000),
+      gameId: source?.gameId ?? "skyrimse",
+      name: cleanName,
+      instanceId: source?.instanceId ?? loadoutId,
+      instanceName: source?.instanceName ?? "Instance",
+      modCount: source?.modCount ?? 0,
+      channel: source?.channel ?? "stable",
+      revision: 0,
+      mcLoader: source?.mcLoader ?? null,
+      mcGameVersion: source?.mcGameVersion ?? null,
+      mcLoaderVersion: source?.mcLoaderVersion ?? null,
+    };
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<LoadoutDto>("create_branch", { loadoutId, name: cleanName });
 }
 
 /** Rename a loadout. */
@@ -197,6 +310,80 @@ export async function setLoadoutChannel(
   }
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("set_loadout_channel", { loadoutId, channel });
+}
+
+export async function setBranchMcLoader(loadoutId: number, loader: McLoaderId): Promise<void> {
+  if (!isTauri()) throw new Error("Disponible uniquement dans le shell Tauri.");
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("set_branch_mc_loader", { loadoutId, loader });
+}
+
+export async function setBranchMcGameVersion(loadoutId: number, version: string): Promise<void> {
+  if (!isTauri()) throw new Error("Disponible uniquement dans le shell Tauri.");
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("set_branch_mc_game_version", { loadoutId, version });
+}
+
+export async function setBranchMcLoaderVersion(loadoutId: number, version: string): Promise<void> {
+  if (!isTauri()) throw new Error("Disponible uniquement dans le shell Tauri.");
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("set_branch_mc_loader_version", { loadoutId, version });
+}
+
+export async function listMcGameVersions(): Promise<string[]> {
+  if (!isTauri()) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<string[]>("list_mc_game_versions");
+}
+
+export async function listMcLoaderVersions(loader: McLoaderId, mcVersion: string): Promise<string[]> {
+  if (!isTauri()) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<string[]>("list_mc_loader_versions", { loader, mcVersion });
+}
+
+/** Loader builds already on disk for this instance + Minecraft version. */
+export async function listInstalledMcLoaderVersions(
+  loadoutId: number,
+  loader: McLoaderId,
+  mcVersion: string,
+): Promise<string[]> {
+  if (!isTauri()) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<string[]>("list_installed_mc_loader_versions", {
+    loadoutId,
+    loader,
+    mcVersion,
+  });
+}
+
+/** Vanilla game version folders already on disk for this instance. */
+export async function listInstalledMcGameVersions(loadoutId: number): Promise<string[]> {
+  if (!isTauri()) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<string[]>("list_installed_mc_game_versions", { loadoutId });
+}
+
+export async function mcLoaderStatus(loadoutId: number): Promise<McLoaderStatus> {
+  if (!isTauri()) return { state: "unset", message: "—" };
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<McLoaderStatus>("mc_loader_status", { loadoutId });
+}
+
+/**
+ * Install (or reinstall) the branch loader. Pass `force: true` to re-run the
+ * pipeline even when `versions_installed` already says the build is present.
+ */
+export async function installBranchMcLoader(
+  loadoutId: number,
+  options?: { force?: boolean },
+): Promise<void> {
+  if (!isTauri()) throw new Error("Disponible uniquement dans le shell Tauri.");
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("install_branch_mc_loader", {
+    loadoutId,
+    force: options?.force ?? false,
+  });
 }
 
 /**
@@ -323,6 +510,32 @@ export async function attachDownload(
   });
 }
 
+/** Progress hit 100 % but Archive never arrived — promote or abandon. */
+export type FinalizeDownloadOutcome =
+  | "completed"
+  | "notReady"
+  | "alreadyDone"
+  | "abandoned";
+
+export async function finalizeDownload(
+  downloadId: number,
+  giveUp = false,
+): Promise<FinalizeDownloadOutcome> {
+  if (!isTauri()) return "alreadyDone";
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<FinalizeDownloadOutcome>("finalize_download", {
+    downloadId,
+    giveUp,
+  });
+}
+
+/** Categories this game offers, with their icon names. Empty when the game is unknown. */
+export async function gameCategories(gameId: string): Promise<GameCategory[]> {
+  if (!isTauri() || !gameId) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<GameCategory[]>("game_categories", { gameId });
+}
+
 export async function setModCategory(
   modId: number,
   category: string | null,
@@ -353,6 +566,20 @@ export async function modCategories(): Promise<string[]> {
   return invoke<string[]>("mod_categories");
 }
 
+/**
+ * Replay local metadata (file name, archive, installed folder) on one mod.
+ * Info calls this when it opens. Returns the loadout's rows afterwards.
+ * `null` in the browser preview, where there is no database to refresh.
+ */
+export async function refreshModMetadata(
+  loadoutId: number,
+  modId: number,
+): Promise<ModRow[] | null> {
+  if (!isTauri()) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<ModRow[]>("refresh_mod_metadata", { loadoutId, modId });
+}
+
 export async function renameMod(
   modId: number,
   loadoutId: number,
@@ -364,9 +591,9 @@ export async function renameMod(
 }
 
 /**
- * Soft-delete: the mod disappears from the table but nothing on disk (its
- * extracted files, its archive) is touched — see `download::remove`'s doc
- * on the Rust side.
+ * Soft-delete from the table. Minecraft also removes the jar from the
+ * instance `mods/` (`.jar` / `.jar.disabled` → data-root trash). Skyrim
+ * leaves managed folders alone (see `download::remove` / `delete_mod`).
  */
 export async function deleteMod(modId: number, loadoutId: number): Promise<ModRow[]> {
   if (!isTauri()) throw new Error("Disponible uniquement dans le shell Tauri.");
@@ -382,22 +609,153 @@ export async function uninstallMod(modId: number, loadoutId: number): Promise<Mo
   return invoke<ModRow[]>("uninstall_mod", { modId, loadoutId });
 }
 
-/** Open Explorer at `path` — the folder itself, or (`select`) its parent
- * folder with `path` highlighted, for a single file like an archive. */
+/**
+ * Pages officielles à ouvrir dans le navigateur du système
+ * (`openExternalUrl`). Le shell Tauri sert la même liste
+ * (`official_tool_pages`) ; ces deux adresses sont la copie pour l'aperçu
+ * navigateur et pour un appel qui ne veut pas attendre le Core.
+ * À garder alignées avec `tool_archive::OFFICIAL_TOOL_PAGES`.
+ */
+export const OFFICIAL_TOOL_PAGES = [
+  { id: "skse", name: "SKSE", url: "https://skse.silverlock.org/" },
+  { id: "loot", name: "LOOT", url: "https://loot.github.io/" },
+] as const;
+
+export type OfficialToolPage = {
+  id: string;
+  name: string;
+  url: string;
+};
+
+/** SKSE et LOOT : les pages que l'UI peut ouvrir, pas des téléchargements. */
+export async function officialToolPages(): Promise<OfficialToolPage[]> {
+  if (!isTauri()) return OFFICIAL_TOOL_PAGES.map((page) => ({ ...page }));
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<OfficialToolPage[]>("official_tool_pages");
+}
+
+/**
+ * Ouvre une adresse http(s) dans le navigateur du système.
+ * Dans le shell, seule la commande `open_external_url` est utilisée :
+ * une adresse refusée remonte à l'appelant. Hors Tauri, l'aperçu ouvre un onglet.
+ */
+export async function openExternalUrl(url: string): Promise<void> {
+  if (!isTauri()) {
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (!opened) throw new Error("Impossible d’ouvrir le navigateur.");
+    return;
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("open_external_url", { url });
+}
+
+/** Open Explorer at `path`. Directories open as folders; files are always
+ * shown with `/select,` on Windows. */
 export async function revealPath(path: string, select = false): Promise<void> {
   if (!isTauri()) throw new Error("Disponible uniquement dans le shell Tauri.");
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("reveal_path", { path, select });
 }
 
+/** One-shot PowerShell for Console → PowerShell (UI REPL, not MCP). */
+export type PowerShellResult = {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  cwd: string;
+};
+
+/** Run `command` via `powershell -NoProfile -Command`. Optional `cwd` sticks across calls. */
+export async function runPowerShell(
+  command: string,
+  cwd?: string | null,
+): Promise<PowerShellResult> {
+  if (!isTauri()) {
+    throw new Error("PowerShell n’est disponible que dans le shell Tauri.");
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<PowerShellResult>("run_powershell", {
+    command,
+    cwd: cwd ?? null,
+  });
+}
+
+/** Open the per-instance folder for this branch (Minecraft launcher tree, …). */
+export async function revealInstanceFolder(loadoutId: number): Promise<void> {
+  if (!isTauri()) throw new Error("Disponible uniquement dans le shell Tauri.");
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("reveal_instance_folder", { loadoutId });
+}
+
+/**
+ * Native open dialog. `dir` picks a folder, `file` picks one file.
+ * `null` means the user cancelled. The path is whatever the dialog returns;
+ * callers save it through the existing override commands.
+ */
+export async function pickPath(kind: PathKind, current: string | null): Promise<string | null> {
+  if (!isTauri()) {
+    throw new Error("La sélection d’un chemin n’est disponible que dans le shell Tauri.");
+  }
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const defaultPath = current?.trim() || undefined;
+  const selected = await openDialog(open, kind, defaultPath);
+  if (typeof selected === "string") return selected;
+  if (Array.isArray(selected)) return selected[0] ?? null;
+  return null;
+}
+
+async function openDialog(
+  open: typeof import("@tauri-apps/plugin-dialog").open,
+  kind: PathKind,
+  defaultPath: string | undefined,
+): Promise<string | string[] | null> {
+  const title = kind === "dir" ? "Choisir un dossier" : "Choisir un fichier";
+  try {
+    if (kind === "dir") {
+      return await open({
+        directory: true,
+        multiple: false,
+        title,
+        defaultPath,
+        canCreateDirectories: true,
+      });
+    }
+    return await open({
+      directory: false,
+      multiple: false,
+      title,
+      defaultPath,
+      filters: [{ name: "Fichiers INI", extensions: ["ini"] }],
+    });
+  } catch (error) {
+    if (!defaultPath) throw error;
+    if (kind === "dir") {
+      return await open({
+        directory: true,
+        multiple: false,
+        title,
+        canCreateDirectories: true,
+      });
+    }
+    return await open({
+      directory: false,
+      multiple: false,
+      title,
+      filters: [{ name: "Fichiers INI", extensions: ["ini"] }],
+    });
+  }
+}
+
 /** What an archive turned out to contain, once unpacked to staging. */
 export type ArchivePlan = {
   modId: number;
   name: string;
-  shape: "fomod" | "bare-data" | "wrapped-data" | "unknown";
+  shape: string;
   needsWizard: boolean;
   stagedPath: string;
   contentRoot: string;
+  /** French sentence when this game cannot install the file. */
+  refusal: string | null;
 };
 
 export async function inspectArchivedMod(modId: number): Promise<ArchivePlan> {
@@ -417,8 +775,8 @@ export async function installArchivedMod(
 }
 
 /**
- * The FOMOD wizard's questions — see `modlab_game_skyrim::fomod` for what
- * is and isn't parsed (no visibility conditions, no `conditionalFileInstalls`).
+ * One settled screen of the FOMOD wizard. Types, visibility and the invalid
+ * hint are computed in Rust from the branch and the checked plugin ids.
  */
 export type FomodGroupType =
   | "select-exactly-one"
@@ -427,20 +785,56 @@ export type FomodGroupType =
   | "select-any"
   | "select-all";
 
-export type FomodPlugin = { id: string; name: string; description: string };
+export type FomodPluginType =
+  | "required"
+  | "optional"
+  | "recommended"
+  | "not-usable"
+  | "could-be-usable";
+
+export type FomodPlugin = {
+  id: string;
+  name: string;
+  description: string;
+  image: string | null;
+  typeName: FomodPluginType;
+  selected: boolean;
+  locked: boolean;
+  reason: string | null;
+};
 export type FomodGroup = {
   id: string;
   name: string;
   groupType: FomodGroupType;
+  hint: string | null;
   plugins: FomodPlugin[];
 };
-export type FomodStep = { id: string; name: string; groups: FomodGroup[] };
-export type FomodModule = { name: string; steps: FomodStep[] };
+export type FomodStep = { id: string; name: string; visible: boolean; groups: FomodGroup[] };
+export type FomodImage = { path: string; show: boolean; height: number | null };
+export type FomodModule = { name: string; image: FomodImage | null; steps: FomodStep[] };
 
-export async function getFomodModule(contentRoot: string): Promise<FomodModule> {
+export async function getFomodModule(contentRoot: string, loadoutId: number): Promise<FomodModule> {
   if (!isTauri()) throw new Error("Disponible uniquement dans le shell Tauri.");
   const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<FomodModule>("get_fomod_module", { contentRoot });
+  return invoke<FomodModule>("get_fomod_module", { contentRoot, loadoutId });
+}
+
+/** Re-settle the same screen after a tick. Recommended options are not put back. */
+export async function previewFomod(
+  contentRoot: string,
+  loadoutId: number,
+  picked: string[],
+): Promise<FomodModule> {
+  if (!isTauri()) throw new Error("Disponible uniquement dans le shell Tauri.");
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<FomodModule>("preview_fomod", { contentRoot, loadoutId, picked });
+}
+
+/** Image bytes from the extracted archive, as a data URL. `null` when there is none. */
+export async function fomodImage(contentRoot: string, path: string): Promise<string | null> {
+  if (!isTauri()) throw new Error("Disponible uniquement dans le shell Tauri.");
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<string | null>("fomod_image", { contentRoot, path });
 }
 
 /** `picked` is every plugin id the wizard's answers checked. */
@@ -455,13 +849,80 @@ export async function installFomod(
   return invoke<ModRow[]>("install_fomod", { modId, loadoutId, contentRoot, picked });
 }
 
-/** Fires the moment the browser finishes capturing a file. */
+/** Fires the moment a browser download is filed into an instance. */
+export type DownloadStarted = {
+  downloadId: number;
+  modId: number;
+  loadoutId: number;
+  fileName: string;
+  displayName: string;
+  /** Listing page to restore after the transfer leaves for a CDN URL. */
+  pageUrl?: string | null;
+};
+
+/** Fires when a browser download fails or is cancelled. The row is already gone. */
+export type DownloadFailed = {
+  fileName: string;
+  loadoutId: number | null;
+  /** French sentence from the shell; may be empty. */
+  message?: string;
+};
+
+/**
+ * Fires when a browser download has landed.
+ * `alreadyFiled` — the row was created at start and just became an archive.
+ * The shell refreshes; it must not attach a second mod.
+ */
 export type CapturedDownload = {
   downloadId: number;
   fileName: string;
   url: string;
   path: string;
+  alreadyFiled: boolean;
+  loadoutId: number | null;
+  displayName: string;
+  /** Present when begin already filed the mod — UI can leave « Téléchargement » immediately. */
+  modId?: number | null;
 };
+
+/** Tell the Core which instance is on screen, so a download can be filed at start. */
+export async function noteActiveLoadout(loadoutId: number | null): Promise<void> {
+  if (!isTauri()) return;
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("note_active_loadout", { loadoutId });
+}
+
+/** A main-frame load in the embedded browser started (`loading`) or finished. */
+export type BrowserNavigated = { url: string; loading: boolean };
+
+/** Returns an unsubscribe function; a no-op outside Tauri. */
+export async function onBrowserNavigated(
+  handler: (event: BrowserNavigated) => void,
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<BrowserNavigated>("browser://navigated", (e) => handler(e.payload));
+}
+
+/** Returns an unsubscribe function; a no-op outside Tauri. */
+export async function onDownloadStarted(
+  handler: (event: DownloadStarted) => void,
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  const unlisten = await listen<DownloadStarted>("download://started", (e) => handler(e.payload));
+  return unlisten;
+}
+
+/** Returns an unsubscribe function; a no-op outside Tauri. */
+export async function onDownloadFailed(
+  handler: (event: DownloadFailed) => void,
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  const unlisten = await listen<DownloadFailed>("download://failed", (e) => handler(e.payload));
+  return unlisten;
+}
 
 /** Returns an unsubscribe function; a no-op outside Tauri. */
 export async function onDownloadCaptured(
@@ -470,6 +931,26 @@ export async function onDownloadCaptured(
   if (!isTauri()) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
   const unlisten = await listen<CapturedDownload>("download://captured", (e) =>
+    handler(e.payload),
+  );
+  return unlisten;
+}
+
+/** Live byte count. Not stored: the shell forgets it when the transfer ends. */
+export type DownloadProgress = {
+  downloadId: number | null;
+  url: string;
+  received: number;
+  total: number | null;
+};
+
+/** Returns an unsubscribe function; a no-op outside Tauri. */
+export async function onDownloadProgress(
+  handler: (event: DownloadProgress) => void,
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  const unlisten = await listen<DownloadProgress>("download://progress", (e) =>
     handler(e.payload),
   );
   return unlisten;
@@ -571,6 +1052,75 @@ export async function minecraftInstallJar(
   return invoke<ModRow[]>("minecraft_install_jar", { loadoutId, jarPath });
 }
 
+export type MinecraftSyncResult = {
+  added: number;
+  entries: ModRow[];
+};
+
+/** Register jars already in the instance `mods/` that the loadout does not list. */
+export async function minecraftSyncMods(loadoutId: number): Promise<MinecraftSyncResult> {
+  if (!isTauri()) {
+    throw new Error("La synchro mods/ n'est disponible que dans le shell Tauri.");
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<MinecraftSyncResult>("minecraft_sync_mods", { loadoutId });
+}
+
+export type ImportManualResult = {
+  added: number;
+  entries: ModRow[];
+};
+
+/**
+ * Add a human-picked file or folder to the loadout as a manual mod
+ * (`source_host = manual`). Minecraft copies/registers jars; Skyrim takes a
+ * mod folder or an archive.
+ */
+export async function importManualMod(
+  loadoutId: number,
+  path: string,
+): Promise<ImportManualResult> {
+  if (!isTauri()) {
+    throw new Error("L'import manuel n'est disponible que dans le shell Tauri.");
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<ImportManualResult>("import_manual_mod", { loadoutId, path });
+}
+
+/**
+ * Native file (or folder) picker for a manual mod add. `mode` chooses the
+ * dialog; filters apply only to files.
+ */
+export async function pickManualModPath(
+  mode: "file" | "dir",
+  filters?: { name: string; extensions: string[] }[],
+): Promise<string | null> {
+  if (!isTauri()) {
+    throw new Error("La sélection d’un chemin n’est disponible que dans le shell Tauri.");
+  }
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  if (mode === "dir") {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "Choisir un dossier de mod",
+      canCreateDirectories: false,
+    });
+    if (typeof selected === "string") return selected;
+    if (Array.isArray(selected)) return selected[0] ?? null;
+    return null;
+  }
+  const selected = await open({
+    directory: false,
+    multiple: false,
+    title: "Choisir un fichier de mod",
+    filters: filters ?? [{ name: "Mods", extensions: ["jar", "zip", "7z", "rar"] }],
+  });
+  if (typeof selected === "string") return selected;
+  if (Array.isArray(selected)) return selected[0] ?? null;
+  return null;
+}
+
 /** Resource packs, shader packs and worlds of the detected instance. */
 export type MinecraftContent = {
   resourcePacks: string[];
@@ -606,6 +1156,146 @@ export async function launchSkse(loadoutId: number): Promise<void> {
   return invoke("launch_skse", { loadoutId });
 }
 
+/** Start a ModLab-owned JVM session (MSA online when connected; else offline pseudo).
+ * Resolves when the process has started; session end is `game://ended`.
+ * Live stdout/stderr arrive on `game://log` (`onGameLog`). */
+export async function launchMinecraft(
+  loadoutId: number,
+  playerName?: string | null,
+): Promise<string | null> {
+  if (!isTauri()) {
+    throw new Error("Le lancement Minecraft n’est disponible que dans le shell Tauri.");
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<string | null>("launch_minecraft", {
+    loadoutId,
+    playerName: playerName ?? null,
+  });
+}
+
+/** Result of « Tester le lancement » (smoke: prepare → spawn → menu or fail → kill). */
+export type MinecraftSmokeResult = {
+  status: "ok" | "fail" | "timeout" | "stopped" | string;
+  message: string;
+  matchedMarker: string | null;
+};
+
+/** Same prepare/spawn/log stream as Jouer, but waits for menu / crash / timeout
+ * then kills the JVM. Resolves when the test finishes. */
+export async function testLaunchMinecraft(
+  loadoutId: number,
+  playerName?: string | null,
+): Promise<MinecraftSmokeResult> {
+  if (!isTauri()) {
+    throw new Error("Le test de lancement n’est disponible que dans le shell Tauri.");
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<MinecraftSmokeResult>("test_launch_minecraft", {
+    loadoutId,
+    playerName: playerName ?? null,
+  });
+}
+
+/** Minecraft Microsoft account (auth-code + PKCE). Tokens stay in the shell store. */
+export type MsaAccountStatus = {
+  connected: boolean;
+  username: string | null;
+  uuid: string | null;
+  clientConfigured: boolean;
+  /** Effective MSA application (client) id (public Minecraft/Prism when unset). */
+  clientId: string | null;
+  /** `env` = MODLAB_MSA_CLIENT_ID ; `default` = client public Minecraft/Prism ; `ui` = legacy override. */
+  clientIdSource: "ui" | "env" | "default" | string | null;
+  /** Legacy UI override if any (Settings no longer exposes this). */
+  clientIdOverride: string | null;
+  mode: "online" | "offline" | "error" | string;
+  error: string | null;
+};
+
+/** Start of a browser login — open `authUrl`, then poll until connected. */
+export type MsaLoginStart = {
+  authUrl: string;
+  message: string;
+  expiresIn: number;
+  interval: number;
+};
+
+/** @deprecated Use MsaLoginStart — kept as alias during the PKCE switch. */
+export type MsaDeviceCode = MsaLoginStart;
+
+export type MsaPollResult = {
+  status: "pending" | "slow_down" | "connected" | "declined" | "expired" | "error" | string;
+  username: string | null;
+  error: string | null;
+};
+
+export async function msaAccountStatus(): Promise<MsaAccountStatus> {
+  if (!isTauri()) {
+    return {
+      connected: false,
+      username: null,
+      uuid: null,
+      clientConfigured: false,
+      clientId: null,
+      clientIdSource: null,
+      clientIdOverride: null,
+      mode: "offline",
+      error: "Disponible uniquement dans le shell Tauri.",
+    };
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<MsaAccountStatus>("msa_account_status");
+}
+
+export async function msaBeginLogin(): Promise<MsaLoginStart> {
+  if (!isTauri()) {
+    throw new Error("Disponible uniquement dans le shell Tauri.");
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<MsaLoginStart>("msa_begin_login");
+}
+
+export async function msaPollLogin(): Promise<MsaPollResult> {
+  if (!isTauri()) {
+    throw new Error("Disponible uniquement dans le shell Tauri.");
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<MsaPollResult>("msa_poll_login");
+}
+
+export async function msaCancelLogin(): Promise<void> {
+  if (!isTauri()) return;
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("msa_cancel_login");
+}
+
+export async function msaDisconnect(): Promise<MsaAccountStatus> {
+  if (!isTauri()) {
+    throw new Error("Disponible uniquement dans le shell Tauri.");
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<MsaAccountStatus>("msa_disconnect");
+}
+
+/** Fired when the PKCE loopback thread finishes exchange (success or error). */
+export type MsaLoginFinished = {
+  status: "connected" | "declined" | "expired" | "error" | string;
+  username: string | null;
+  error: string | null;
+};
+
+/** Returns an unsubscribe function; a no-op outside Tauri. */
+export async function onMsaLoginFinished(
+  handler: (event: MsaLoginFinished) => void,
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  const unlisten = await listen<MsaLoginFinished>("msa://login-finished", (e) =>
+    handler(e.payload),
+  );
+  return unlisten;
+}
+
 /**
  * `ok` — loader and the DLL of the game's version are in the game folder;
  * `wrong_version` — SKSE is there but built for another game version;
@@ -636,6 +1326,8 @@ export type RejectedPlugin = { name: string; reason: string };
 
 /** The balance sheet of one finished game session, from SKSE's own journals. */
 export type SessionReport = {
+  /** Absent or `skyrim` on older builds; `minecraft` for MC sessions. */
+  sessionKind?: "skyrim" | "minecraft" | "minecraft-smoke";
   loadoutId: number;
   /** Unix time, milliseconds. */
   endedAt: number;
@@ -666,11 +1358,53 @@ export async function getGameSessionState(): Promise<GameSessionState> {
   return invoke<GameSessionState>("game_session_state", {});
 }
 
+export type StopGameSessionResult = {
+  accepted: boolean;
+  alreadyStopped: boolean;
+  message: string | null;
+};
+
+/** Kill the active game process; `game://ended` follows once teardown completes. */
+export async function stopGameSession(): Promise<StopGameSessionResult> {
+  if (!isTauri()) {
+    return { accepted: false, alreadyStopped: true, message: null };
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<StopGameSessionResult>("stop_game_session", {});
+}
+
 /** Fired once the game (and everything it started) has fully exited. */
 export async function onGameEnded(handler: (report: SessionReport) => void): Promise<() => void> {
   if (!isTauri()) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
   return listen<SessionReport>("game://ended", (e) => handler(e.payload));
+}
+
+/** One chunk of Minecraft JVM stdout/stderr during an active session. */
+export type GameLogChunk = {
+  stream: "stdout" | "stderr" | string;
+  text: string;
+};
+
+/** Live process log while Jouer owns the JVM (`game://log`). */
+export async function onGameLog(handler: (chunk: GameLogChunk) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<GameLogChunk>("game://log", (e) => handler(e.payload));
+}
+
+/** French hint while Minecraft is still running (e.g. Sodium Fatal Startup). */
+export type GameLaunchHint = {
+  message: string;
+};
+
+/** Known mod-mismatch hint from live JVM logs — before `game://ended`. */
+export async function onGameLaunchHint(
+  handler: (hint: GameLaunchHint) => void,
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<GameLaunchHint>("game://launch-hint", (e) => handler(e.payload));
 }
 
 /** A field left `null` means `SkyrimPrefs.ini` doesn't set that key yet —
@@ -713,6 +1447,103 @@ export async function getGamePathSlots(gameId: string): Promise<GamePathSlot[]> 
   return invoke<GamePathSlot[]>("game_path_slots", { gameId });
 }
 
+export type GamePathId = "game_dir" | "mods_dir" | "downloads_dir" | "config_dir";
+
+/** Badge source for `ManagedPath`. A built-in folder is `default`, not `detected`. */
+export type GamePathOrigin = "detected" | "override" | "default" | "missing";
+
+/**
+ * Which existing command writes this path back. `null` means the folder is
+ * derived and no override is honored.
+ * - `gamePathOverride`: `setGamePathOverride(gameId, slotId, editPath)`
+ * - `downloadsDirOverride`: `setDownloadsDirOverride(editPath)` — `editPath`
+ *   is the shared downloads root, not the per-game folder in `effective`.
+ */
+export type GamePathUpdate =
+  | { via: "gamePathOverride"; slotId: string }
+  | { via: "downloadsDirOverride" }
+  | { via: "instancePathOverride"; instanceId: number; slotId: string };
+
+/**
+ * One location from `getGamePaths`. Show `effective`. Badge from `origin`.
+ * Open it only when `exists` is true. An editor loads `editPath` and saves
+ * through `update`.
+ */
+export type ManagedPath = {
+  id: GamePathId;
+  label: string;
+  kind: PathKind;
+  detected: string | null;
+  overridePath: string | null;
+  effective: string | null;
+  exists: boolean;
+  origin: GamePathOrigin;
+  editPath: string | null;
+  update: GamePathUpdate | null;
+};
+
+/** One `.ini` under `configDir`. `slotId` is set for `prefs_ini` only. */
+export type GameIniFile = {
+  name: string;
+  path: string | null;
+  present: boolean;
+  slotId: string | null;
+};
+
+/**
+ * The four paths for one game. `modsDir` for Skyrim is `<data root>/mods`
+ * (archive installs). MO2 imports keep each row's `sourcePath`. Minecraft's
+ * `modsDir` is `<instance>/mods`. `downloadsDir.effective` is the per-game
+ * subfolder; `downloadsDir.editPath` is the shared root.
+ */
+export type GamePaths = {
+  gameId: string;
+  gameDir: ManagedPath;
+  modsDir: ManagedPath;
+  downloadsDir: ManagedPath;
+  configDir: ManagedPath;
+  iniFiles: GameIniFile[];
+  /** Launcher folder, shown when installs go to a per-instance directory. */
+  referenceDir: ManagedPath | null;
+};
+
+/**
+ * Install folder, installed-mods folder, this game's downloads folder, and
+ * the INI config folder. Read-only. Lecture tier (§7.2).
+ */
+export async function getGamePaths(
+  gameId: string,
+  loadoutId?: number | null,
+): Promise<GamePaths> {
+  if (!isTauri()) return previewGamePaths(gameId);
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<GamePaths>("game_paths", { gameId, loadoutId: loadoutId ?? null });
+}
+
+/** One child of the game's install folder (path slot `root`). */
+export type GameInstallEntry = {
+  name: string;
+  kind: PathKind;
+};
+
+/**
+ * Immediate children of one folder inside the active game's install
+ * directory. `relativePath` is relative to that install folder; empty (the
+ * default) lists the folder itself. The Core refuses a path that climbs
+ * above it. `null` outside the Tauri shell: the preview has a path from
+ * `getGamePathSlots` but no folder to read, and this does not invent names.
+ * An empty list is a real empty folder (or a game with no install path —
+ * the page checks the slot first and says so itself).
+ */
+export async function listGameInstallEntries(
+  gameId: string,
+  relativePath = "",
+): Promise<GameInstallEntry[] | null> {
+  if (!isTauri()) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<GameInstallEntry[]>("game_install_entries", { gameId, relativePath });
+}
+
 /**
  * Point one path slot at a folder/file chosen by hand — Mutation réversible
  * tier (§7.2): nothing on disk moves, and `clearGamePathOverride` undoes it
@@ -731,6 +1562,31 @@ export async function setGamePathOverride(
   return invoke<GamePathSlot[]>("set_game_path_override", { gameId, slotId, path });
 }
 
+/** Point one slot of one instance at a folder. Nothing already installed is moved. */
+export async function setInstancePathOverride(
+  instanceId: number,
+  slotId: string,
+  path: string,
+): Promise<void> {
+  if (!isTauri()) {
+    throw new Error("La modification des chemins n'est disponible que dans le shell Tauri.");
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("set_instance_path_override", { instanceId, slotId, path });
+}
+
+/** Drop a human override for one instance slot. The stored folder stays. */
+export async function clearInstancePathOverride(
+  instanceId: number,
+  slotId: string,
+): Promise<void> {
+  if (!isTauri()) {
+    throw new Error("La modification des chemins n'est disponible que dans le shell Tauri.");
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("clear_instance_path_override", { instanceId, slotId });
+}
+
 /** Drop a human override for one slot, falling back to auto-detection again. */
 export async function clearGamePathOverride(
   gameId: string,
@@ -741,6 +1597,87 @@ export async function clearGamePathOverride(
   }
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<GamePathSlot[]>("clear_game_path_override", { gameId, slotId });
+}
+
+/** Where a vanilla config or an unreadable path is relative to. */
+export type VanillaLocation = "data" | "documents" | "install";
+
+/** One top-level `Data/` name that is not part of a vanilla install. */
+export type VanillaExtra = {
+  path: string;
+  kind: PathKind;
+};
+
+/** A config kept apart from `extras`. `path` is relative to `location`. */
+export type VanillaConfig = {
+  path: string;
+  location: VanillaLocation;
+};
+
+/** One path the scan could not read. */
+export type VanillaUnreadable = {
+  path: string;
+  location: VanillaLocation;
+  reason: string;
+};
+
+/**
+ * Read-only vanilla check. `scanned` is false when no `Data/` path is known —
+ * not the same as a scan that found nothing. `documentsScanned` is false when
+ * the INI folder could not be opened.
+ */
+export type VanillaScan = {
+  scanned: boolean;
+  documentsScanned: boolean;
+  extras: VanillaExtra[];
+  configs: VanillaConfig[];
+  unreadable: VanillaUnreadable[];
+};
+
+export type VanillaControlView =
+  | { status: "ready"; scan: VanillaScan }
+  | { status: "error"; message: string };
+
+/**
+ * What in this game's `Data/` (and, separately, its INI folder) is not part
+ * of a vanilla install. Read-only: nothing is deleted. Invoke `game_vanilla_scan`.
+ */
+export async function getVanillaControl(gameId: string): Promise<VanillaControlView> {
+  if (!isTauri()) return { status: "ready", scan: previewVanillaScan() };
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const scan = await invoke<VanillaScan>("game_vanilla_scan", { gameId });
+    return { status: "ready", scan };
+  } catch (error) {
+    return { status: "error", message: errorText(error) };
+  }
+}
+
+function errorText(error: unknown): string {
+  if (typeof error === "string" && error.trim()) return error;
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return "Lecture impossible.";
+}
+
+/** Browser preview only — same rule as `previewPathSlots`. Not a scan. */
+function previewVanillaScan(): VanillaScan {
+  return {
+    scanned: true,
+    documentsScanned: true,
+    extras: [
+      { path: "Meshes", kind: "dir" },
+      { path: "Mod.esp", kind: "file" },
+    ],
+    configs: [
+      { path: "foo.ini", location: "data" },
+      { path: "SKSE/skse.ini", location: "documents" },
+    ],
+    unreadable: [],
+  };
 }
 
 export type ModConflicts = {
@@ -786,6 +1723,46 @@ export async function getLoadoutConflicts(
   return invoke<LoadoutConflicts>("get_loadout_conflicts", { loadoutId });
 }
 
+/** `active` is satisfied, `disabled` is present but off, `missing` is absent. */
+export type DependencyState = "active" | "disabled" | "missing";
+
+/** How a resolved dependency relates to the mod. Absent → treat as required. */
+export type DependencyKind =
+  | "required"
+  | "optional"
+  | "incompatible"
+  | "discouraged"
+  | "usedBy";
+
+/** One dependency the game adapter could resolve. Silence means it does not know. */
+export type ResolvedDependency = {
+  name: string;
+  state: DependencyState;
+  /** Mod of this branch that provides it, when one does. */
+  providerModId: number | null;
+  providerName: string | null;
+  /** Required / optional / … / used-by. Older payloads omit it → required. */
+  kind?: DependencyKind;
+};
+
+export type ModDependencyReport = {
+  modId: number;
+  dependencies: ResolvedDependency[];
+};
+
+/**
+ * Dependencies of the active branch. Same moment as the conflict scan:
+ * again when a mod is enabled or disabled. An empty list is a finished
+ * scan that found nothing, not a skipped one.
+ */
+export async function getLoadoutDependencies(
+  loadoutId: number,
+): Promise<ModDependencyReport[]> {
+  if (!isTauri()) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<ModDependencyReport[]>("get_loadout_dependencies", { loadoutId });
+}
+
 /**
  * One resolved path from the merged view — the Core's own "what the game
  * would see in Data/" answer (`modlab_core::conflicts::merged_view`),
@@ -800,7 +1777,7 @@ export type DirectoryEntry = {
   contributorCount: number;
 };
 
-/** The Répertoire tab: every resolved path. */
+/** Resolved paths of the enabled mods' files — the merged Data view. */
 export async function getLoadoutDirectory(loadoutId: number): Promise<DirectoryEntry[]> {
   if (!isTauri()) return [];
   const { invoke } = await import("@tauri-apps/api/core");
@@ -850,19 +1827,64 @@ export type PluginsView = {
   lightLimit: number;
 };
 
+/**
+ * Browser-preview load order. Only used outside the Tauri shell, and only so
+ * the Plugins tab can show the same pills the real list uses. Ids match
+ * `mockSnapshot`'s installed mods (4 USSEP, 5 SkyUI, 6 RaceMenu).
+ */
+function previewPlugins(): PluginsView {
+  const row = (
+    fileName: string,
+    extra: Pick<PluginRow, "official" | "modId" | "modName" | "master" | "light">,
+  ): PluginRow => ({
+    fileName,
+    contributorCount: 1,
+    active: true,
+    missingMasters: [],
+    readable: true,
+    ...extra,
+  });
+  return {
+    plugins: [
+      row("Skyrim.esm", { official: true, modId: null, modName: null, master: true, light: false }),
+      row("Update.esm", { official: true, modId: null, modName: null, master: true, light: false }),
+      row("Unofficial Skyrim Special Edition Patch.esp", {
+        official: false,
+        modId: 4,
+        modName: "Unofficial Skyrim Special Edition Patch",
+        master: true,
+        light: false,
+      }),
+      row("SkyUI_SE.esp", {
+        official: false,
+        modId: 5,
+        modName: "SkyUI",
+        master: false,
+        light: false,
+      }),
+      row("RaceMenu.esl", {
+        official: false,
+        modId: 6,
+        modName: "RaceMenu",
+        master: true,
+        light: true,
+      }),
+    ],
+    issues: [],
+    activeFull: 4,
+    activeLight: 1,
+    fullLimit: 255,
+    lightLimit: 4096,
+  };
+}
+
 /** The Plugins tab: the load order computed by the Skyrim adapter from the
  * enabled mods (masters first, missing masters reported). Same computation
- * that writes plugins.txt at launch; no LOOT sorting, no manual order yet. */
+ * that writes plugins.txt at launch. LOOT is not run, and this does not read
+ * a plugins.txt back. */
 export async function getLoadoutPlugins(loadoutId: number): Promise<PluginsView> {
   if (!isTauri()) {
-    return {
-      plugins: [],
-      issues: [],
-      activeFull: 0,
-      activeLight: 0,
-      fullLimit: 255,
-      lightLimit: 4096,
-    };
+    return previewPlugins();
   }
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<PluginsView>("loadout_plugins", { loadoutId });
@@ -891,20 +1913,37 @@ export async function getSkyrimSaves(): Promise<SaveFile[]> {
   return invoke<SaveFile[]>("skyrim_saves");
 }
 
-/** A dependency the shell knows to look for on a mod — a stopgap ahead of
- * a real "known mods" registry (see the Rust side's own doc). */
-export type ModDependency = {
-  name: string;
-  satisfied: boolean;
-};
-
+/** Dependencies of one mod. Same scan as `getLoadoutDependencies`. */
 export async function getModDependencies(
   loadoutId: number,
   modId: number,
-): Promise<ModDependency[]> {
+): Promise<ResolvedDependency[]> {
   if (!isTauri()) return [];
   const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<ModDependency[]>("mod_dependencies", { loadoutId, modId });
+  return invoke<ResolvedDependency[]>("mod_dependencies", { loadoutId, modId });
+}
+
+/** A config file found in the selected mod's own folder. */
+export type ModConfigFile = {
+  /** File name only. */
+  name: string;
+  /** Path relative to the mod folder, `/`-separated. Not a game `Data/` path. */
+  relativePath: string;
+  /**
+   * UTF-8 body when the file is at most 64 KiB and textual.
+   * `null` when there is nothing to show — the file is still listed.
+   */
+  text: string | null;
+};
+
+/** Config files this mod placed. Empty when it placed none. Read-only. */
+export async function getModConfigFiles(
+  loadoutId: number,
+  modId: number,
+): Promise<ModConfigFile[]> {
+  if (!isTauri()) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<ModConfigFile[]>("mod_config_files", { loadoutId, modId });
 }
 
 /**
@@ -979,6 +2018,9 @@ export async function rollbackLoadout(loadoutId: number): Promise<ModRow[]> {
   return invoke<ModRow[]>("rollback_loadout", { loadoutId });
 }
 
+/** Browser-preview `dataRoot`. Other screens may still show it; the profile row does not. */
+export const BROWSER_PREVIEW_DATA_ROOT = "(aperçu navigateur — pas le Core)";
+
 /**
  * Browser-preview fixture. Only reachable outside the Tauri shell (`npm run dev`
  * in a plain browser), so it can never be mistaken for Core data at runtime —
@@ -997,8 +2039,75 @@ function mockSnapshot(): ShellSnapshot {
     "Static Mesh Improvement Mod",
     "Skyland AIO",
   ];
+  const sizes: (number | null)[] = [
+    840,
+    Math.round(12.3 * 1024),
+    null,
+    Math.round(12.3 * 1024 * 1024),
+    Math.round(1.2 * 1024 * 1024 * 1024),
+    4096,
+    88 * 1024,
+    Math.round(2.5 * 1024 * 1024),
+    640,
+    900 * 1024 * 1024,
+  ];
+  // Several months, on purpose: the cell shows the month, the full instant
+  // (day included) is what a sort would use. Archived and in-progress rows
+  // have no install date. Every row still has a download date, including
+  // the one whose transfer has only just started, and it is not the same
+  // instant as the install.
+  const installedAt = [
+    "2026-11-03T18:42:00.000Z",
+    null,
+    null,
+    "2026-08-14T09:05:00.000Z",
+    "2026-01-22T21:10:00.000Z",
+    "2025-12-01T08:00:00.000Z",
+    "2026-03-19T16:30:00.000Z",
+    "2025-06-02T11:15:00.000Z",
+    "2026-09-28T07:48:00.000Z",
+    "2024-11-11T22:05:00.000Z",
+  ];
+  const downloadedAt = [
+    "2026-10-28T14:12:00.000Z",
+    "2026-11-20T09:00:00.000Z",
+    "2026-11-25T04:40:00.000Z",
+    "2026-07-02T11:20:00.000Z",
+    "2025-12-18T19:45:00.000Z",
+    "2025-11-03T08:30:00.000Z",
+    "2026-02-14T13:05:00.000Z",
+    "2025-04-09T16:55:00.000Z",
+    "2026-08-21T06:18:00.000Z",
+    "2024-09-30T21:40:00.000Z",
+  ];
+  // Jeux column preview: one loader, several loaders, a version range,
+  // a Skyrim build, and a row that declared nothing.
+  const gameVersions: string[][] = [
+    ["1.20.1"],
+    ["1.20.1"],
+    ["1.21.1"],
+    ["1.20.1"],
+    ["1.20", "1.20.1", "1.21"],
+    [],
+    ["1.6.1170"],
+    [],
+    [],
+    [],
+  ];
+  const loaders: string[][] = [
+    ["fabric"],
+    ["forge"],
+    ["neoforge"],
+    ["fabric", "quilt"],
+    ["fabric"],
+    [],
+    [],
+    [],
+    [],
+    [],
+  ];
   return {
-    dataRoot: "(aperçu navigateur — pas le Core)",
+    dataRoot: BROWSER_PREVIEW_DATA_ROOT,
     games: [
       {
         id: "skyrimse",
@@ -1030,16 +2139,70 @@ function mockSnapshot(): ShellSnapshot {
       },
     ],
     loadouts: [
-      { id: 1, gameId: "skyrimse", name: "Main 2026", modCount: 10, channel: "stable", revision: 12 },
-      { id: 2, gameId: "skyrimse", name: "Labo météo", modCount: 7, channel: "alpha", revision: 3 },
-      { id: 3, gameId: "skyrimse", name: "Bench FG", modCount: 4, channel: "beta", revision: 5 },
+      {
+        id: 1,
+        gameId: "skyrimse",
+        name: "principale",
+        instanceId: 1,
+        instanceName: "Main 2026",
+        modCount: 10,
+        channel: "stable",
+        revision: 12,
+        mcLoader: null,
+        mcGameVersion: null,
+        mcLoaderVersion: null,
+      },
+      {
+        id: 5,
+        gameId: "skyrimse",
+        name: "essai",
+        instanceId: 1,
+        instanceName: "Main 2026",
+        modCount: 10,
+        channel: "beta",
+        revision: 1,
+        mcLoader: null,
+        mcGameVersion: null,
+        mcLoaderVersion: null,
+      },
+      {
+        id: 2,
+        gameId: "skyrimse",
+        name: "principale",
+        instanceId: 2,
+        instanceName: "Labo météo",
+        modCount: 7,
+        channel: "alpha",
+        revision: 3,
+        mcLoader: null,
+        mcGameVersion: null,
+        mcLoaderVersion: null,
+      },
+      {
+        id: 3,
+        gameId: "skyrimse",
+        name: "principale",
+        instanceId: 3,
+        instanceName: "Bench FG",
+        modCount: 4,
+        channel: "beta",
+        revision: 5,
+        mcLoader: null,
+        mcGameVersion: null,
+        mcLoaderVersion: null,
+      },
       {
         id: 4,
         gameId: "minecraft",
-        name: "Survie Fabric 1.21",
+        name: "principale",
+        instanceId: 4,
+        instanceName: "Survie Fabric 1.21",
         modCount: 14,
         channel: "stable",
         revision: 8,
+        mcLoader: "fabric",
+        mcGameVersion: "1.21",
+        mcLoaderVersion: null,
       },
     ],
     entries: names.map((name, i) => ({
@@ -1051,12 +2214,29 @@ function mockSnapshot(): ShellSnapshot {
       // Skyrim mods imported from MO2 genuinely carry no version — the
       // preview shows the same dashes the real shell does.
       version: null,
-      // One archived row so the preview shows what a fresh capture looks
-      // like before it is unpacked; everything else came from an import and
-      // is therefore installed.
-      status: i === 1 ? ("archived" as const) : ("installed" as const),
+      // One archived row and one in-progress download, so the preview shows
+      // both states a capture passes through. Everything else came from an
+      // import and is therefore installed.
+      status:
+        i === 1 ? ("archived" as const) : i === 2 ? ("downloading" as const) : ("installed" as const),
       category: i === 1 ? "Éclairage" : null,
       archivePath: i === 1 ? `F:/ModLab/downloads/${name}.7z` : null,
+      tool: i === 0 ? "skse" : null,
+      toolVersion: null,
+      sourceHost: null,
+      pageUrl: null,
+      gameVersions: gameVersions[i] ?? [],
+      loaders: loaders[i] ?? [],
+      dependencies: [],
+      categoryUserSet: false,
+      categoryRaw: null,
+      categoryNexusId: null,
+      nexusModId: null,
+      author: null,
+      website: null,
+      sizeBytes: sizes[i] ?? null,
+      installedAt: installedAt[i] ?? null,
+      downloadedAt: downloadedAt[i] ?? null,
     })),
     selectedLoadoutId: 1,
     usvfsDll: null,
@@ -1080,7 +2260,7 @@ function previewMinecraftContent(): MinecraftContent {
 /**
  * Browser-preview fixture for path slots — same rule as `mockSnapshot`: only
  * reachable outside the Tauri shell. Mirrors each real adapter's actual slot
- * ids (`skyrimse`: root/exe/data_dir/usvfs_dll, `minecraft`: root/mods_dir)
+ * ids (`skyrimse`: root/exe/data_dir/usvfs_dll/prefs_ini/saves_dir, `minecraft`: root/launcher_exe/mods_dir)
  * so the Réglages → Jeux layout can be built and eyeballed without the Core.
  */
 function previewPathSlots(gameId: string): GamePathSlot[] {
@@ -1088,11 +2268,19 @@ function previewPathSlots(gameId: string): GamePathSlot[] {
     return [
       {
         id: "root",
-        label: "Dossier .minecraft / launcher",
+        label: "Dossier du launcher Minecraft",
         kind: "dir",
-        detected: "C:\\Users\\dev\\AppData\\Roaming\\.minecraft",
+        detected: "C:\\Users\\dev\\curseforge\\minecraft\\Install",
         overridePath: null,
-        effective: "C:\\Users\\dev\\AppData\\Roaming\\.minecraft",
+        effective: "C:\\Users\\dev\\curseforge\\minecraft\\Install",
+      },
+      {
+        id: "launcher_exe",
+        label: "Exécutable du launcher Minecraft",
+        kind: "file",
+        detected: "C:\\Users\\dev\\curseforge\\minecraft\\Install\\minecraft.exe",
+        overridePath: null,
+        effective: "C:\\Users\\dev\\curseforge\\minecraft\\Install\\minecraft.exe",
       },
       {
         id: "mods_dir",
@@ -1137,7 +2325,130 @@ function previewPathSlots(gameId: string): GamePathSlot[] {
       overridePath: null,
       effective: null,
     },
+    {
+      id: "prefs_ini",
+      label: "SkyrimPrefs.ini",
+      kind: "file",
+      detected: "C:\\Users\\dev\\Documents\\My Games\\Skyrim Special Edition\\SkyrimPrefs.ini",
+      overridePath: null,
+      effective: "C:\\Users\\dev\\Documents\\My Games\\Skyrim Special Edition\\SkyrimPrefs.ini",
+    },
+    {
+      id: "saves_dir",
+      label: "Dossier des sauvegardes",
+      kind: "dir",
+      detected: "C:\\Users\\dev\\Documents\\My Games\\Skyrim Special Edition\\Saves",
+      overridePath: null,
+      effective: "C:\\Users\\dev\\Documents\\My Games\\Skyrim Special Edition\\Saves",
+    },
   ];
+}
+
+function previewManagedPath(
+  id: GamePathId,
+  label: string,
+  path: string | null,
+  origin: GamePathOrigin,
+  update: GamePathUpdate | null,
+  editPath: string | null = path,
+): ManagedPath {
+  return {
+    id,
+    label,
+    kind: "dir",
+    detected: origin === "override" ? null : path,
+    overridePath: origin === "override" ? path : null,
+    effective: path,
+    exists: path !== null,
+    origin,
+    editPath: update ? editPath : null,
+    update,
+  };
+}
+
+/**
+ * Browser-preview fixture for `getGamePaths`. Same rule as `previewPathSlots`:
+ * only outside the Tauri shell. Paths are illustrative, not this machine.
+ */
+function previewGamePaths(gameId: string): GamePaths {
+  if (gameId === "minecraft") {
+    const instance = "F:\\ModLab\\instances\\minecraft\\.decube";
+    return {
+      gameId,
+      gameDir: previewManagedPath(
+        "game_dir",
+        "Dossier de l'instance",
+        instance,
+        "default",
+        { via: "instancePathOverride", instanceId: 1, slotId: "instance_root" },
+      ),
+      modsDir: previewManagedPath(
+        "mods_dir",
+        "Dossier mods/",
+        `${instance}\\mods`,
+        "default",
+        { via: "instancePathOverride", instanceId: 1, slotId: "mods_dir" },
+      ),
+      downloadsDir: previewManagedPath(
+        "downloads_dir",
+        "Téléchargements",
+        "F:\\ModLab\\downloads\\minecraft",
+        "default",
+        { via: "downloadsDirOverride" },
+        "F:\\ModLab\\downloads",
+      ),
+      configDir: previewManagedPath(
+        "config_dir",
+        "Dossier config/",
+        `${instance}\\config`,
+        "default",
+        { via: "instancePathOverride", instanceId: 1, slotId: "config_dir" },
+      ),
+      iniFiles: [],
+      referenceDir: previewManagedPath(
+        "game_dir",
+        "Dossier du launcher Minecraft",
+        "C:\\Users\\dev\\curseforge\\minecraft\\Install",
+        "detected",
+        { via: "gamePathOverride", slotId: "root" },
+      ),
+    };
+  }
+  const root = "C:\\Steam\\Skyrim Special Edition";
+  const configs = "C:\\Users\\dev\\Documents\\My Games\\Skyrim Special Edition";
+  return {
+    gameId,
+    gameDir: previewManagedPath("game_dir", "Dossier d'installation", root, "detected", {
+      via: "gamePathOverride",
+      slotId: "root",
+    }),
+    modsDir: previewManagedPath("mods_dir", "Mods installés", "F:\\ModLab\\mods", "default", null),
+    downloadsDir: previewManagedPath(
+      "downloads_dir",
+      "Téléchargements",
+      "F:\\ModLab\\downloads\\skyrimse",
+      "default",
+      { via: "downloadsDirOverride" },
+      "F:\\ModLab\\downloads",
+    ),
+    configDir: previewManagedPath("config_dir", "Configs (.ini)", configs, "detected", null),
+    iniFiles: [
+      { name: "Skyrim.ini", path: `${configs}\\Skyrim.ini`, present: true, slotId: null },
+      {
+        name: "SkyrimPrefs.ini",
+        path: `${configs}\\SkyrimPrefs.ini`,
+        present: true,
+        slotId: "prefs_ini",
+      },
+      {
+        name: "SkyrimCustom.ini",
+        path: `${configs}\\SkyrimCustom.ini`,
+        present: false,
+        slotId: null,
+      },
+    ],
+    referenceDir: null,
+  };
 }
 
 /**

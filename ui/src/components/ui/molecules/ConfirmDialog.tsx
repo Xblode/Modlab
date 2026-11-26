@@ -1,11 +1,10 @@
 import { useState } from "react";
 import { Button } from "../atoms/Button";
-import { IconButton } from "../atoms/IconButton";
+import { Dialog } from "./Dialog";
 
 /**
  * A generic yes/no confirmation modal for an action worth a pause before it
- * fires — same `modal-backdrop`/`modal` markup as `CreateLoadoutDialog` and
- * `Mo2ImportDialog`, just without a form.
+ * fires. The shell is `Dialog`; this only owns the confirm/cancel actions.
  */
 export function ConfirmDialog({
   title,
@@ -39,20 +38,13 @@ export function ConfirmDialog({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <div
-        className="modal"
-        role="alertdialog"
-        aria-labelledby="confirm-dialog-title"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="modal-head">
-          <h2 id="confirm-dialog-title">{title}</h2>
-          <IconButton name="x" title="Fermer" onClick={onClose} />
-        </div>
-        <p className="modal-copy">{body}</p>
-        {message ? <p className="modal-error">{message}</p> : null}
-        <div className="modal-actions">
+    <Dialog
+      titleId="confirm-dialog-title"
+      title={title}
+      role="alertdialog"
+      onClose={onClose}
+      actions={
+        <>
           <Button variant="sm-ghost" onClick={onClose}>
             Annuler
           </Button>
@@ -64,8 +56,11 @@ export function ConfirmDialog({
           >
             {busy ? "…" : confirmLabel}
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <p className="modal-copy">{body}</p>
+      {message ? <p className="modal-error">{message}</p> : null}
+    </Dialog>
   );
 }

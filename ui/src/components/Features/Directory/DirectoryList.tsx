@@ -4,8 +4,8 @@ import { Ico } from "../../../Ico";
 
 /**
  * A flat list of `DirectoryEntry` rows — the merged view (or a filtered
- * slice of it), shared by the Plugins/Archives/Répertoire tabs. Each one
- * only differs in which fetch it calls and what its empty state says.
+ * slice of it). The Archives tab uses it. The Répertoire tab does not: that
+ * one lists the game's install folder, which is not a merged-view row.
  */
 export function DirectoryList({
   loadoutId,

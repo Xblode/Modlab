@@ -12,12 +12,21 @@
 //! creates, moves, hides and navigates it.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::webview::{DownloadEvent, WebviewBuilder};
-use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl};
+use tauri::webview::{DownloadEvent, PageLoadEvent, WebviewBuilder};
+use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl};
 
 /// The one embedded browser. A single persistent tab, per the design
 /// decision — so its label is a constant, not a generated id.
 pub const BROWSER_LABEL: &str = "modlab-browser";
+
+/// Emitted when a main-frame load starts and when it ends, so the address
+/// bar follows links the human clicks inside the page.
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct BrowserNavigated {
+    url: String,
+    loading: bool,
+}
 
 /// Where the browser sits inside the shell window, in CSS pixels as the React
 /// side measures them. Tauri's `Logical*` types use the same unit, so the
@@ -87,8 +96,27 @@ pub fn create_parked(app: &AppHandle) -> Result<(), String> {
         .ok_or_else(|| "fenêtre principale introuvable".to_string())?;
 
     let blank: tauri::Url = "about:blank".parse().expect("about:blank parses");
-    let builder = WebviewBuilder::new(BROWSER_LABEL, WebviewUrl::External(blank)).on_download(
-        move |webview, event| {
+    let builder = WebviewBuilder::new(BROWSER_LABEL, WebviewUrl::External(blank))
+        .on_page_load(|webview, payload| {
+            // Main-frame loads only (WebView2's NavigationCompleted). A
+            // client-side route that never loads a document is not seen
+            // here; asking the webview for its URL from the download
+            // callback would wait on this same UI thread.
+            let _ = webview.app_handle().emit(
+                "browser://navigated",
+                BrowserNavigated {
+                    url: payload.url().to_string(),
+                    loading: payload.event() == PageLoadEvent::Started,
+                },
+            );
+            if payload.event() != PageLoadEvent::Finished {
+                return;
+            }
+            if let Some(state) = webview.try_state::<crate::AppState>() {
+                crate::downloads::remember_browser_page(&state, payload.url().as_str());
+            }
+        })
+        .on_download(move |webview, event| {
             // Capture is the whole point of this webview, but it stays a
             // *capture* of what the human clicked: nothing here starts a
             // download, it only observes the ones the page starts.
@@ -104,8 +132,7 @@ pub fn create_parked(app: &AppHandle) -> Result<(), String> {
             // `true` = let it proceed. Refusing would just break the page's
             // own button for no benefit.
             true
-        },
-    );
+        });
 
     window
         .add_child(
@@ -114,6 +141,11 @@ pub fn create_parked(app: &AppHandle) -> Result<(), String> {
             LogicalSize::new(HIDDEN.width, HIDDEN.height),
         )
         .map_err(|e| e.to_string())?;
+    // Tauri's download hook has no byte counts. A second WebView2 listener
+    // (it does not replace Tauri's) emits `download://progress`.
+    if let Some(webview) = app.get_webview(BROWSER_LABEL) {
+        crate::download_progress::attach(&webview);
+    }
     Ok(())
 }
 
@@ -142,6 +174,9 @@ pub fn hide(app: &AppHandle) -> Result<(), String> {
 /// game's Nexus page" default.
 pub fn navigate(app: &AppHandle, url: &str) -> Result<(), String> {
     let parsed: tauri::Url = url.parse().map_err(|_| format!("URL invalide : {url}"))?;
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        crate::downloads::remember_browser_page(&state, parsed.as_str());
+    }
     on_main(app, move |app| {
         if let Some(webview) = app.get_webview(BROWSER_LABEL) {
             let _ = webview.navigate(parsed);
@@ -155,7 +190,7 @@ pub fn navigate(app: &AppHandle, url: &str) -> Result<(), String> {
 pub fn go(app: &AppHandle, delta: i32) -> Result<(), String> {
     on_main(app, move |app| {
         if let Some(webview) = app.get_webview(BROWSER_LABEL) {
-            let _ = webview.eval(&format!("history.go({delta})"));
+            let _ = webview.eval(format!("history.go({delta})"));
         }
     })
 }

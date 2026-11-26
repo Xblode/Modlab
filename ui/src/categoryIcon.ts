@@ -1,10 +1,6 @@
 /**
- * A deterministic icon per category name — same name always gets the same
- * icon, with no per-category storage anywhere (a category is just a free
- * tag on `mod_`, not a first-class Core entity yet). Picked from the
- * existing icon set rather than adding new art, biased toward glyphs that
- * read reasonably as "kind of mod" (palette, wand, shield…) without
- * pretending to know what any given tag actually means.
+ * Icon for a legacy free-text tag that is not one of the game's category
+ * ids. A known id uses the icon the adapter sent (`presentCategory`).
  */
 const CATEGORY_ICONS = [
   "palette",
@@ -25,4 +21,18 @@ export function categoryIcon(category: string): string {
     hash = (hash * 31 + category.charCodeAt(i)) >>> 0;
   }
   return CATEGORY_ICONS[hash % CATEGORY_ICONS.length];
+}
+
+export type CategoryRef = { id: string; label: string; icon: string };
+
+/** Icon and French label for a stored category id. Empty stays a dash. */
+export function presentCategory(
+  stored: string | null | undefined,
+  catalog: readonly CategoryRef[],
+): { icon: string | null; label: string } {
+  const value = stored?.trim() ?? "";
+  if (!value) return { icon: null, label: "—" };
+  const known = catalog.find((item) => item.id === value);
+  if (known) return { icon: known.icon, label: known.label };
+  return { icon: categoryIcon(value), label: value };
 }

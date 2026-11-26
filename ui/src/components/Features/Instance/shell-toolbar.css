@@ -1,0 +1,249 @@
+/* Instance toolbar — shell slot under the Mods hero (`header`), above the sheet.
+ *
+ * Primary-action slot (`.tbar-primary-slot`): same height as `.select`
+ * (`--ctl-sm`). Default = Select atom (branch); swaps to bordered install CTA
+ * when a loader must be installed, then returns. See DESIGN.md « Slot action
+ * principale » / « Select ».
+ *
+ * Toolbar compaction (container queries on `.tbar.shell-toolbar`):
+ * - Wide: full labels (branch name, “N branches”, “Ajouter un mod”, …).
+ * - ≤940px: counts → icon/digit (+ tip); branch select → icon + r.N; labeled
+ *   buttons → icon-only (IconButton footprint for ghost; bordered action stays
+ *   a square `--ctl-sm`). The primary-slot install CTA keeps its label.
+ *   Borders remain only on primary controls (branch select / install CTA +
+ *   « Ajouter un mod ») — never on every control.
+ * - ≤700px: drop the lead stats entirely; tighten gaps.
+ * See DESIGN.md « Toolbar compaction » and DesignSystemPage.
+ */
+.main-stack > .shell-slot-toolbar > .tbar.shell-toolbar {
+  margin: 0;
+}
+
+.shell-add-mod-anchor {
+  display: inline-flex;
+  flex: none;
+}
+
+.tbar.shell-toolbar {
+  container-type: inline-size;
+  gap: 16px;
+  /* Same vertical padding top and bottom around --ctl-sm controls. */
+  height: calc(var(--ctl-sm) + 10px);
+  padding: 5px 12px 5px 16px;
+  border-top: 1px solid var(--line);
+  border-bottom: none;
+}
+
+/* Hero separator lives on the toolbar top — no stacked line under the header. */
+.mods-head .ghero {
+  border-bottom: none;
+}
+
+.shell-toolbar .repo-lead {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* Same footprint for branch select and primary CTA (install loader, …). */
+.shell-toolbar .tbar-primary-slot {
+  display: inline-flex;
+  align-items: stretch;
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 1 auto;
+}
+
+.shell-toolbar .tbar-primary-slot > .select,
+.shell-toolbar .tbar-primary-slot > .tbar-primary-action {
+  height: var(--ctl-sm);
+  max-width: 100%;
+  min-width: 0;
+}
+
+.shell-toolbar .tbar-primary-action {
+  /* Keep label + border; fill the slot like the select (not icon-only compact). */
+  width: auto;
+  min-width: 10rem;
+  justify-content: center;
+}
+
+.shell-toolbar .tbar-primary-action:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+/* Base look lives on `.select` in shell.css; toolbar only tweaks compaction. */
+
+.shell-toolbar .repo-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  color: var(--t2);
+  font-size: var(--fs-md);
+  white-space: nowrap;
+}
+
+.shell-toolbar .repo-stat .ico {
+  width: 16px;
+  height: 16px;
+  color: var(--t3);
+}
+
+/* Narrow twin for counts — hidden until the compact breakpoint. */
+.shell-toolbar .tbar-stat-narrow {
+  display: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.shell-toolbar .repo-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.shell-toolbar .repo-counts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--t3);
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.shell-toolbar .repo-counts b {
+  color: var(--t2);
+  font-weight: 500;
+}
+
+.shell-toolbar .repo-count-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--t2);
+}
+
+.shell-toolbar .repo-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.shell-toolbar .repo-sync .ico {
+  width: 16px;
+  height: 16px;
+}
+
+.shell-toolbar .repo-sync.ok {
+  color: var(--green);
+}
+
+.shell-toolbar .repo-sync.dirty {
+  color: var(--warn);
+}
+
+.shell-toolbar .repo-sync.pending {
+  color: var(--t3);
+}
+
+.mods-head {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.popover-menu.branch-menu {
+  min-width: 300px;
+  max-height: min(480px, calc(100vh - 96px));
+}
+
+/* —— Compact (≤940px container): keep info, drop words —— */
+@container (max-width: 940px) {
+  .tbar.shell-toolbar {
+    gap: 10px;
+  }
+
+  .shell-toolbar .repo-lead {
+    gap: 8px;
+  }
+
+  /* Select → icon + short revision (r.12); name lives in data-tip / aria-label. */
+  .shell-toolbar .select .select-label {
+    display: none;
+  }
+
+  .shell-toolbar .select {
+    padding: 0 6px 0 8px;
+    gap: 6px;
+  }
+
+  /* Counts → icon + digit (or ChannelDot alone); tip keeps the full phrase. */
+  .shell-toolbar .tbar-stat-wide,
+  .shell-toolbar .tbar-unit {
+    display: none;
+  }
+
+  .shell-toolbar .tbar-stat-narrow {
+    display: inline;
+  }
+
+  .shell-toolbar .repo-counts {
+    gap: 8px;
+  }
+
+  /* Labeled toolbar buttons → icon-only; type/variant unchanged. */
+  .shell-toolbar .btn-label {
+    display: none;
+  }
+
+  /* Ghost actions match neighbouring IconButton (24×24, no border). */
+  .shell-toolbar .btn.sm.ghost:has(.btn-label) {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    gap: 0;
+    justify-content: center;
+  }
+
+  /* Primary bordered action stays bordered, square --ctl-sm (rare border).
+   * Exception: `.tbar-primary-action` keeps its label (replaces the select). */
+  .shell-toolbar .btn.action:has(.btn-label):not(.tbar-primary-action) {
+    width: var(--ctl-sm);
+    height: var(--ctl-sm);
+    padding: 0;
+    gap: 0;
+    justify-content: center;
+  }
+
+  .shell-toolbar .tbar-primary-action .btn-label {
+    display: inline;
+  }
+}
+
+/* —— Tight (≤700px): drop secondary lead stats —— */
+@container (max-width: 700px) {
+  .tbar.shell-toolbar {
+    gap: 8px;
+    padding-inline: 8px 10px;
+  }
+
+  .shell-toolbar .repo-stat {
+    display: none;
+  }
+
+  .shell-toolbar .repo-counts {
+    gap: 6px;
+  }
+}

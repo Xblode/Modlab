@@ -1,5 +1,7 @@
 # Archive
 
+**Agents : ce dossier est hors périmètre par défaut.** Ne pas ouvrir ni lire ces fichiers en session sauf demande explicite de l'humain (économie de tokens, éviter les consignes dépassées).
+
 Ne jamais mettre en œuvre ces documents tels quels.
 
 Rien n'a été supprimé : chaque fichier est conservé pour l'historique.

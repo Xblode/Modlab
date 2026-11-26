@@ -9,6 +9,10 @@ import { Ico } from "../../../Ico";
  * native checkbox rather than a `<span role="checkbox">`, so it is focusable,
  * togglable with Space and announced with its real state. The input is laid
  * over the square (border included, hence the -1px) at zero opacity.
+ *
+ * `default` keeps the DS / settings look (filled accent + check glyph when on).
+ * `mod` is the denser ModTable enable control: framed case with a soft accent
+ * wash and a small inner accent square when on (Radio-like, no checkmark).
  */
 const OVERLAY: CSSProperties = {
   position: "absolute",
@@ -22,19 +26,28 @@ const OVERLAY: CSSProperties = {
   cursor: "inherit",
 };
 
+export type CheckboxVariant = "default" | "mod";
+
 export function Checkbox({
   checked,
   onToggle,
   className,
   stopPropagation = false,
+  variant = "default",
   ...props
 }: Omit<ComponentProps<"input">, "checked" | "onChange" | "type"> & {
   checked: boolean;
   onToggle: () => void;
   /** Keep the click from reaching a clickable row underneath. */
   stopPropagation?: boolean;
+  variant?: CheckboxVariant;
 }) {
-  const classNames = ["chk", checked ? "on" : "", className ?? ""]
+  const classNames = [
+    "chk",
+    variant !== "default" ? variant : "",
+    checked ? "on" : "",
+    className ?? "",
+  ]
     .filter(Boolean)
     .join(" ");
   return (
@@ -50,7 +63,11 @@ export function Checkbox({
         style={OVERLAY}
         {...props}
       />
-      {checked ? <Ico name="check" className="sm" /> : null}
+      {variant === "mod" ? (
+        <span className="chk-mod-dot" aria-hidden />
+      ) : checked ? (
+        <Ico name="check" className="sm" />
+      ) : null}
     </span>
   );
 }

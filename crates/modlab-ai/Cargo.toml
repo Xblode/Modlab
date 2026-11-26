@@ -7,7 +7,7 @@ description = "ModLab local AI layer: the rules engine diagnoses from Core facts
 
 [dependencies]
 llama-cpp-2 = { version = "=0.1.156", optional = true }
-encoding_rs = { version = "0.8", optional = true }
+encoding_rs = { workspace = true, optional = true }
 
 [features]
 # Off by default: pulling it in means a full llama.cpp C++ build (needs LLVM +

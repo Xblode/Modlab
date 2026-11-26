@@ -1,4 +1,4 @@
-import type { SessionReport, SkseStatus } from "./api";
+import type { SessionReport } from "./api";
 
 /** A short message pinned under the instance card: why a launch was
  * refused, or what SKSE's journals said about the session that just ended. */
@@ -10,29 +10,6 @@ export type LaunchNotice = {
 
 const plural = (n: number, one: string, many: string) => (n > 1 ? many : one);
 
-/** The engine indicator's chip: what the sidebar shows for SKSE. Read from
- * the game folder (loader and the DLL of the game's version), never from
- * a mod's name. */
-export function skseChip(status: SkseStatus | null): {
-  sub: string;
-  tone: "ok" | "warn" | "off";
-  hint: string;
-} {
-  if (!status) {
-    return { sub: "non vérifié", tone: "off", hint: "L’état de SKSE n’a pas pu être lu." };
-  }
-  switch (status.state) {
-    case "ok":
-      return { sub: status.gameVersion ?? "prêt", tone: "ok", hint: status.message };
-    case "wrong_version":
-      return { sub: "mauvaise version", tone: "warn", hint: status.message };
-    case "unverifiable":
-      return { sub: "non vérifiable", tone: "warn", hint: status.message };
-    default:
-      return { sub: "absent", tone: "off", hint: status.message };
-  }
-}
-
 /** A launch the Core refused (its message is already French; the "Lancement
  * annulé." lead-in becomes the title). */
 export function noticeFromRefusal(message: string): LaunchNotice {
@@ -41,8 +18,38 @@ export function noticeFromRefusal(message: string): LaunchNotice {
   return { tone: "bad", title: "Lancement annulé", lines: [body] };
 }
 
+/** Informational notice under Jouer (vanilla fallback / offline notes). */
+export function noticeFromInfo(message: string): LaunchNotice {
+  return {
+    tone: "warn",
+    title: "Minecraft",
+    lines: [message],
+  };
+}
+
 /** The balance sheet of a finished session. */
 export function noticeFromReport(r: SessionReport): LaunchNotice {
+  if (r.sessionKind === "minecraft-smoke") {
+    const lines: string[] = [];
+    if (r.error) lines.push(r.error);
+    for (const n of r.loaderNotes) lines.push(n);
+    const ok = !r.error;
+    return {
+      tone: ok ? "ok" : "bad",
+      title: ok ? "Test de lancement OK" : "Test de lancement échoué",
+      lines: lines.length > 0 ? lines : [ok ? "Menu atteint." : "Échec."],
+    };
+  }
+  if (r.sessionKind === "minecraft") {
+    const lines: string[] = [];
+    if (r.error) lines.push(r.error);
+    for (const n of r.loaderNotes) lines.push(`Java : ${n}`);
+    return {
+      tone: r.error ? "warn" : "ok",
+      title: r.error ? "Minecraft : session interrompue" : "Partie Minecraft terminée",
+      lines,
+    };
+  }
   const lines: string[] = [];
   if (r.error) lines.push(`Suivi de la partie : ${r.error}`);
 
@@ -90,6 +97,16 @@ export function noticeFromReport(r: SessionReport): LaunchNotice {
 
 /** The one-line toast shown when a session ends. */
 export function toastFromReport(r: SessionReport): string {
+  if (r.sessionKind === "minecraft-smoke") {
+    if (r.error) return r.error;
+    const note = r.loaderNotes.find((n) => n.startsWith("Test OK") || n.startsWith("Test "));
+    return note ?? "Test de lancement terminé.";
+  }
+  if (r.sessionKind === "minecraft") {
+    if (!r.error) return "Partie Minecraft terminée.";
+    const tail = r.loaderNotes.length > 0 ? ` (${r.loaderNotes[r.loaderNotes.length - 1]})` : "";
+    return `Partie terminée — ${r.error}${tail}`;
+  }
   if (!r.logFound || !r.logFresh || !r.skseInitialized) {
     return "Partie terminée — SKSE ne s’est pas initialisé (voir le bilan).";
   }

@@ -1,0 +1,126 @@
+/* One 24px column at the start of each explorer line.
+   Icons, the channel dot and the 3×3 pixel grid are centered in it.
+   Labels share the x that follows the column. The current line is --c3. */
+
+.side-row.explorer-line,
+.tr.explorer-line {
+  align-items: center;
+  gap: 0;
+  height: var(--row);
+  padding-left: 0;
+  background: transparent;
+}
+
+.side-row.explorer-line.nested,
+.tr.explorer-line.instance-empty {
+  padding-left: 0;
+}
+
+.side-row.explorer-line .side-row-main {
+  gap: 0;
+  padding-left: 0;
+  background: transparent;
+}
+
+.side-row.explorer-line:hover,
+.side-row.explorer-line.current,
+.side-row.explorer-line.current:hover,
+.tr.explorer-line:hover,
+.tr.explorer-line.sel,
+.tr.explorer-line.sel:hover {
+  background: var(--c3);
+  color: var(--t1);
+}
+
+.explorer-line > .side-mark,
+.explorer-line .side-row-main > .side-mark {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+  place-items: center;
+  width: 24px;
+  min-width: 24px;
+  height: var(--row);
+  flex: none;
+}
+
+.explorer-line .game-folder.side-mark > .ico {
+  grid-area: 1 / 1;
+  place-self: center;
+  width: 16px;
+  height: 16px;
+  color: var(--t3);
+}
+
+.explorer-line .game-folder > .game-folder-chev {
+  opacity: 0;
+}
+
+.explorer-line .game-folder:hover > .game-folder-ico {
+  opacity: 0;
+}
+
+.explorer-line .game-folder:hover > .game-folder-chev {
+  opacity: 1;
+}
+
+.explorer-line .game-folder:hover > .ico {
+  color: var(--t1);
+}
+
+.side-row.explorer-line > .side-row-trailing {
+  position: absolute;
+  right: 4px;
+  top: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.side-row.explorer-line:hover > .side-row-trailing,
+.side-row.explorer-line:focus-within > .side-row-trailing {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.instance-tail {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 100%;
+}
+
+.instance-tail > .ico {
+  width: 16px;
+  height: 16px;
+  color: var(--t3);
+}
+
+.tr.explorer-line .lbl {
+  flex: 1;
+  min-width: 0;
+}
+
+.explorer-line .pixel-loader {
+  color: var(--t1);
+}
+
+.pixel-loader {
+  display: inline-grid;
+  grid-template-columns: repeat(3, 3px);
+  grid-template-rows: repeat(3, 3px);
+  gap: 2px;
+  width: 13px;
+  height: 13px;
+  flex: none;
+  color: currentColor;
+}
+
+.pixel-loader > span {
+  display: block;
+  width: 3px;
+  height: 3px;
+  background: currentColor;
+}

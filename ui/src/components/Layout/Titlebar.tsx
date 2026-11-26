@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { Ico } from "../../Ico";
 import { tip } from "../ui";
 import { TabStrip } from "../Features/Tabs/TabStrip";
 import type { TabDef, TabId } from "../../gameChrome";
+import "./titlebar-tools.css";
 
 /** Same guard as `api.ts`: outside the Tauri shell there is no window to drive. */
 function isTauri(): boolean {
@@ -55,35 +56,41 @@ function useMaximized(): [boolean, () => void] {
  * The window's own title bar — Windows has none of its own
  * (`decorations: false`). The page's own tab strip lives here too (so it
  * never costs its own row), then the drag region, the shell-wide action
- * buttons (browser, IA, console — moved here from the tab strip so they
- * stay reachable no matter what page is open) and the three window
- * controls: no app menu (back in the sidebar, its original spot) and no
- * title/logo.
+ * buttons (Web, IA, console, search — the first three open tabs in the
+ * right column) and
+ * the three window controls: no app menu (back in the sidebar, its
+ * original spot) and no title/logo.
  */
 export function Titlebar({
   hideTabs,
   tabs,
   currentTab,
   modCount,
-  webOpen,
   onSelectTab,
   webActive,
   aiActive,
+  consoleActive,
   onOpenWeb,
   onOpenAi,
   onOpenConsole,
+  onOpenSearch,
+  webButtonRef,
 }: {
   hideTabs?: boolean;
   tabs: TabDef[];
   currentTab: TabId;
   modCount: number;
-  webOpen: boolean;
   onSelectTab: (tab: TabId) => void;
   webActive: boolean;
   aiActive: boolean;
+  consoleActive: boolean;
   onOpenWeb: () => void;
   onOpenAi: () => void;
   onOpenConsole: () => void;
+  /** Opens the existing command palette (same entry as Ctrl+K). */
+  onOpenSearch: () => void;
+  /** Optional ref on the Web tool (legacy anchor; picker lives on Ajouter un mod). */
+  webButtonRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const [maximized, toggleMaximize] = useMaximized();
 
@@ -104,7 +111,6 @@ export function Titlebar({
           tabs={tabs}
           currentTab={currentTab}
           modCount={modCount}
-          webOpen={webOpen}
           onSelect={onSelectTab}
         />
       )}
@@ -118,8 +124,9 @@ export function Titlebar({
       <div className="tb-actions">
         <button
           type="button"
-          className="ti"
-          {...tip("Navigateur intégré")}
+          className="tb-tool"
+          ref={webButtonRef}
+          {...tip("Web")}
           aria-pressed={webActive}
           onClick={onOpenWeb}
         >
@@ -127,20 +134,29 @@ export function Titlebar({
         </button>
         <button
           type="button"
-          className="ti claude"
+          className="tb-tool"
+          {...tip("Chat")}
           aria-pressed={aiActive}
           onClick={onOpenAi}
         >
           <Ico name="sparkle" />
-          <span className="n">IA</span>
         </button>
         <button
           type="button"
-          className="ti"
+          className="tb-tool"
           {...tip("Console", "Ctrl J")}
+          aria-pressed={consoleActive}
           onClick={onOpenConsole}
         >
           <Ico name="term" />
+        </button>
+        <button
+          type="button"
+          className="tb-tool"
+          {...tip("Rechercher", "Ctrl K")}
+          onClick={onOpenSearch}
+        >
+          <Ico name="search" />
         </button>
       </div>
 

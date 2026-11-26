@@ -7,10 +7,10 @@ description = "ModLab engine: the single source of truth. UI, CLI and MCP are al
 
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
-thiserror = "1"
+thiserror = { workspace = true }
 blake3 = "1"
-tempfile = "3"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+tempfile = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 sevenz-rust = "0.6"
-zip = "2"
+zip = { workspace = true }

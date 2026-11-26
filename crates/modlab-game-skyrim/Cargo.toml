@@ -7,13 +7,13 @@ description = "The Skyrim Game Adapter — everything Bethesda-modding-specific 
 
 [dependencies]
 modlab-core = { path = "../modlab-core" }
-thiserror = "1"
+thiserror = { workspace = true }
 roxmltree = "0.20"
 # Header-only reader for .esp/.esm/.esl (flags + masters) — the same crate LOOT
 # uses; see `plugins.rs` for why it is used instead of a hand-written parser.
 esplugin = "6"
 # Windows-1252 encoding of plugins.txt (already pulled in by esplugin).
-encoding_rs = "0.8"
+encoding_rs = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 libloading = "0.8"
@@ -25,4 +25,4 @@ windows-sys = { version = "0.59", features = [
 ] }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }

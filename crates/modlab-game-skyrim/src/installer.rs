@@ -4,11 +4,12 @@
 //! file. Placement (actually deploying into a mod's folder) is a later,
 //! separate step, same "read/decide, then act" split as the MO2 importer.
 //!
-//! Deliberately narrow for now: recognizes the common shapes (bare Data
-//! content, a wrapped `Data/` folder, a FOMOD needing the guided installer
-//! that doesn't exist yet) and says `Unknown` rather than guessing for
-//! anything else — including root-level files (SKSE loaders, ENB DLLs,
-//! `d3d11.dll`) which `docs/faisabilite.md` A3 covers but this doesn't yet.
+//! Recognizes the common shapes (bare Data content, a wrapped `Data/`
+//! folder, a FOMOD, and SKSE's own loader at the content root) and says
+//! `Unknown` rather than guessing for anything else — including ENB DLLs
+//! and `d3d11.dll`, which `docs/faisabilite.md` A3 covers but this doesn't
+//! yet. A readme (or another loose note) sitting next to a single folder
+//! is not a shape: it is skipped so the folder underneath can be classified.
 
 use std::fs;
 use std::io;
@@ -41,6 +42,9 @@ pub enum ArchiveShape {
     /// The content root contains a folder literally named `Data` —
     /// install its contents under the mod's `Data/`.
     WrappedData { data_dir: String },
+    /// `skse64_loader.exe` at the content root and no `Data/` folder. The
+    /// layout is the game root, not Data content — see `engine`.
+    EngineRoot,
     /// Nothing recognized.
     Unknown,
 }
@@ -76,8 +80,12 @@ pub fn detect_shape(extracted_root: &Path) -> io::Result<DetectedArchive> {
                 content_root: current,
             });
         }
-        match dirs.as_slice() {
-            [only] if files.is_empty() => current = current.join(only),
+        // A readme, a preview image, `desktop.ini`: not a mod. One folder
+        // next to only those is still a wrapper, the same as a level that
+        // holds nothing else at all.
+        let only_noise = files.iter().all(|name| is_wrapper_noise(name));
+        match (dirs.as_slice(), only_noise) {
+            ([only], true) => current = current.join(only),
             _ => {
                 return Ok(DetectedArchive {
                     shape: ArchiveShape::Unknown,
@@ -104,11 +112,13 @@ pub fn detect_shape(extracted_root: &Path) -> io::Result<DetectedArchive> {
 /// no descent happens) to keep callers from having to carry the shape around.
 pub fn place_content(content_root: &Path, dest: &Path, keep_game_root: bool) -> io::Result<()> {
     let detected = detect_shape(content_root)?;
-    let source = match detected.shape {
-        ArchiveShape::WrappedData { data_dir } if !keep_game_root => {
-            detected.content_root.join(data_dir)
-        }
-        _ => detected.content_root,
+    let unwrap_data = match &detected.shape {
+        ArchiveShape::WrappedData { data_dir } if !keep_game_root => Some(data_dir.clone()),
+        _ => None,
+    };
+    let source = match &unwrap_data {
+        Some(data_dir) => detected.content_root.join(data_dir),
+        None => detected.content_root.clone(),
     };
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
@@ -117,6 +127,42 @@ pub fn place_content(content_root: &Path, dest: &Path, keep_game_root: bool) -> 
     // fallback covers a staging area that landed on another volume.
     if fs::rename(&source, dest).is_err() {
         copy_dir(&source, dest)?;
+    }
+    // Unwrapping `Data/` must not drop a plugin or archive that was sitting
+    // beside that folder. Those files belong at the mod root (= Data/ once
+    // USVFS links it). The engine mod never takes this branch: its loader
+    // stays beside `Data/`.
+    if matches!(detected.shape, ArchiveShape::WrappedData { .. }) && !keep_game_root {
+        copy_data_siblings(&detected.content_root, dest)?;
+    }
+    Ok(())
+}
+
+/// Plugin and Bethesda-archive names that the game loads from `Data/` itself,
+/// so they cannot stay outside the folder `place_content` just unwrapped.
+fn is_data_root_file(name: &str) -> bool {
+    Path::new(name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "esp" | "esm" | "esl" | "bsa" | "ba2"
+            )
+        })
+}
+
+fn copy_data_siblings(content_root: &Path, dest: &Path) -> io::Result<()> {
+    let (_, files) = list_entries(content_root)?;
+    for name in files {
+        if !is_data_root_file(&name) {
+            continue;
+        }
+        let to = dest.join(&name);
+        if to.exists() {
+            continue;
+        }
+        fs::copy(content_root.join(&name), &to)?;
     }
     Ok(())
 }
@@ -145,9 +191,34 @@ fn classify(dirs: &[String], files: &[String]) -> ArchiveShape {
         }
     } else if has_data_shaped_content(dirs, files) {
         ArchiveShape::BareData
+    } else if files
+        .iter()
+        .any(|f| f.eq_ignore_ascii_case(crate::engine::LOADER_FILE))
+    {
+        ArchiveShape::EngineRoot
     } else {
         ArchiveShape::Unknown
     }
+}
+
+/// A file that does not make a directory a mod by itself: notes, licenses,
+/// preview images, and the two bookkeeping names Windows and Explorer drop
+/// into folders. Used only to decide whether a single child folder is still
+/// just wrapping.
+fn is_wrapper_noise(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    if lower == "thumbs.db" || lower == "desktop.ini" {
+        return true;
+    }
+    Path::new(&lower)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| {
+            matches!(
+                ext,
+                "txt" | "md" | "pdf" | "url" | "html" | "htm" | "rtf" | "jpg" | "jpeg" | "png"
+            )
+        })
 }
 
 fn list_entries(dir: &Path) -> io::Result<(Vec<String>, Vec<String>)> {
@@ -182,6 +253,213 @@ fn has_data_shaped_content(dirs: &[String], files: &[String]) -> bool {
             })
     });
     has_data_shaped_subdir || has_plugin_file
+}
+
+/// An archive extracted into the data root's staging area, classified but
+/// not installed. The shell turns this into the wizard-or-install decision.
+pub struct StagedArchive {
+    pub name: String,
+    pub shape: ArchiveShape,
+    pub staged_path: PathBuf,
+    pub content_root: PathBuf,
+}
+
+/// Unpack `mod_id`'s archive into `<data root>/staging/<id>` and classify it.
+/// A previous staging directory is moved to the trash, not deleted.
+pub fn stage_archive(
+    core: &modlab_core::Core,
+    data_root: &Path,
+    mod_id: i64,
+) -> Result<StagedArchive, String> {
+    let pending = modlab_core::download::archived_mod(core, mod_id).map_err(|e| e.to_string())?;
+    stage_archived(data_root, mod_id, &pending)
+}
+
+/// Disk half of [`stage_archive`]. No database access: the caller looks the
+/// archive up, drops its lock, then extracts.
+pub fn stage_archived(
+    data_root: &Path,
+    mod_id: i64,
+    pending: &modlab_core::download::ArchivedMod,
+) -> Result<StagedArchive, String> {
+    let staged = data_root.join("staging").join(mod_id.to_string());
+    if staged.exists() {
+        modlab_core::files::move_to_trash(data_root, &staged).map_err(|e| e.to_string())?;
+    }
+    fs::create_dir_all(&staged).map_err(|e| e.to_string())?;
+    modlab_core::archive::extract(&pending.archive_path, &staged).map_err(|e| e.to_string())?;
+    let detected =
+        detect_shape(&staged).map_err(|e| format!("lecture de l'archive extraite : {e}"))?;
+    Ok(StagedArchive {
+        name: pending.name.clone(),
+        shape: detected.shape,
+        staged_path: staged,
+        content_root: detected.content_root,
+    })
+}
+
+/// What [`install_archived`] needs besides the archive path. Computed from
+/// the content root (a directory listing) and the archive row — no copy.
+pub struct ArchivedInstallPlan {
+    pub keep_game_root: bool,
+    pub adjustments: modlab_core::install::InstallAdjustments,
+}
+
+pub fn archived_install_plan(
+    pending: &modlab_core::download::ArchivedMod,
+    content_root: &Path,
+) -> ArchivedInstallPlan {
+    let keep_game_root = crate::engine::is_engine_content(content_root);
+    let tool_label = keep_game_root.then(|| {
+        let archive_name = pending
+            .archive_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        let dir_name = content_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        crate::tool_archive::label_from_install(&pending.name, archive_name, dir_name)
+    });
+    ArchivedInstallPlan {
+        keep_game_root,
+        adjustments: modlab_core::install::InstallAdjustments {
+            rename_to: tool_label.as_ref().and_then(|tool| {
+                (pending.name != tool.display_name).then(|| tool.display_name.to_string())
+            }),
+            version_if_empty: tool_label.as_ref().and_then(|tool| tool.version.clone()),
+        },
+    }
+}
+
+/// Build the new mod tree beside `dest`. Does not touch the database.
+/// Failure leaves `dest` as it was; whatever was written goes to the trash.
+pub fn prepare_archived_tree(
+    data_root: &Path,
+    content_root: &Path,
+    dest: &Path,
+    keep_game_root: bool,
+) -> Result<modlab_core::files::DirSwap, String> {
+    modlab_core::files::DirSwap::replace_with(data_root, dest, |staged| {
+        place_content(content_root, staged, keep_game_root)
+            .map_err(|e| modlab_core::CoreError::Message(e.to_string()))
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// Place `content_root` into `dest` and mark the mod installed.
+///
+/// The new tree is built beside `dest` and renamed into place. The previous
+/// folder, if any, goes to the trash. A failure restores both the folder
+/// and the database row.
+pub fn install_archived(
+    core: &modlab_core::Core,
+    data_root: &Path,
+    loadout_id: i64,
+    mod_id: i64,
+    content_root: &Path,
+    dest: &Path,
+) -> Result<(), String> {
+    let pending = modlab_core::download::archived_mod(core, mod_id).map_err(|e| e.to_string())?;
+    // The engine mod is told by its content (a loader exe at the content
+    // root), never by its name. The inner folder name is read first:
+    // `place_content` renames that directory and the version in it would
+    // otherwise be lost.
+    let plan = archived_install_plan(&pending, content_root);
+    let swap = prepare_archived_tree(data_root, content_root, dest, plan.keep_game_root)?;
+    modlab_core::install::commit_prepared_install(
+        core,
+        loadout_id,
+        mod_id,
+        dest,
+        plan.adjustments,
+        swap,
+    )
+    .map_err(|e| e.to_string())?;
+    discard_staging(data_root, mod_id);
+    Ok(())
+}
+
+fn checked_fomod_files(
+    content_root: &Path,
+    picked: &[String],
+    env: &crate::fomod::FomodEnv<'_>,
+) -> Result<Vec<crate::fomod::FileMapping>, String> {
+    let config_path = crate::fomod::find_module_config(content_root)
+        .ok_or_else(|| "fomod/ModuleConfig.xml introuvable dans l'archive".to_string())?;
+    let module = crate::fomod::read_module_config(&config_path)?;
+    // Re-reads the script and settles the selection again. The wizard's
+    // checks are a preview; flags, required plugins and conditional files
+    // are decided here.
+    crate::fomod::install_plan(content_root, &module, picked, env)
+}
+
+/// Copy the files the wizard picked into a sibling of `dest`. Group rules,
+/// flags and conditional files are settled before anything is written.
+/// No database access.
+pub fn prepare_fomod_tree(
+    data_root: &Path,
+    content_root: &Path,
+    picked: &[String],
+    dest: &Path,
+    env: &crate::fomod::FomodEnv<'_>,
+) -> Result<modlab_core::files::DirSwap, String> {
+    let files = checked_fomod_files(content_root, picked, env)?;
+    modlab_core::files::DirSwap::replace_with(data_root, dest, |staged| {
+        fs::create_dir_all(staged).map_err(|e| modlab_core::CoreError::Message(e.to_string()))?;
+        for mapping in &files {
+            let from = content_root.join(&mapping.source);
+            let to = staged.join(&mapping.destination);
+            if let Some(parent) = to.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| modlab_core::CoreError::Message(e.to_string()))?;
+            }
+            fs::copy(&from, &to).map_err(|e| {
+                modlab_core::CoreError::Message(format!(
+                    "copie de {} : {e}",
+                    mapping.source.display()
+                ))
+            })?;
+        }
+        Ok(())
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// Copy the FOMOD files the wizard picked into `dest`, after re-checking
+/// each group's rules. Same rollback as [`install_archived`].
+#[allow(clippy::too_many_arguments)]
+pub fn install_fomod(
+    core: &modlab_core::Core,
+    data_root: &Path,
+    loadout_id: i64,
+    mod_id: i64,
+    content_root: &Path,
+    picked: &[String],
+    dest: &Path,
+    env: &crate::fomod::FomodEnv<'_>,
+) -> Result<(), String> {
+    modlab_core::download::archived_mod(core, mod_id).map_err(|e| e.to_string())?;
+    let swap = prepare_fomod_tree(data_root, content_root, picked, dest, env)?;
+    modlab_core::install::commit_prepared_install(
+        core,
+        loadout_id,
+        mod_id,
+        dest,
+        modlab_core::install::InstallAdjustments::default(),
+        swap,
+    )
+    .map_err(|e| e.to_string())?;
+    discard_staging(data_root, mod_id);
+    Ok(())
+}
+
+pub fn discard_staging(data_root: &Path, mod_id: i64) {
+    let staging = data_root.join("staging").join(mod_id.to_string());
+    if staging.exists() {
+        let _ = modlab_core::files::move_to_trash(data_root, &staging);
+    }
 }
 
 #[cfg(test)]
@@ -348,6 +626,94 @@ mod tests {
     }
 
     #[test]
+    fn a_readme_beside_one_folder_does_not_hide_the_mod() {
+        // The download lands as `readme.txt` plus the real folder. Stopping
+        // at the readme used to report Unknown, so the shell refused to
+        // install and the mod stayed an inactive archive.
+        let staged = make_tree(&[
+            "readme.txt",
+            "My Mod/Data/MyMod.esp",
+            "My Mod/Data/meshes/thing.nif",
+        ]);
+        let detected = detect_shape(staged.path()).unwrap();
+        assert_eq!(
+            detected.shape,
+            ArchiveShape::WrappedData {
+                data_dir: "Data".into()
+            }
+        );
+
+        let out = tempfile::tempdir().unwrap();
+        let dest = out.path().join("mods").join("9");
+        let keep = crate::engine::is_engine_content(&detected.content_root);
+        place_content(&detected.content_root, &dest, keep).unwrap();
+
+        assert!(dest.join("MyMod.esp").is_file());
+        assert!(dest.join("meshes/thing.nif").is_file());
+        assert!(!dest.join("Data").exists());
+        assert!(!dest.join("readme.txt").exists());
+    }
+
+    #[test]
+    fn a_plugin_sitting_beside_data_is_kept_at_the_mod_root() {
+        let staged = make_tree(&[
+            "MyMod.esp",
+            "MyMod.bsa",
+            "Data/meshes/thing.nif",
+            "readme.txt",
+        ]);
+        let out = tempfile::tempdir().unwrap();
+        let dest = out.path().join("mods").join("8");
+
+        place_content(staged.path(), &dest, false).unwrap();
+
+        assert!(dest.join("MyMod.esp").is_file());
+        assert!(dest.join("MyMod.bsa").is_file());
+        assert!(dest.join("meshes/thing.nif").is_file());
+        assert!(!dest.join("readme.txt").exists());
+    }
+
+    #[test]
+    fn a_loader_without_a_data_folder_is_the_engine_not_unknown() {
+        let staged = make_tree(&["skse64_loader.exe", "skse64_1_7_104.dll", "readme.txt"]);
+        let detected = detect_shape(staged.path()).unwrap();
+        assert_eq!(detected.shape, ArchiveShape::EngineRoot);
+        assert!(crate::engine::is_engine_content(&detected.content_root));
+
+        let out = tempfile::tempdir().unwrap();
+        let dest = out.path().join("mods").join("7");
+        place_content(&detected.content_root, &dest, true).unwrap();
+
+        assert!(dest.join("skse64_loader.exe").is_file());
+        assert!(dest.join("skse64_1_7_104.dll").is_file());
+    }
+
+    #[test]
+    fn a_readme_does_not_hide_a_nested_skse_loader() {
+        let staged = make_tree(&[
+            "notes.txt",
+            "Skyrim Script Extender/skse64_2_02_06/skse64_loader.exe",
+            "Skyrim Script Extender/skse64_2_02_06/skse64_1_7_104.dll",
+            "Skyrim Script Extender/skse64_2_02_06/Data/Scripts/Actor.pex",
+        ]);
+        let detected = detect_shape(staged.path()).unwrap();
+        assert!(
+            detected.content_root.join("skse64_loader.exe").is_file(),
+            "loader must be at the content root, got {}",
+            detected.content_root.display()
+        );
+        assert!(crate::engine::is_engine_content(&detected.content_root));
+
+        let out = tempfile::tempdir().unwrap();
+        let dest = out.path().join("mods").join("6");
+        place_content(&detected.content_root, &dest, true).unwrap();
+
+        assert!(dest.join("skse64_loader.exe").is_file());
+        assert!(dest.join("Data/Scripts/Actor.pex").is_file());
+        assert!(!crate::engine::is_engine_content(&dest.join("Data")));
+    }
+
+    #[test]
     fn detects_the_real_skse_archive_if_present() {
         // Same spirit as the other real-machine tests this session.
         let real_archive = StdPath::new(
@@ -366,5 +732,91 @@ mod tests {
             "resolved content root should be where the loader actually is: {}",
             detected.content_root.display()
         );
+    }
+
+    #[test]
+    fn install_failure_leaves_the_game_tree_and_uninstall_keeps_the_files() {
+        let root = tempfile::tempdir().unwrap();
+        let game = root.path().join("Game").join("Data");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(game.join("Skyrim.esm"), b"VANILLA").unwrap();
+
+        let content = root.path().join("content");
+        fs::create_dir_all(content.join("meshes")).unwrap();
+        fs::write(content.join("meshes").join("a.nif"), b"mesh").unwrap();
+        let archive = root.path().join("mod.zip");
+        fs::write(&archive, b"archive").unwrap();
+
+        let core = modlab_core::Core::open_in_memory().unwrap();
+        let loadout = modlab_core::loadout::create(&core, "skyrimse", "Test").unwrap();
+        let download_id = modlab_core::download::capture(
+            &core,
+            "https://example.test/mod.zip",
+            "mod.zip",
+            &archive,
+            None,
+        )
+        .unwrap()
+        .id();
+        let mod_id =
+            modlab_core::download::attach_to_loadout(&core, download_id, loadout.id, None).unwrap();
+        let dest = root.path().join("mods").join(mod_id.to_string());
+
+        let missing = root.path().join("missing-content");
+        let err = install_archived(&core, root.path(), loadout.id, mod_id, &missing, &dest);
+        assert!(err.is_err(), "{err:?}");
+        assert!(!dest.exists(), "a failed install leaves no partial folder");
+        assert_eq!(fs::read(game.join("Skyrim.esm")).unwrap(), b"VANILLA");
+        assert_eq!(
+            modlab_core::loadout::entries(&core, loadout.id).unwrap()[0].status,
+            modlab_core::loadout::STATUS_ARCHIVED
+        );
+
+        install_archived(&core, root.path(), loadout.id, mod_id, &content, &dest).unwrap();
+        assert_eq!(
+            fs::read(dest.join("meshes").join("a.nif")).unwrap(),
+            b"mesh"
+        );
+        assert_eq!(fs::read(game.join("Skyrim.esm")).unwrap(), b"VANILLA");
+
+        let trashed =
+            modlab_core::install::uninstall_mod(&core, root.path(), loadout.id, mod_id, &dest)
+                .unwrap()
+                .expect("extracted files moved to the trash");
+        assert!(!dest.exists());
+        assert_eq!(
+            fs::read(trashed.join("meshes").join("a.nif")).unwrap(),
+            b"mesh"
+        );
+        assert_eq!(fs::read(game.join("Skyrim.esm")).unwrap(), b"VANILLA");
+        assert_eq!(
+            modlab_core::loadout::entries(&core, loadout.id).unwrap()[0].status,
+            modlab_core::loadout::STATUS_ARCHIVED
+        );
+    }
+
+    #[test]
+    fn fomod_priority_keeps_the_higher_file_and_rolls_back_with_the_swap() {
+        let root = tempfile::tempdir().unwrap();
+        let content = root.path().join("content");
+        fs::create_dir_all(content.join("fomod")).unwrap();
+        fs::write(content.join("low.txt"), b"low").unwrap();
+        fs::write(content.join("high.txt"), b"high").unwrap();
+        fs::write(
+            content.join("fomod").join("ModuleConfig.xml"),
+            r#"<config><requiredInstallFiles>
+              <file source="low.txt" destination="out.txt" priority="1"/>
+              <file source="high.txt" destination="out.txt" priority="8"/>
+            </requiredInstallFiles></config>"#,
+        )
+        .unwrap();
+        let dest = root.path().join("mods").join("1");
+        let env = crate::fomod::FomodEnv {
+            file_state: &|_| crate::fomod::FileState::Missing,
+            game_version: None,
+        };
+        let swap = prepare_fomod_tree(root.path(), &content, &[], &dest, &env).unwrap();
+        assert_eq!(fs::read(dest.join("out.txt")).unwrap(), b"high");
+        swap.commit();
     }
 }

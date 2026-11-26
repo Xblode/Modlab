@@ -454,6 +454,19 @@ mod tests {
             status: crate::loadout::STATUS_INSTALLED.to_string(),
             category: None,
             archive_path: None,
+            source_host: None,
+            page_url: None,
+            game_versions: Vec::new(),
+            dependencies: Vec::new(),
+            loaders: Vec::new(),
+            category_raw: None,
+            category_nexus_id: None,
+            nexus_mod_id: None,
+            author: None,
+            website: None,
+            size_bytes: None,
+            installed_at: None,
+            downloaded_at: None,
         }
     }
 
