@@ -1,26 +1,19 @@
 # Fixtures
 
-Test data — never the real game, never `F:\ModLab`. See `CLAUDE.md` and `docs/01-architecture-decidee.md` §5 ("fake Skyrim" fixtures).
+Les faux jeux des tests : jamais le vrai jeu, jamais `F:\ModLab`. Règles de test : section « Tests » de `CLAUDE.md`.
 
 ## `fake-skyrim/`
 
-A minimal skeleton: `SkyrimSE.exe` + `Data/` with a plugin, an SKSE DLL, empty `meshes/`/`textures/` folders — enough shape for path/structure tests.
+Un squelette minimal : `SkyrimSE.exe` et un dossier `Data/` avec un plugin (`Fake Plugin.esp`) et une DLL SKSE (`SKSE/Plugins/FakePlugin.dll`), de quoi tester les chemins et la structure.
 
-**Current limitation, deliberate:** the "plugin" and "DLL" here are plain text placeholders, not real binary formats. That's fine for anything that only cares about *paths and file presence* (store import, detection-adjacent tests). It is **not** fine once real ESP parsing exists (Phase 1+) — at that point these need to be regenerated as genuine minimal binary fixtures (via Mutagen output, or hand-built following the ESP spec), or record-level tests will pass against nonsense. Whoever builds the plugin parser should replace these, not assume they're already correct.
+**Limite actuelle, voulue :** le « plugin » et la « DLL » sont des textes de remplacement, pas de vrais formats binaires. C'est suffisant pour tout ce qui ne regarde que les *chemins et la présence des fichiers* (import dans le store, détection). Ce ne l'est **plus** dès que l'analyse réelle des ESP existera : il faudra alors régénérer de vraies fixtures binaires minimales (sortie de Mutagen, ou construites à la main d'après la spécification ESP), sinon les tests au niveau des enregistrements passeront sur du vide. Celui qui écrit l'analyseur de plugins doit les remplacer.
 
 ## `fake-minecraft/`
 
-Same spirit as `fake-skyrim/`: a minimal `.minecraft`-shaped skeleton
-(`launcher_profiles.json`, `versions/<id>/<id>.json`, `mods/`, `resourcepacks/`,
-`saves/<world>/level.dat`) — enough shape for `MinecraftAdapter::detect` and
-path/presence tests.
+Même esprit : un squelette de `.minecraft` (`launcher_profiles.json`, `versions/<id>/<id>.json`, `mods/`, `resourcepacks/`, `saves/<monde>/level.dat`), de quoi tester `MinecraftAdapter::detect` et les chemins.
 
-**Same limitation, deliberate:** the `.jar`/`.zip` files here are plain text
-placeholders, not real zip archives — fine for path/presence tests, **not**
-fine for anything that opens them as an archive. `modlab_game_minecraft`'s
-own jar-metadata tests (`fabric.mod.json`/`quilt.mod.json`/`mods.toml`
-extraction) therefore build real, minimal zip fixtures **at test time** in
-Rust (via the `zip` crate), not as checked-in binaries here — same reasoning
-as this file's own caution about the Skyrim plugin fixture: a binary format
-that actually gets parsed needs a fixture regenerated against that real
-format, not hand-waved as a text file with the right extension.
+**Même limite, voulue :** les `.jar` et `.zip` d'ici sont des textes de remplacement, pas de vraies archives zip. Les tests d'extraction de métadonnées de `modlab-game-minecraft` (`fabric.mod.json`, `quilt.mod.json`, `mods.toml`) construisent donc de vrais petits zips **à l'exécution**, en Rust (crate `zip`), et non des binaires versionnés ici. Un format binaire réellement lu exige une fixture régénérée d'après ce format, pas un texte avec la bonne extension.
+
+## Utilisation
+
+Essai sans risque avec la CLI : `cargo run -p modlab-cli -- mc-scan fixtures/fake-minecraft` (voir `crates/README.md`). Les tests Rust s'y appuient : `cargo test --workspace`.

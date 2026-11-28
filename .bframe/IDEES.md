@@ -1,15 +1,24 @@
 ---
 titre: Idées
 description: Les idées de l'humain, rangées par sujet.
-maj: 2026-11-25
+maj: 2026-11-28
 ---
 
 # Idées
 
-Une ligne datée par idée, sous son sujet. Une idée n'est pas une décision. Faisabilité détaillée (indicateurs SKSE/ENB, LOOT en 3 niveaux, installation manuelle intelligente) : `docs/faisabilite.md`. Superpouvoirs (bisect, loadout as code, KB, recorder) : `docs/superpouvoirs.md`. Sources d'origine : `docs/archive/idees.md` (B1–B20) et `docs/archive/00-cadrage-technique.md` §14 (P1–P15).
+Une ligne datée par idée, sous son sujet. Une idée n'est pas une décision. Les grandes directions (superpouvoirs, communauté, IA) sont dans `VISION.md`. Sources d'origine, en archive : `idees.md` (B1–B20, A1–A3), `00-cadrage-technique.md` §14 (P1–P15), `faisabilite.md`.
+
+## Outils du jeu (LOOT, indicateurs)
+
+- 2026-09-14 : Indicateurs SKSE, ENB, ReShade, Community Shaders, upscalers et génération d'images (DLSS, FSR, XeSS, OptiScaler), par signatures de fichiers, DLL et clés INI : un catalogue versionné `capacité → fichiers`. Rien n'est affiché si rien n'est détecté ; une DLL inconnue est signalée plutôt que devinée ; cohérence avec la carte graphique (ex. DLSS FG demande une RTX 40). Limite : les mods PureDark (Patreon) n'ont que leurs fichiers comme indice. (A1)
+- 2026-09-14 : LOOT intégré en 3 niveaux : 1) piloté (lancer `LOOT.exe --auto-sort` dans l'environnement de la branche, relire `plugins.txt`) ; 2) dans le processus via `libloot` (tri et messages dans l'onglet Plugins, sur une branche jetable) ; 3) métadonnées seules (masterlist YAML : prérequis, incompatibilités, sales éditions). Recommandé : 1 et 3 d'abord, 2 quand le moteur est stable. Même bouton « Trier avec LOOT » quel que soit le niveau. (A2)
+
+- 2026-09-15 : Outils à orchestrer : Skyrim — Nemesis/Pandora, DynDOLOD/TexGen/xLODGen, BodySlide, Wrye Bash, Crash Logger SSE/Trainwreck ; Witcher 3 — Script Merger, REDmod.
 
 ## Rangement des docs et migration vers bFrame
 
+- 2026-11-27 : Pour bFrame (hors ModLab) : un `worker-architect`, garde-fou de cohérence court et indépendant du langage, qui vérifie qu'un changement respecte l'architecture d'ensemble. Proposé par ChatGPT, pas tranché.
+- 2026-11-28 : Si l'extension de bFrame faite pour ModLab marche (VISION, PRODUIT, ARCHITECTURE, DESIGN, ROADMAP en plus des 5 boîtes), l'ajouter comme fonctionnalité de bFrame.
 - 2026-11-13 : faire de ce rangement (nettoyer un ancien système, ranger les docs, ne rien perdre) un module ou skill bFrame réutilisable, à partir du rapport de cette première fois.
 
 ## Pendant le jeu
@@ -35,6 +44,7 @@ Une ligne datée par idée, sous son sujet. Une idée n'est pas une décision. F
 
 ## Installation et fichiers
 
+- 2026-09-14 : Installation intelligente (« je donne l'archive, ça va au bon endroit ») : analyser l'archive et montrer un plan de placement avant d'écrire, y compris les fichiers de la racine du jeu (SKSE, ENB, `d3d11.dll`) que MO2 ne gère pas sans Root Builder. Détection : fichiers racine connus, `Data/` et ses sous-dossiers, FOMOD, BAIN, archive « nue ». Tout ce qui va à la racine est enregistré (provenance, hash) pour désinstaller proprement et repérer les écrasements. (A3)
 - 2026-09-15 : Résolveur visuel de textures : comparer gagnant et perdant, règle gardée par branche. (B7)
 - 2026-09-15 : Surveillance du dossier Téléchargements : archive reconnue par hash, plan de placement proposé. (B20)
 - 2026-09-15 : Migration guidée depuis MO2 / Vortex / Prism, jamais destructive, ancien outil utilisable en parallèle. (B17)
@@ -48,6 +58,7 @@ Une ligne datée par idée, sous son sujet. Une idée n'est pas une décision. F
 
 ## Réglages
 
+- 2026-11-13 : Éditeur clé/valeur des fichiers de config d'un mod, avec différences et surcharge par branche ; « preset » = branche + canal + outils + réglages de lancement.
 - 2026-09-15 : Réglages transversaux : un curseur ModLab qui écrit dans plusieurs INI/JSON, tracé et réversible. (B18)
 - 2026-09-14 : INI as tokens : réglages INI en panneau nommé, avec diff par loadout. (P8)
 
@@ -63,6 +74,9 @@ Une ligne datée par idée, sous son sujet. Une idée n'est pas une décision. F
 
 ## Diagnostic et IA
 
+- 2026-09-15 : IA locale cible : modèle par défaut Qwen2.5-1.5B (≈ 1 Go) ; au choix Llama-3.2-3B, Phi-3.5-mini ; Qwen3 8B suggéré si la carte a 8 Go de VRAM (plafond 8-9B, au-delà ça déborde en RAM). Chargé à la demande, déchargé après inactivité, jamais pendant une partie : une demande faite en jeu attend la fin de la partie. Grammaire contrainte (GBNF) pour que le modèle n'invente aucun fait.
+- 2026-09-15 : Outils MCP cibles, par niveau : lecture ; modification réversible ; action dangereuse ; et transactionnels (`modlab_plan`, `modlab_apply`, `modlab_history`).
+
 - 2026-09-15 : Mode « debugger de problèmes » : parcourir les problèmes comme des points d'arrêt (Appliquer / Ignorer / Noter). (B13)
 - 2026-09-15 : Assistant de premier lancement : lit le crash log et les temps de chargement, propose l'étape suivante. (B19)
 - 2026-09-14 : Claude accueille un mod : lit README et FOMOD, propose les choix, explique les prérequis manquants. (P6)
@@ -76,16 +90,11 @@ Une ligne datée par idée, sous son sujet. Une idée n'est pas une décision. F
 
 ## Direction communauté
 
-- 2026-11-06 : Profils, modpacks, patches, place de marché, économie : voir `docs/deep-research-report.md` et `docs/communaute/`. Direction validée, pas encore cadrée.
+- 2026-11-06 : Profils, modpacks, patches, place de marché, économie : la direction est dans `VISION.md`, l'étude complète en archive (`deep-research-report.md`, dossier `communaute/`). Direction validée, pas encore cadrée.
 
 ## Minecraft
 
-- 2026-11-25 : Install drop-in jar → `mods/`. Un mod téléchargé se pose tel quel, sans extraction. Décision du jour, pour le futur GameAdapter (`DECISIONS.md`).
 - 2026-09-15 : Une branche par serveur : mods du modpack, version de Java, RAM et JVM par branche. (B16)
-
-## Look de l'interface
-
-- 2026-11-26 : Unifier Pop + MenuPicker en `PopoverMenu` (structure GitHub : titre, croix, une utilitaire max, tabs). Décision posée le même jour.
 
 ## Table des mods
 

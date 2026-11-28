@@ -1,41 +1,48 @@
 # Spikes
 
-Time-boxed, throwaway explorations for the risks flagged in `docs/01-architecture-decidee.md`. Code here is never merged into `crates/` — see `CLAUDE.md`.
+Des explorations jetables, limitées dans le temps, pour lever les risques signalés dans `.bframe/ARCHITECTURE.md`. Leur code n'est jamais fusionné dans `crates/`. Les décisions en vigueur sont dans `.bframe/DECISIONS.md`.
 
-## sevenz-rust — ✅ resolved, 2026-09-15
+> Note du 2026-11-28 : les résultats ci-dessous sont l'historique de septembre. Depuis, l'USVFS est implémenté (`crates/modlab-game-skyrim/src/usvfs.rs`) et `rmcp` n'a pas été adopté (absent de `Cargo.lock`).
 
-**Question:** can we extract `.7z` archives in pure Rust, without depending on `7z.dll`?
+## Contenu
 
-**Result:** yes. `spikes/sevenz-rust/` extracts a real SKSE archive (`Skyrim Script Extender (SKSE64) Steam 2.2.8.7z`, 129 files) cleanly with the `sevenz-rust` crate, no external DLL. `.zip` is separately a solved problem (the mature `zip` crate). RAR is not yet spiked — smaller share of Nexus archives, not blocking.
+- `sevenz-rust/` : extraction d'une archive `.7z` en Rust pur (`src/main.rs`).
+- `llama-binding/` : le binding `llama-cpp-2` (`src/main.rs`).
 
-**Decision:** use `sevenz-rust` + `zip` for archive handling. Revisit RAR only if it turns out to matter in practice.
+Chaque spike est son propre workspace Cargo, hors du workspace racine. Pour en lancer un : `cargo run` depuis son dossier. Leurs `target/` sont ignorés par Git.
 
-## USVFS FFI — ✅ feasible, not yet implemented, 2026-09-15
+## sevenz-rust : résolu, 2026-09-15
 
-**Question:** can Rust call into `usvfs_x64.dll` (C++, used by MO2) without a painful FFI layer?
+**Question :** peut-on extraire des `.7z` en Rust pur, sans dépendre de `7z.dll` ?
 
-**Result:** `dumpbin /EXPORTS` on Benjamin's real `usvfs_x64.dll` (from his MO2 install at `F:\_Modding\Skyrim Modding\Mod Organazer\`) shows two families of exports: internal C++-mangled symbols (not directly callable), and a **clean, unmangled C ABI** — `usvfsCreateVFS`, `usvfsConnectVFS`, `usvfsCreateParameters`, `usvfsCreateHookContext`, `CreateVFS`, `ConnectVFS`, `InitHooks`, `InitLogging`, etc. This is a real, intentional C API surface, not just internals leaking out.
+**Résultat :** oui. `spikes/sevenz-rust/` extrait proprement une vraie archive SKSE (129 fichiers) avec le crate `sevenz-rust`, sans DLL externe. Le `.zip` est un problème résolu à part (crate `zip`). Le RAR n'a pas été essayé : part plus faible des archives Nexus, pas bloquant.
 
-**Decision:** FFI via `extern "C"` + either `libloading` (dynamic, no link-time dependency) or a generated import lib is viable. Full binding (matching real function signatures to MO2's usage of them) is real work for a later Phase 1 task, not done here — this spike only proves it's *possible*, which was the actual risk.
+**Décision :** `sevenz-rust` + `zip` pour les archives ; revoir le RAR seulement si cela compte en pratique.
 
-## MCP Rust SDK — ✅ resolved, 2026-09-15
+## USVFS FFI : faisable, 2026-09-15
 
-**Question:** is there a Rust MCP SDK mature enough to match the official C# one?
+**Question :** Rust peut-il appeler `usvfs_x64.dll` (C++, utilisée par MO2) sans couche FFI pénible ?
 
-**Result:** yes — **`rmcp`**, the official Rust SDK at `github.com/modelcontextprotocol/rust-sdk`, implements the current MCP spec (2026-07-28) with a tokio async runtime. `rust-mcp-sdk` (community) is a solid alternative, passing the full official conformance suite. No need for a wrapper or fallback.
+**Résultat :** `dumpbin /EXPORTS` sur la vraie `usvfs_x64.dll` montre deux familles d'exports : des symboles C++ mangés (non appelables directement) et une **API C claire** (`usvfsCreateVFS`, `usvfsConnectVFS`, `usvfsCreateParameters`, `usvfsCreateHookContext`, `CreateVFS`, `ConnectVFS`, `InitHooks`, `InitLogging`…), une vraie surface publique voulue.
 
-**Decision:** use `rmcp`.
+**Décision :** FFI en `extern "C"` avec `libloading` (dynamique) ou une bibliothèque d'import générée. Le spike prouvait seulement la faisabilité ; l'implémentation existe depuis.
 
-## llama.cpp Rust binding — ✅ resolved, 2026-09-15
+## MCP Rust SDK : résolu, 2026-09-15
 
-**Question:** `llama-cpp-2` (thin binding, closer to LLamaSharp's role) vs `candle` (pure-Rust reimplementation)?
+**Question :** existe-t-il un SDK MCP Rust assez mûr ?
 
-**Result:** `llama-cpp-2` compiles and links cleanly, full C++ llama.cpp build included (~2 min from scratch). Needed two extra machine-level dependencies neither of which were present: **LLVM** (for `libclang.dll`, which `bindgen` needs to generate the FFI layer from llama.cpp's C headers) and **CMake** (to actually build llama.cpp). Both installed via winget. `spikes/llama-binding/` runs.
+**Résultat :** oui, `rmcp` (SDK officiel, `github.com/modelcontextprotocol/rust-sdk`, runtime tokio). `rust-mcp-sdk` (communautaire) est une alternative solide.
 
-**Decision:** use `llama-cpp-2`. Closest analog to the already-proven LLamaSharp approach (GGUF, CPU/CUDA/Vulkan backends, thin wrapper over the real llama.cpp) — no need to fall back to `candle`.
+**Décision de l'époque :** utiliser `rmcp`. Non adopté à ce jour (voir la note ci-dessus).
 
-⚠️ **Consequence for packaging later:** whatever machine actually builds ModLab's release binaries needs LLVM + CMake installed too (dev-time only — these aren't runtime dependencies of the shipped app, `llama-cpp-sys-2` statically links what it builds). Worth a line in the eventual CI/build docs.
+## Binding llama.cpp : résolu, 2026-09-15
 
-## xEdit orchestration — 🚧 blocked, no binary on this machine, 2026-09-15
+**Question :** `llama-cpp-2` (binding fin) ou `candle` (réimplémentation en Rust pur) ?
 
-xEdit/SSEEdit isn't installed standalone on Benjamin's machine (checked `F:\_Modding\Skyrim Modding\` and common tool locations — LOOT and MO2 are there, xEdit isn't). The orchestration approach itself (CLI args: `-autoload -autoexit -veryquickshowconflicts` + Pascal scripts, capture output) doesn't need a spike to *design* — it's the same pattern MO2 already uses — but it can't be *verified* end-to-end without the binary. Needs Benjamin to grab xEdit (or point at wherever he keeps it) before this can move past design.
+**Résultat :** `llama-cpp-2` compile et se lie proprement (build C++ complet de llama.cpp, environ 2 min depuis zéro). Il a fallu deux dépendances machine, installées via winget : **LLVM** (`libclang.dll`, pour `bindgen`) et **CMake**.
+
+**Décision :** `llama-cpp-2`. Conséquence : toute machine qui compile les binaires de release de ModLab avec `local-llm` doit avoir LLVM et CMake (dépendances de build seulement, pas d'exécution : `llama-cpp-sys-2` lie statiquement).
+
+## xEdit : bloqué, 2026-09-15
+
+xEdit n'est pas installé seul sur la machine de Benjamin (LOOT et MO2 y sont, pas xEdit). L'orchestration (arguments `-autoload -autoexit -veryquickshowconflicts` + scripts Pascal, capture de la sortie) suit le même schéma que MO2, mais ne peut pas être vérifiée de bout en bout sans le binaire.

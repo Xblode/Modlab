@@ -1,7 +1,7 @@
 ---
 titre: Tâches
 description: Ce qu'il y a à faire, du plus proche au plus lointain.
-maj: 2026-11-25
+maj: 2026-11-28
 ---
 
 # Tâches
@@ -63,7 +63,7 @@ Look de l'interface (unslop) :
 - [ ] Raccourcir les encadrés « Ce que le Core ne suit pas encore » (tableau de bord) et l'explication des Mondes
 - [ ] Vérifier les écrans non vus : thème clair, Minecraft, Santé, Sauvegardes, dialogues
 - [x] 2026-11-24 : CLAUDE.md : l'appli `ui/` est la référence visuelle, la maquette devient un historique
-- [ ] Aligner sur cette règle : `docs/01-architecture-decidee.md` (l.15, 53, 246, 325, 327), `docs/README.md`, `docs/design/design-system.md`, `.bframe/PROJET.md`
+- [x] 2026-11-28 : Aligner sur cette règle les anciens docs et `.bframe/PROJET.md` — fait par la refonte de la doc (anciens docs en archive)
 - [ ] Icône soleil pour le thème « Clair » (aujourd'hui une étincelle) ; police dédiée (Geist ou IBM Plex Sans) seulement si Benjamin le veut
 
 Défauts relevés par la contre-vérification, pour le lot 2 (Bilan de la Phase 2) :
@@ -84,11 +84,13 @@ Défauts relevés par la contre-vérification, pour le lot 2 (Bilan de la Phase 
 
 - [ ] Trancher le sort du travail non enregistré et des deux branches locales (Travail non enregistré)
 
-- [ ] Déplacer `docs/deep-research-report.md` dans `docs/communaute/` en corrigeant ses 7 renvois dans `ui/` (dont un texte affiché dans les Réglages) (Direction communauté)
-- [ ] Fusionner les deux dossiers d'images (`img/` hors Git et `docs/design/img/`) : les `Assets_IA_profil` diffèrent d'un dossier à l'autre (Rangement des docs)
+- [x] 2026-11-28 : Rapport communauté rangé en archive, renvois de `ui/` corrigés vers `VISION.md` (refonte de la doc) (Direction communauté)
+- [x] 2026-11-28 : Dossiers d'images : `img/` supprimé (images des jeux, plus utilisées), images de doc en archive (Rangement des docs)
 
 ## Plus tard
 
+- [ ] `.claude/launch.json` garde une config « maquette » (python, port 5502) alors que la maquette n'existe plus ; `tauri-dev.log` traîne à la racine (ignoré par Git) (Rangement des docs)
+- [ ] Commentaires du code avec d'anciens numéros de section (« §5 », « §6 », « §7.2 » de l'ancienne architecture) : les aligner sur `ARCHITECTURE.md` (`ui/src/api.ts`, `modlab-ui/src/commands/*.rs`, `transaction.rs`, `loadout.rs`, `modlab-ai`, `minecraft/instance.rs:26`) (Revue d'architecture)
 - [ ] Rendre le script `tauri:dev` de `ui/package.json` portable : il contient des chemins `C:/Users/planc/...` en dur (Bilan de la Phase 2)
 - [ ] Vérifier deux écarts relevés par l'audit du 6 nov. : commentaire périmé dans `crates/modlab-core/src/lib.rs`, chemin `C:/Users/planc` dans `ui/package.json` (Rangement des docs)
 - [ ] Ajouter un test d'intégration de la CLI, qui n'en a aucun (Bilan de la Phase 2)

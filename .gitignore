@@ -42,13 +42,8 @@ crates/modlab-ui/*.log
 # Claude Code local scratch
 .claude/settings.local.json
 
-# Unexplained external sync artifact, not ModLab source — see project memory
-/shared/
-
 # Local files kept out of the repository
 /tauri-dev.log
-/img/*
-!/img/header_skyrim.jpg
 
 # Python bytecode
 __pycache__/

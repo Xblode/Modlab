@@ -6,25 +6,15 @@ L'idée : « Cursor pour le game modding ».
 
 ## Où sont les choses
 
-| Dossier | Rôle |
+| Dossier | Contenu |
 |---|---|
-| `crates/modlab-core/` | Le moteur : source unique de vérité, l'UI, la CLI et le MCP en sont des clients |
-| `crates/modlab-cli/` | La CLI `modlab`, client du moteur |
-| `crates/modlab-ui/` | L'hôte Tauri de l'interface, client du moteur |
-| `crates/modlab-ai/` | La couche IA locale : un moteur de règles diagnostique, un LLM optionnel ne fait que reformuler |
-| `crates/modlab-game-skyrim/` | L'adaptateur Skyrim (tout ce qui est spécifique à Bethesda) |
-| `crates/modlab-game-minecraft/` | L'adaptateur Minecraft (loaders, jars, fournisseurs) |
-| `ui/` | L'interface React (Vite) |
-| `docs/` | La documentation, l'architecture et les décisions (ADR) |
-| `fixtures/` | De faux jeux (Skyrim, Minecraft) pour les tests |
-| `spikes/` | Essais techniques jetables (binding llama, 7z) |
-| `.bframe/` | La mémoire du projet (cap, décisions) |
-| `.claude/agents/` | Les agents spécialisés de Claude Code |
+| `crates/` | Le moteur Rust, les adaptateurs de jeu (Skyrim, Minecraft), la couche IA, la CLI et l'hôte Tauri : voir `crates/README.md` |
+| `ui/` | L'interface React (Vite) et le shell : voir `ui/README.md` |
+| `fixtures/` | De faux jeux (Skyrim, Minecraft) pour les tests : voir `fixtures/README.md` |
+| `spikes/` | Essais techniques jetables (binding llama, 7z) : voir `spikes/README.md` |
+| `.bframe/` | Toute la documentation et la mémoire du projet : voir `.bframe/PROJET.md` |
 
-## Ce qui fait foi
-
-- Architecture : `docs/01-architecture-decidee.md`
-- Interface : `ui/`. L'ancienne maquette HTML a été retirée, remplacée par `ui/`.
+Le code fait foi. Règles de travail : `CLAUDE.md`. Architecture : `.bframe/ARCHITECTURE.md`. Règles d'interface : `.bframe/DESIGN.md`.
 
 ## Lancer et tester
 
@@ -61,7 +51,6 @@ npm --prefix ui run dev
 ```
 
 - La commande ci-dessus, depuis la racine du dépôt, sert l'interface seule dans le navigateur sur `http://localhost:1420` (sans le moteur : les appels à l'hôte Tauri ne répondent pas). Arrêt avec `Ctrl+C`.
-- L'ancienne maquette HTML a été retirée, remplacée par `ui/`.
 
 ### La CLI
 
@@ -109,7 +98,7 @@ npm --prefix ui run build
 
 - La commande ci-dessus vérifie les types TypeScript puis construit l'interface (il n'y a pas encore de tests d'interface).
 
-Avant de valider un changement (`cargo fmt -- --check`, `cargo clippy`, `cargo check && cargo test`, `npm --prefix ui run build`) : suivre la section « Before committing » de `CLAUDE.md`.
+Avant de valider un changement (`cargo fmt -- --check`, `cargo clippy`, `cargo check && cargo test`, `npm --prefix ui run build`) : suivre la section « Avant de committer » de `CLAUDE.md`.
 
 Les tests tournent sur les faux jeux de `fixtures/`, jamais sur le vrai jeu ni sur `F:\ModLab`.
 
