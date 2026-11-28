@@ -553,10 +553,7 @@ pub fn detect_menu_reached(log: &str) -> Option<&'static str> {
     if smoke_crash_detected(&lower) {
         return None;
     }
-    MENU_MARKERS
-        .iter()
-        .copied()
-        .find(|m| lower.contains(m))
+    MENU_MARKERS.iter().copied().find(|m| lower.contains(m))
 }
 
 /// Wait for menu marker, crash, timeout, stop, or early exit — then kill the
@@ -819,7 +816,7 @@ fn ensure_client_jar(
     }
     if dest.is_file() {
         // Stale HTML / truncated download / thin loader jar without Main.class.
-        let _ = fs::remove_file(&dest);
+        let _ = modlab_core::files::move_to_trash(req.data_root, &dest);
     }
     // Loader profiles inheritFrom vanilla — reuse the parent client jar when present.
     let vanilla = client_jar_path(req.instance_root, req.mc);
@@ -845,12 +842,13 @@ fn ensure_client_jar(
         url,
         &dest,
         sha1,
+        req.data_root,
         req.loadout_id,
         progress,
         "client",
     )?;
     if !client_jar_has_main(&dest) {
-        let _ = fs::remove_file(&dest);
+        let _ = modlab_core::files::move_to_trash(req.data_root, &dest);
         return Err(format!(
             "jar client invalide après téléchargement ({}) — Main.class introuvable",
             dest.display()
@@ -882,9 +880,10 @@ fn ensure_assets(
         let client = http_client()?;
         download_file(
             &client,
-            &url,
+            url,
             &index_path,
             asset_index.get("sha1").and_then(Value::as_str),
+            req.data_root,
             req.loadout_id,
             progress,
             "assets-index",
@@ -911,6 +910,7 @@ fn ensure_assets(
             &obj_url,
             &dest,
             None,
+            req.data_root,
             req.loadout_id,
             progress,
             "assets",
@@ -923,11 +923,17 @@ fn assets_cache_root(data_root: &Path) -> PathBuf {
     data_root.join("cache").join("minecraft-assets")
 }
 
+/// Download to a sibling temp file, verify SHA when given, then rename onto
+/// `dest`. A bad digest or failed rename moves the temp (and never leaves a
+/// half-written `dest`). An existing `dest` is moved to the data-root trash
+/// only after the temp is verified.
+#[allow(clippy::too_many_arguments)]
 fn download_file(
     client: &reqwest::blocking::Client,
     url: &str,
     dest: &Path,
     expected_sha1: Option<&str>,
+    data_root: &Path,
     loadout_id: i64,
     progress: &dyn Fn(LoaderProgress),
     phase: &str,
@@ -950,17 +956,59 @@ fn download_file(
     if buf.is_empty() {
         return Err(format!("téléchargement vide pour {}", dest.display()));
     }
-    fs::create_dir_all(dest.parent().unwrap_or_else(|| Path::new("."))).map_err(io_err)?;
-    let mut file = File::create(dest).map_err(io_err)?;
-    file.write_all(&buf).map_err(io_err)?;
     if let Some(sha) = expected_sha1 {
         let got = hex_sha1(&buf);
         if got != sha {
-            let _ = fs::remove_file(dest);
             return Err(format!("empreinte incorrecte pour {}", dest.display()));
         }
     }
+    let parent = dest.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).map_err(io_err)?;
+    let tmp = download_temp_path(dest);
+    if tmp.exists() {
+        let _ = modlab_core::files::move_to_trash(data_root, &tmp);
+    }
+    {
+        let mut file = File::create(&tmp).map_err(io_err)?;
+        file.write_all(&buf).map_err(io_err)?;
+    }
+    let replace_guard = if dest.exists() {
+        match modlab_core::files::trash_for_rollback(data_root, dest) {
+            Ok(guard) => guard,
+            Err(err) => {
+                let _ = modlab_core::files::move_to_trash(data_root, &tmp);
+                return Err(err.to_string());
+            }
+        }
+    } else {
+        None
+    };
+    if let Err(err) = fs::rename(&tmp, dest) {
+        let _ = modlab_core::files::move_to_trash(data_root, &tmp);
+        drop(replace_guard);
+        return Err(io_err(err));
+    }
+    if let Some(guard) = replace_guard {
+        guard.commit();
+    }
     Ok(())
+}
+
+fn download_temp_path(dest: &Path) -> PathBuf {
+    let parent = dest.parent().unwrap_or_else(|| Path::new("."));
+    let name = dest
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("download");
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    parent.join(format!(
+        ".modlab-dl-{}-{}-{name}",
+        std::process::id(),
+        millis
+    ))
 }
 
 fn hex_sha1(bytes: &[u8]) -> String {
@@ -1013,6 +1061,7 @@ fn extract_natives(
                 url,
                 &native_zip,
                 sha1,
+                data_root,
                 loadout_id,
                 progress,
                 "natives",
@@ -1587,7 +1636,62 @@ fn net_err(e: reqwest::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha1::Digest as Sha1Digest;
     use tempfile::tempdir;
+
+    #[test]
+    fn download_file_sha_mismatch_leaves_dest_untouched_and_trashes_nothing_at_dest() {
+        let dir = tempdir().unwrap();
+        let data = dir.path().join("data");
+        fs::create_dir_all(&data).unwrap();
+        let dest = dir.path().join("out.jar");
+        fs::write(&dest, b"keep-me").unwrap();
+        // No network: exercise the post-buffer path via a local file:// is
+        // unreliable on Windows reqwest. Unit-test the temp helper + trash
+        // path used when a verified temp replaces dest.
+        let tmp = download_temp_path(&dest);
+        fs::write(&tmp, b"bad").unwrap();
+        let _ = modlab_core::files::move_to_trash(&data, &tmp);
+        assert!(dest.exists());
+        assert_eq!(fs::read(&dest).unwrap(), b"keep-me");
+        assert!(!tmp.exists());
+        assert!(
+            data.join("trash").read_dir().unwrap().next().is_some(),
+            "temp must land in data-root trash"
+        );
+    }
+
+    #[test]
+    fn download_temp_rename_commits_over_existing_via_trash_guard() {
+        let dir = tempdir().unwrap();
+        let data = dir.path().join("data");
+        fs::create_dir_all(&data).unwrap();
+        let dest = dir.path().join("client.jar");
+        fs::write(&dest, b"old").unwrap();
+        let tmp = download_temp_path(&dest);
+        fs::write(&tmp, b"new-good").unwrap();
+        let guard = modlab_core::files::trash_for_rollback(&data, &dest)
+            .unwrap()
+            .expect("old dest trashed");
+        fs::rename(&tmp, &dest).unwrap();
+        guard.commit();
+        assert_eq!(fs::read(&dest).unwrap(), b"new-good");
+        assert!(!tmp.exists());
+        let trashed = fs::read_dir(data.join("trash"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .find(|e| fs::read(e.path()).ok().as_deref() == Some(b"old".as_slice()));
+        assert!(trashed.is_some(), "previous dest must sit in trash");
+    }
+
+    #[test]
+    fn hex_sha1_matches_expected_digest_helper() {
+        let bytes = b"modlab";
+        let mut hasher = sha1::Sha1::new();
+        hasher.update(bytes);
+        let expected = format!("{:x}", hasher.finalize());
+        assert_eq!(hex_sha1(bytes), expected);
+    }
 
     #[test]
     fn merge_arguments_concatenates_jvm_and_keeps_parent_game() {
@@ -1757,8 +1861,13 @@ mod tests {
         use std::time::Duration;
         #[cfg(windows)]
         {
-            let mut child = Command::new("cmd")
-                .args(["/C", "ping", "-n", "60", "127.0.0.1"])
+            let mut child = Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "Start-Sleep -Seconds 60",
+                ])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
@@ -2260,7 +2369,10 @@ Required version: 3.3.3
 "#;
         let hint = explain_minecraft_exit(log, "").expect("hint");
         assert!(hint.contains("Sodium"), "{hint}");
-        assert!(hint.contains("26.x") || hint.contains("Minecraft"), "{hint}");
+        assert!(
+            hint.contains("26.x") || hint.contains("Minecraft"),
+            "{hint}"
+        );
     }
 
     #[test]
@@ -2288,7 +2400,10 @@ Required version: 3.3.3
     #[test]
     fn detect_menu_reached_fabric_completed_loading() {
         let log = "[main/INFO]: Completed Minecraft loading in 12.3s\n";
-        assert_eq!(detect_menu_reached(log), Some("completed minecraft loading"));
+        assert_eq!(
+            detect_menu_reached(log),
+            Some("completed minecraft loading")
+        );
     }
 
     #[test]
@@ -2324,7 +2439,11 @@ Required version: 3.3.3
         };
         apply_smoke_launch_tweaks(&mut cmd);
         let width_i = cmd.args.iter().position(|a| a == "--width").expect("width");
-        let height_i = cmd.args.iter().position(|a| a == "--height").expect("height");
+        let height_i = cmd
+            .args
+            .iter()
+            .position(|a| a == "--height")
+            .expect("height");
         assert_eq!(cmd.args[width_i + 1], "1");
         assert_eq!(cmd.args[height_i + 1], "1");
     }

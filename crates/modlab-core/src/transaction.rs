@@ -1,5 +1,5 @@
 //! Transactions — the safety mechanism behind every mutation.
-//! See docs/01-architecture-decidee.md §5: `intention → PLAN (lisible) →
+//! See .bframe/ARCHITECTURE.md: `intention → PLAN (lisible) →
 //! APPROBATION → SNAPSHOT → APPLY → VÉRIFICATION → COMMIT | ROLLBACK auto`.
 //!
 //! `Transaction` (below) is the raw primitive — journal these steps as one

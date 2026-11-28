@@ -1,5 +1,5 @@
 //! Given an already-extracted archive, work out where its files belong —
-//! see `docs/faisabilite.md` A3 and `docs/01-architecture-decidee.md` §9 for the
+//! see `.bframe/IDEES.md` A3 and `.bframe/ARCHITECTURE.md` for the
 //! reasoning. This only *classifies*; it doesn't move or copy a single
 //! file. Placement (actually deploying into a mod's folder) is a later,
 //! separate step, same "read/decide, then act" split as the MO2 importer.
@@ -7,7 +7,7 @@
 //! Recognizes the common shapes (bare Data content, a wrapped `Data/`
 //! folder, a FOMOD, and SKSE's own loader at the content root) and says
 //! `Unknown` rather than guessing for anything else — including ENB DLLs
-//! and `d3d11.dll`, which `docs/faisabilite.md` A3 covers but this doesn't
+//! and `d3d11.dll`, which `.bframe/IDEES.md` A3 covers but this doesn't
 //! yet. A readme (or another loose note) sitting next to a single folder
 //! is not a shape: it is skipped so the folder underneath can be classified.
 

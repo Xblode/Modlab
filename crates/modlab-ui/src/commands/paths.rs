@@ -103,9 +103,17 @@ pub(crate) fn set_game_path_override(
     if path.is_empty() {
         return Err("Le chemin ne peut pas être vide.".into());
     }
+    let path_buf = PathBuf::from(path);
     {
         let core = state.core.lock().map_err(|e| e.to_string())?;
-        core.set_game_path_override(&game_id, &slot_id, path)
+        crate::ipc_paths::validate_game_path_override(
+            &core,
+            &state.data_root,
+            &game_id,
+            &slot_id,
+            &path_buf,
+        )?;
+        core.set_game_path_override(&game_id, &slot_id, &path_buf.display().to_string())
             .map_err(|e| e.to_string())?;
     }
     game_path_slots(state, game_id)

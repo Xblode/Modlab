@@ -2,7 +2,7 @@
  *
  * Primary-action slot (`.tbar-primary-slot`): same height as `.select`
  * (`--ctl-sm`). Default = Select atom (branch); swaps to bordered install CTA
- * when a loader must be installed, then returns. See DESIGN.md « Slot action
+ * when a loader must be installed, then returns. See .bframe/DESIGN.md « Slot action
  * principale » / « Select ».
  *
  * Toolbar compaction (container queries on `.tbar.shell-toolbar`):
@@ -13,7 +13,7 @@
  *   Borders remain only on primary controls (branch select / install CTA +
  *   « Ajouter un mod ») — never on every control.
  * - ≤700px: drop the lead stats entirely; tighten gaps.
- * See DESIGN.md « Toolbar compaction » and DesignSystemPage.
+ * See .bframe/DESIGN.md « Toolbar compaction » and DesignSystemPage.
  */
 .main-stack > .shell-slot-toolbar > .tbar.shell-toolbar {
   margin: 0;

@@ -1,7 +1,7 @@
 //! The Minecraft Game Adapter. Everything here is allowed to know what a
 //! `.jar` is, what Fabric/Forge/NeoForge/Quilt are, where Prism or the
 //! vanilla launcher put instances — none of that belongs in `modlab-core`.
-//! See `docs/01-architecture-decidee.md` §3.1.
+//! See `.bframe/ARCHITECTURE.md`.
 //!
 //! Detection lives here; reading and writing an instance's `mods/` folder
 //! lives in `instance`. Whether a jar *is* Fabric Loader, Forge or NeoForge

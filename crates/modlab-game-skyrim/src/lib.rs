@@ -1,6 +1,6 @@
 //! The Skyrim Game Adapter. Everything here is allowed to know what an
 //! `.esp` is, what SKSE is, what MO2's on-disk format looks like — none of
-//! that belongs in `modlab-core`. See docs/01-architecture-decidee.md §3.1.
+//! that belongs in `modlab-core`. See .bframe/ARCHITECTURE.md.
 
 pub mod archive_meta;
 pub mod categories;

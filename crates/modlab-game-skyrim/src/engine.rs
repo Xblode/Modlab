@@ -248,10 +248,80 @@ fn replace_file(src: &Path, dest: &Path) -> io::Result<()> {
     result
 }
 
+/// What an unfinished engine-disk change undoes on `Drop`.
+enum EngineUndo {
+    /// Undo `install_root_files`: take these names back out of the install root.
+    RemoveInstalled { names: Vec<String> },
+    /// Undo `uninstall_root_files`: put the engine's root files back from `source`.
+    RestoreUninstalled { source: PathBuf },
+}
+
+/// RAII guard for SKSE root files on the real install root.
+///
+/// After a disk mutation, hold this until the Plan (DB) — or a successful
+/// launch — has succeeded, then call [`commit`](Self::commit). If the guard
+/// is dropped without `commit`, the previous disk state is restored.
+pub struct EngineInstallGuard {
+    install_root: PathBuf,
+    store: PathBuf,
+    undo: Option<EngineUndo>,
+}
+
+impl EngineInstallGuard {
+    /// Guard a successful (or partial-then-completed) install. Only `copied`
+    /// names are rolled back — identical hand-made files are left alone.
+    pub fn after_install(install_root: PathBuf, store: PathBuf, copied: Vec<String>) -> Self {
+        let undo = (!copied.is_empty()).then_some(EngineUndo::RemoveInstalled { names: copied });
+        Self {
+            install_root,
+            store,
+            undo,
+        }
+    }
+
+    /// Guard a successful uninstall. On Drop without `commit`, re-installs
+    /// root files from `source` (the mod folder that was just disabled).
+    pub fn after_uninstall(
+        install_root: PathBuf,
+        store: PathBuf,
+        source: PathBuf,
+        removed: Vec<String>,
+    ) -> Self {
+        let undo = (!removed.is_empty()).then_some(EngineUndo::RestoreUninstalled { source });
+        Self {
+            install_root,
+            store,
+            undo,
+        }
+    }
+
+    /// Keep the disk change — call only after the Plan DB (or launch) succeeded.
+    pub fn commit(&mut self) {
+        self.undo = None;
+    }
+}
+
+impl Drop for EngineInstallGuard {
+    fn drop(&mut self) {
+        match self.undo.take() {
+            Some(EngineUndo::RemoveInstalled { names }) => {
+                let _ = uninstall_root_files(&self.install_root, &self.store, Some(&names));
+            }
+            Some(EngineUndo::RestoreUninstalled { source }) => {
+                let _ = install_root_files(&source, &self.install_root, &self.store);
+            }
+            None => {}
+        }
+    }
+}
+
 /// Put the engine mod's root files (`skse64_loader.exe`, `skse64_*.dll`) into
 /// the real install root — safely, see the module doc. `store` is ModLab's
 /// own folder for this (backups, retired files, manifest). Idempotent: when
 /// everything is already in place it changes nothing.
+///
+/// On a mid-loop failure, every name already in `copied` is taken back out
+/// before the error is returned — the install root is never left half-updated.
 pub fn install_root_files(
     source: &Path,
     install_root: &Path,
@@ -260,68 +330,79 @@ pub fn install_root_files(
     let mut report = InstallReport::default();
     let mut records = load_manifest(store)?;
 
-    for name in engine_root_files(source)? {
-        let bytes = fs::read(source.join(&name))?;
-        let (size, hash) = (bytes.len() as u64, fnv1a(&bytes));
-        let dest = install_root.join(&name);
-        let known = records
-            .iter()
-            .position(|r| r.name.eq_ignore_ascii_case(&name));
-        let mut backup = known.and_then(|i| records[i].backup.clone());
+    let outcome = (|| -> io::Result<()> {
+        for name in engine_root_files(source)? {
+            let bytes = fs::read(source.join(&name))?;
+            let (size, hash) = (bytes.len() as u64, fnv1a(&bytes));
+            let dest = install_root.join(&name);
+            let known = records
+                .iter()
+                .position(|r| r.name.eq_ignore_ascii_case(&name));
+            let mut backup = known.and_then(|i| records[i].backup.clone());
 
-        if dest.exists() {
-            if !dest.is_file() {
-                return Err(io::Error::other(format!(
-                    "{} existe mais n'est pas un fichier",
-                    dest.display()
-                )));
-            }
-            let current = fs::read(&dest)?;
-            if current == bytes {
-                // Same bytes: nothing to do. Only a file ModLab already owns
-                // keeps being listed (its hash is refreshed); a hand-made
-                // install is never claimed.
-                if let Some(i) = known {
-                    records[i].size = size;
-                    records[i].hash = hash;
-                    save_manifest(store, &records)?;
-                }
-                report.identical.push(name);
-                continue;
-            }
-            let ours = known.is_some_and(|i| {
-                current.len() as u64 == records[i].size && fnv1a(&current) == records[i].hash
-            });
-            if !ours {
-                // Somebody else's file: set it aside before anything else.
-                let backups = store.join(BACKUP_DIR);
-                fs::create_dir_all(&backups)?;
-                let target = unique_path(&backups, &name);
-                let copied = fs::copy(&dest, &target)?;
-                if copied != current.len() as u64 {
+            if dest.exists() {
+                if !dest.is_file() {
                     return Err(io::Error::other(format!(
-                        "sauvegarde incomplète de {}",
+                        "{} existe mais n'est pas un fichier",
                         dest.display()
                     )));
                 }
-                backup = target.file_name().map(|n| n.to_string_lossy().to_string());
-                report.backed_up.push(name.clone());
+                let current = fs::read(&dest)?;
+                if current == bytes {
+                    // Same bytes: nothing to do. Only a file ModLab already owns
+                    // keeps being listed (its hash is refreshed); a hand-made
+                    // install is never claimed.
+                    if let Some(i) = known {
+                        records[i].size = size;
+                        records[i].hash = hash;
+                        save_manifest(store, &records)?;
+                    }
+                    report.identical.push(name);
+                    continue;
+                }
+                let ours = known.is_some_and(|i| {
+                    current.len() as u64 == records[i].size && fnv1a(&current) == records[i].hash
+                });
+                if !ours {
+                    // Somebody else's file: set it aside before anything else.
+                    let backups = store.join(BACKUP_DIR);
+                    fs::create_dir_all(&backups)?;
+                    let target = unique_path(&backups, &name);
+                    let copied = fs::copy(&dest, &target)?;
+                    if copied != current.len() as u64 {
+                        return Err(io::Error::other(format!(
+                            "sauvegarde incomplète de {}",
+                            dest.display()
+                        )));
+                    }
+                    backup = target.file_name().map(|n| n.to_string_lossy().to_string());
+                    report.backed_up.push(name.clone());
+                }
             }
-        }
 
-        replace_file(&source.join(&name), &dest)?;
-        let record = Record {
-            name: name.clone(),
-            size,
-            hash,
-            backup,
-        };
-        match known {
-            Some(i) => records[i] = record,
-            None => records.push(record),
+            replace_file(&source.join(&name), &dest)?;
+            // Track before manifest save so a save failure still rolls this file back.
+            report.copied.push(name.clone());
+            let record = Record {
+                name: name.clone(),
+                size,
+                hash,
+                backup,
+            };
+            match known {
+                Some(i) => records[i] = record,
+                None => records.push(record),
+            }
+            save_manifest(store, &records)?;
         }
-        save_manifest(store, &records)?;
-        report.copied.push(name);
+        Ok(())
+    })();
+
+    if let Err(e) = outcome {
+        if !report.copied.is_empty() {
+            let _ = uninstall_root_files(install_root, store, Some(&report.copied));
+        }
+        return Err(e);
     }
     Ok(report)
 }
@@ -375,7 +456,8 @@ pub fn uninstall_root_files(
 /// Before a launch: make sure every enabled, installed engine mod of `rows`
 /// has its root files in the install root — the case a click on the checkbox
 /// never covers (an imported or restored loadout whose SKSE is already
-/// enabled).
+/// enabled). On failure after at least one mod was copied, those copies are
+/// taken back out so the install root is not left half-updated.
 pub fn ensure_engine_installed(
     rows: &[LoadoutEntryRow],
     install_root: &Path,
@@ -383,7 +465,15 @@ pub fn ensure_engine_installed(
 ) -> io::Result<InstallReport> {
     let mut total = InstallReport::default();
     for row in enabled_engine_rows(rows) {
-        total.merge(install_root_files(&row.source_path, install_root, store)?);
+        match install_root_files(&row.source_path, install_root, store) {
+            Ok(report) => total.merge(report),
+            Err(e) => {
+                if !total.copied.is_empty() {
+                    let _ = uninstall_root_files(install_root, store, Some(&total.copied));
+                }
+                return Err(e);
+            }
+        }
     }
     Ok(total)
 }
@@ -701,5 +791,90 @@ mod tests {
         let rows = vec![row("SKSE64", disabled_skse.path(), false)];
         let report = ensure_engine_installed(&rows, game2.path(), store.path()).unwrap();
         assert_eq!(report, InstallReport::default());
+    }
+
+    #[test]
+    fn guard_drop_without_commit_removes_copied_files() {
+        let skse = fake_skse_mod();
+        let game = tempfile::tempdir().unwrap();
+        let store = tempfile::tempdir().unwrap();
+        let report = install_root_files(skse.path(), game.path(), store.path()).unwrap();
+        assert!(game.path().join("skse64_loader.exe").is_file());
+
+        {
+            let _guard = EngineInstallGuard::after_install(
+                game.path().to_path_buf(),
+                store.path().to_path_buf(),
+                report.copied,
+            );
+            assert!(game.path().join("skse64_loader.exe").is_file());
+        }
+
+        assert!(!game.path().join("skse64_loader.exe").exists());
+        assert!(!game.path().join("skse64_1_7_104.dll").exists());
+    }
+
+    #[test]
+    fn guard_commit_keeps_copied_files() {
+        let skse = fake_skse_mod();
+        let game = tempfile::tempdir().unwrap();
+        let store = tempfile::tempdir().unwrap();
+        let report = install_root_files(skse.path(), game.path(), store.path()).unwrap();
+
+        {
+            let mut guard = EngineInstallGuard::after_install(
+                game.path().to_path_buf(),
+                store.path().to_path_buf(),
+                report.copied,
+            );
+            guard.commit();
+        }
+
+        assert!(game.path().join("skse64_loader.exe").is_file());
+        assert!(game.path().join("skse64_1_7_104.dll").is_file());
+    }
+
+    #[test]
+    fn guard_drop_after_uninstall_restores_from_source() {
+        let skse = fake_skse_mod();
+        let game = tempfile::tempdir().unwrap();
+        let store = tempfile::tempdir().unwrap();
+        install_root_files(skse.path(), game.path(), store.path()).unwrap();
+        let names = engine_root_files(skse.path()).unwrap();
+        let report = uninstall_root_files(game.path(), store.path(), Some(&names)).unwrap();
+        assert!(!game.path().join("skse64_loader.exe").exists());
+
+        {
+            let _guard = EngineInstallGuard::after_uninstall(
+                game.path().to_path_buf(),
+                store.path().to_path_buf(),
+                skse.path().to_path_buf(),
+                report.removed,
+            );
+        }
+
+        assert!(game.path().join("skse64_loader.exe").is_file());
+        assert!(game.path().join("skse64_1_7_104.dll").is_file());
+    }
+
+    #[test]
+    fn partial_install_failure_rolls_back_already_copied_files() {
+        let skse = fake_skse_mod();
+        let game = tempfile::tempdir().unwrap();
+        let store = tempfile::tempdir().unwrap();
+        // A directory where a root DLL should go: replace_file cannot overwrite it.
+        let blocker = game.path().join("skse64_steam_loader.dll");
+        fs::create_dir_all(&blocker).unwrap();
+
+        let err = install_root_files(skse.path(), game.path(), store.path()).unwrap_err();
+        assert!(err.to_string().len() > 0);
+
+        assert!(
+            !game.path().join("skse64_loader.exe").exists(),
+            "earlier copies must be rolled back when a later file fails"
+        );
+        assert!(!game.path().join("skse64_1_7_104.dll").exists());
+        // The blocker directory itself is left as we found it.
+        assert!(blocker.is_dir());
     }
 }

@@ -35,7 +35,7 @@ export type SideAct =
    * Réglages subsection. See `ProfilePage`. */
   | "profile"
   /** Atelier de patchs / Boutique — the "Communauté" preview from
-   * `docs/deep-research-report.md`. Also not configuration. */
+   * `.bframe/VISION.md`. Also not configuration. */
   | "community";
 
 type Props = {

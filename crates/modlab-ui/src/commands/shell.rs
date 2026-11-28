@@ -91,27 +91,32 @@ pub struct PowerShellResult {
 }
 
 const PS_CWD_MARK: &str = "__MODLAB_PS_CWD__";
+/// Hard cap on the command string (XSS / IPC abuse).
+const PS_COMMAND_MAX_BYTES: usize = 8 * 1024;
 
-/// Run `command` in PowerShell from `cwd` (or the process default). Returns
+/// Run `command` in PowerShell from `cwd` (or the user profile). Returns
 /// stdout/stderr, exit code, and the working directory after the command.
+/// `cwd` must sit under a known root (`data_root`, profile, game installs).
 #[tauri::command]
 pub(crate) fn run_powershell(
+    state: State<AppState>,
     command: String,
     cwd: Option<String>,
 ) -> Result<PowerShellResult, String> {
     #[cfg(not(windows))]
     {
-        let _ = (command, cwd);
+        let _ = (state, command, cwd);
         return Err("PowerShell n’est disponible que sous Windows.".into());
     }
     #[cfg(windows)]
     {
-        run_powershell_windows(command, cwd)
+        run_powershell_windows(&state, command, cwd)
     }
 }
 
 #[cfg(windows)]
 fn run_powershell_windows(
+    state: &AppState,
     command: String,
     cwd: Option<String>,
 ) -> Result<PowerShellResult, String> {
@@ -124,19 +129,23 @@ fn run_powershell_windows(
     if trimmed.is_empty() {
         return Err("Commande vide.".into());
     }
+    if trimmed.len() > PS_COMMAND_MAX_BYTES {
+        return Err(format!(
+            "Commande trop longue (max {PS_COMMAND_MAX_BYTES} caractères)."
+        ));
+    }
 
-    let start_cwd = cwd
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .filter(|p| p.is_dir())
-        .unwrap_or_else(|| {
-            std::env::var_os("USERPROFILE")
-                .map(PathBuf::from)
-                .filter(|p| p.is_dir())
-                .unwrap_or_else(|| PathBuf::from("."))
-        });
+    let roots = {
+        let core = state.core.lock().map_err(|e| e.to_string())?;
+        crate::ipc_paths::known_roots(&state.data_root, Some(&core))
+    };
+
+    let start_cwd = resolve_powershell_cwd(cwd.as_deref(), &roots)?;
+    eprintln!(
+        "[powershell] cwd={} command_len={}",
+        start_cwd.display(),
+        trimmed.len()
+    );
 
     // Quote for PowerShell single-quoted string (escape ' as '').
     let cwd_lit = start_cwd.display().to_string().replace('\'', "''");
@@ -169,6 +178,24 @@ fn run_powershell_windows(
     })
 }
 
+/// Default cwd = USERPROFILE (must be in `roots`). An explicit cwd is
+/// refused when it escapes every authorized root.
+#[cfg(windows)]
+fn resolve_powershell_cwd(cwd: Option<&str>, roots: &[PathBuf]) -> Result<PathBuf, String> {
+    let candidate = cwd
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+        .or_else(|| {
+            std::env::var_os("USERPROFILE")
+                .map(PathBuf::from)
+                .filter(|p| p.is_dir())
+        })
+        .ok_or_else(|| "Aucun répertoire de travail autorisé.".to_string())?;
+    crate::ipc_paths::ensure_under_roots(&candidate, roots)
+}
+
 #[cfg(windows)]
 fn split_ps_cwd(raw: &str, fallback: &Path) -> (String, String) {
     if let Some(idx) = raw.rfind(PS_CWD_MARK) {
@@ -189,4 +216,38 @@ fn split_ps_cwd(raw: &str, fallback: &Path) -> (String, String) {
         raw.trim_end_matches(['\r', '\n']).to_string(),
         fallback.display().to_string(),
     )
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn resolve_powershell_cwd_rejects_outside_roots() {
+        let root = std::env::temp_dir().join(format!("modlab-ps-root-{}", std::process::id()));
+        let outside = std::env::temp_dir().join(format!("modlab-ps-out-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+
+        let roots = vec![crate::ipc_paths::canonicalize_path(&root).unwrap()];
+        assert!(resolve_powershell_cwd(Some(root.to_str().unwrap()), &roots).is_ok());
+        let err = resolve_powershell_cwd(Some(outside.to_str().unwrap()), &roots).unwrap_err();
+        assert!(
+            err.contains("autorisés") || err.contains("autoris"),
+            "{err}"
+        );
+
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn powershell_command_max_is_enforced_before_spawn() {
+        assert!(PS_COMMAND_MAX_BYTES >= 1024);
+        let huge = "x".repeat(PS_COMMAND_MAX_BYTES + 1);
+        assert!(huge.trim().len() > PS_COMMAND_MAX_BYTES);
+    }
 }

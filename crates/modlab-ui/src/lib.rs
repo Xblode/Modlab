@@ -5,6 +5,7 @@ pub mod browser;
 mod commands;
 mod download_progress;
 pub mod downloads;
+mod ipc_paths;
 mod msa_store;
 mod paths;
 mod source_page;
@@ -932,28 +933,32 @@ pub(crate) fn engine_store_dir(data_root: &Path) -> PathBuf {
 /// `modlab_game_skyrim::engine`. A no-op for every other mod, every other
 /// game, and an archived (not yet extracted) row. The launch also copies
 /// them when needed (`skse::prepare_launch`), so this is not the only way in.
+///
+/// Returns a guard the caller must [`commit`](modlab_game_skyrim::engine::EngineInstallGuard::commit)
+/// only after the Plan DB mutation succeeds. Drop without commit restores the
+/// previous install-root state. `Ok(None)` means nothing was done on disk.
 pub(crate) fn sync_engine_mod_direct_install(
     core: &Core,
     state: &AppState,
     loadout_id: i64,
     mod_id: i64,
     enabled: bool,
-) -> Result<(), String> {
+) -> Result<Option<modlab_game_skyrim::engine::EngineInstallGuard>, String> {
     let is_skyrim = loadout::list(core)
         .map_err(|e| e.to_string())?
         .into_iter()
         .any(|l| l.id == loadout_id && l.game_id == SkyrimAdapter.id());
     if !is_skyrim {
-        return Ok(());
+        return Ok(None);
     }
     let rows = loadout::entries(core, loadout_id).map_err(|e| e.to_string())?;
     let Some(row) = rows.into_iter().find(|r| r.mod_id == mod_id) else {
-        return Ok(());
+        return Ok(None);
     };
     if row.status != loadout::STATUS_INSTALLED
         || !modlab_game_skyrim::engine::is_engine_content(&row.source_path)
     {
-        return Ok(());
+        return Ok(None);
     }
     if state.game_running.load(Ordering::SeqCst) {
         return Err(
@@ -961,7 +966,7 @@ pub(crate) fn sync_engine_mod_direct_install(
         );
     }
     let Some(install_root) = resolve_slot(core, &SkyrimAdapter, "root") else {
-        return Ok(());
+        return Ok(None);
     };
     let store = engine_store_dir(&state.data_root);
     if enabled {
@@ -975,35 +980,46 @@ pub(crate) fn sync_engine_mod_direct_install(
             game_version,
         )?;
     }
-    let described = if enabled {
-        modlab_game_skyrim::engine::install_root_files(&row.source_path, &install_root, &store).map(
-            |r| {
-                format!(
-                    "SKSE : {} fichier(s) copié(s), {} mis de côté, {} déjà identique(s)",
-                    r.copied.len(),
-                    r.backed_up.len(),
-                    r.identical.len()
-                )
-            },
-        )
+    let (summary, guard) = if enabled {
+        let report =
+            modlab_game_skyrim::engine::install_root_files(&row.source_path, &install_root, &store)
+                .map_err(|e| e.to_string())?;
+        let summary = format!(
+            "SKSE : {} fichier(s) copié(s), {} mis de côté, {} déjà identique(s)",
+            report.copied.len(),
+            report.backed_up.len(),
+            report.identical.len()
+        );
+        let guard = modlab_game_skyrim::engine::EngineInstallGuard::after_install(
+            install_root,
+            store,
+            report.copied,
+        );
+        (summary, guard)
     } else {
         let names = modlab_game_skyrim::engine::engine_root_files(&row.source_path)
             .map_err(|e| e.to_string())?;
-        modlab_game_skyrim::engine::uninstall_root_files(&install_root, &store, Some(&names)).map(
-            |r| {
-                format!(
-                    "SKSE : {} fichier(s) retiré(s), {} original(aux) remis, {} laissé(s) car modifié(s)",
-                    r.removed.len(),
-                    r.restored.len(),
-                    r.left_alone.len()
-                )
-            },
-        )
+        let report =
+            modlab_game_skyrim::engine::uninstall_root_files(&install_root, &store, Some(&names))
+                .map_err(|e| e.to_string())?;
+        let summary = format!(
+            "SKSE : {} fichier(s) retiré(s), {} original(aux) remis, {} laissé(s) car modifié(s)",
+            report.removed.len(),
+            report.restored.len(),
+            report.left_alone.len()
+        );
+        let guard = modlab_game_skyrim::engine::EngineInstallGuard::after_uninstall(
+            install_root,
+            store,
+            row.source_path,
+            report.removed,
+        );
+        (summary, guard)
     };
-    let summary = described.map_err(|e| e.to_string())?;
     let mut tx = transaction::Transaction::new(core, "skyrim.engine");
     tx.step(summary);
-    tx.commit().map(|_| ()).map_err(|e| e.to_string())
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(Some(guard))
 }
 
 /// What USVFS actually layers at launch: every mod, except that the engine mod

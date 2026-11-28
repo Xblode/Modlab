@@ -18,7 +18,7 @@ const MARKET_ITEMS: readonly {
 ];
 
 /** Communauté → Boutique — a static preview of the cosmetic marketplace
- * from `docs/deep-research-report.md`. Own page, own nav entry
+ * from `.bframe/VISION.md`. Own page, own nav entry
  * (`CommunityMenu`): not a Réglages subsection. */
 export function MarketplacePage({ onUnwired }: { onUnwired: (label: string) => void }) {
   return (

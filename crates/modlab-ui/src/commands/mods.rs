@@ -59,9 +59,13 @@ pub(crate) fn set_mod_enabled(
         // Minecraft: `foo.jar` ↔ `foo.jar.disabled` in the instance mods/, then DB.
         modlab_game_minecraft::instance::set_mod_enabled(&core, loadout_id, mod_id, enabled)?;
     } else {
-        // Checked first: an engine mod's files must not move under a running game.
-        sync_engine_mod_direct_install(&core, &state, loadout_id, mod_id, enabled)?;
+        // Disk under RAII guard; commit only after the Plan DB succeeds so a
+        // failed set_enabled never leaves the install root out of sync.
+        let mut guard = sync_engine_mod_direct_install(&core, &state, loadout_id, mod_id, enabled)?;
         loadout::set_enabled(&core, loadout_id, mod_id, enabled).map_err(|e| e.to_string())?;
+        if let Some(g) = guard.as_mut() {
+            g.commit();
+        }
     }
     entries_dto(&core, loadout_id)
 }
@@ -652,16 +656,14 @@ pub(crate) fn delete_mod(
                     .into(),
             );
         }
-        modlab_game_minecraft::instance::remove_mod(
-            &core,
-            &state.data_root,
-            loadout_id,
-            mod_id,
-        )?;
+        modlab_game_minecraft::instance::remove_mod(&core, &state.data_root, loadout_id, mod_id)?;
     } else {
-        // An engine mod leaves the game's install root before it leaves the list.
-        sync_engine_mod_direct_install(&core, &state, loadout_id, mod_id, false)?;
+        // Disk under guard; commit only after the Plan DB soft-delete succeeds.
+        let mut guard = sync_engine_mod_direct_install(&core, &state, loadout_id, mod_id, false)?;
         download::remove(&core, mod_id).map_err(|e| e.to_string())?;
+        if let Some(g) = guard.as_mut() {
+            g.commit();
+        }
     }
     entries_dto(&core, loadout_id)
 }
@@ -683,8 +685,10 @@ pub(crate) async fn uninstall_mod(
         let _busy = state.claim_mod(mod_id)?;
         let core = state.core.lock().map_err(|e| e.to_string())?;
         // Before the mod's folder goes: the engine's root files are taken out of
-        // the game's install root while their source still exists.
-        sync_engine_mod_direct_install(&core, &state, loadout_id, mod_id, false)?;
+        // the game's install root while their source still exists. Commit the
+        // engine guard only after the Core uninstall Plan succeeds.
+        let mut engine_guard =
+            sync_engine_mod_direct_install(&core, &state, loadout_id, mod_id, false)?;
         let source = loadout::entries(&core, loadout_id)
             .map_err(|e| e.to_string())?
             .into_iter()
@@ -715,7 +719,11 @@ pub(crate) async fn uninstall_mod(
         );
         if let Err(err) = uninstalled {
             drop(guards);
+            // engine_guard drops without commit → restores SKSE root files
             return Err(err.to_string());
+        }
+        if let Some(g) = engine_guard.as_mut() {
+            g.commit();
         }
         for guard in guards {
             guard.commit();
@@ -1565,7 +1573,9 @@ mod tests {
         // A mod merely named after SKSE never reaches the game folder.
         // Copying files and the enabled flag are two steps: the flag is what
         // the Mods list shows, and it is not implied by the copy.
-        sync_engine_mod_direct_install(&core, &state, loadout_id, plugin_id, true).unwrap();
+        let plugin_guard =
+            sync_engine_mod_direct_install(&core, &state, loadout_id, plugin_id, true).unwrap();
+        assert!(plugin_guard.is_none());
         assert_eq!(fs::read_dir(&game).unwrap().count(), 0);
         assert!(loadout::set_enabled(&core, loadout_id, plugin_id, true).unwrap());
         assert!(
@@ -1577,19 +1587,59 @@ mod tests {
                 .enabled
         );
 
-        sync_engine_mod_direct_install(&core, &state, loadout_id, engine_id, true).unwrap();
+        let mut engine_guard =
+            sync_engine_mod_direct_install(&core, &state, loadout_id, engine_id, true).unwrap();
         assert!(game.join("skse64_loader.exe").is_file());
         assert!(game.join("skse64_1_7_104.dll").is_file());
         assert!(!game.join("Data").exists());
         assert!(data_root.join("engine/skyrimse/engine-files.tsv").is_file());
         assert!(loadout::set_enabled(&core, loadout_id, engine_id, true).unwrap());
+        if let Some(g) = engine_guard.as_mut() {
+            g.commit();
+        }
         let rows = loadout::entries(&core, loadout_id).unwrap();
         assert!(rows.iter().find(|r| r.mod_id == engine_id).unwrap().enabled);
         assert!(rows.iter().find(|r| r.mod_id == plugin_id).unwrap().enabled);
 
-        sync_engine_mod_direct_install(&core, &state, loadout_id, engine_id, false).unwrap();
+        let mut off_guard =
+            sync_engine_mod_direct_install(&core, &state, loadout_id, engine_id, false).unwrap();
         assert!(!game.join("skse64_loader.exe").exists());
         assert!(skse.join("skse64_loader.exe").is_file());
+        if let Some(g) = off_guard.as_mut() {
+            g.commit();
+        }
+
+        drop(core);
+        for dir in [skse, address_library, game, data_root] {
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn engine_disk_rolls_back_when_plan_db_is_not_committed() {
+        // Mirrors enable/uninstall order: disk under guard, commit only after
+        // Plan OK. Dropping the guard without commit must restore the folder.
+        let core = Core::open_in_memory().unwrap();
+        let (loadout_id, skse, address_library) = skse_loadout(&core, "guard-rollback");
+        let game = scratch("skse-fake-game-guard-rollback");
+        let data_root = scratch("skse-data-root-guard-rollback");
+        core.set_game_path_override("skyrimse", "root", &game.display().to_string())
+            .unwrap();
+        let rows = loadout::entries(&core, loadout_id).unwrap();
+        let engine_id = rows.iter().find(|r| r.name == "SKSE64").unwrap().mod_id;
+        let state = test_state(core, data_root.clone());
+        let core = state.core.lock().unwrap();
+
+        {
+            let _guard =
+                sync_engine_mod_direct_install(&core, &state, loadout_id, engine_id, true).unwrap();
+            assert!(game.join("skse64_loader.exe").is_file());
+            // Simulate Plan DB failure: leave without commit.
+        }
+        assert!(
+            !game.join("skse64_loader.exe").exists(),
+            "SKSE files must not linger when the Plan never committed"
+        );
 
         drop(core);
         for dir in [skse, address_library, game, data_root] {
@@ -1617,8 +1667,10 @@ mod tests {
         let state = test_state(core, data_root.clone());
         let core = state.core.lock().unwrap();
 
-        let err =
-            sync_engine_mod_direct_install(&core, &state, loadout_id, engine_id, true).unwrap_err();
+        let err = match sync_engine_mod_direct_install(&core, &state, loadout_id, engine_id, true) {
+            Err(e) => e,
+            Ok(_) => panic!("expected an error"),
+        };
 
         assert!(err.contains("1.7.104"), "{err}");
         assert!(err.contains("Rien n'a été copié"), "{err}");
@@ -1645,8 +1697,10 @@ mod tests {
         state.game_running.store(true, Ordering::SeqCst);
         let core = state.core.lock().unwrap();
 
-        let err =
-            sync_engine_mod_direct_install(&core, &state, loadout_id, engine_id, true).unwrap_err();
+        let err = match sync_engine_mod_direct_install(&core, &state, loadout_id, engine_id, true) {
+            Err(e) => e,
+            Ok(_) => panic!("expected an error"),
+        };
 
         assert!(err.contains("Une partie est en cours"), "{err}");
         assert_eq!(fs::read_dir(&game).unwrap().count(), 0);

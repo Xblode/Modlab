@@ -161,12 +161,21 @@ fn reveal_path_on_disk(path: &Path, select: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub(crate) fn reveal_path(path: String, select: bool) -> Result<(), String> {
+pub(crate) fn reveal_path(
+    state: State<AppState>,
+    path: String,
+    select: bool,
+) -> Result<(), String> {
     let path = path.trim();
     if path.is_empty() {
         return Err("chemin vide".to_string());
     }
-    reveal_path_on_disk(Path::new(path), select)
+    let roots = {
+        let core = state.core.lock().map_err(|e| e.to_string())?;
+        crate::ipc_paths::known_roots(&state.data_root, Some(&core))
+    };
+    let bounded = crate::ipc_paths::ensure_under_roots(Path::new(path), &roots)?;
+    reveal_path_on_disk(&bounded, select)
 }
 
 /// Open the per-instance launcher folder for a branch (`install_target`).

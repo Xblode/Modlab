@@ -78,7 +78,9 @@ pub(crate) fn resolve(mods: &[DependencyMod]) -> Vec<ModDependencyReport> {
             if ignored(&declared.id)
                 || matches!(
                     declared.kind,
-                    DependencyKind::Incompatible | DependencyKind::Discouraged | DependencyKind::UsedBy
+                    DependencyKind::Incompatible
+                        | DependencyKind::Discouraged
+                        | DependencyKind::UsedBy
                 )
             {
                 continue;

@@ -3,7 +3,7 @@ name = "modlab-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "ModLab engine: the single source of truth. UI, CLI and MCP are all clients of this crate — see docs/01-architecture-decidee.md."
+description = "ModLab engine: the single source of truth. UI, CLI and MCP are all clients of this crate — see .bframe/ARCHITECTURE.md."
 
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }

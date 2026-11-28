@@ -284,7 +284,7 @@ pub fn launcher_from_data_dir(data: &Path) -> Option<LauncherInstall> {
     }
     // Classic `.minecraft` (profiles here, exe elsewhere).
     if data.join("launcher_profiles.json").is_file() || data.join("versions").is_dir() {
-        for exe in mojang_desktop_exe_candidates() {
+        if let Some(exe) = mojang_desktop_exe_candidates().into_iter().next() {
             return Some(LauncherInstall {
                 kind: LauncherKind::MojangDesktop,
                 exe,

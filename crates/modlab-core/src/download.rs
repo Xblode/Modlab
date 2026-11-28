@@ -177,7 +177,10 @@ pub enum ReconcileOutcome {
     /// Still downloading and the file is missing or empty.
     NotReady,
     /// [`abandon`] ran (give-up with no file).
-    Failed { loadout_id: Option<i64>, file_name: String },
+    Failed {
+        loadout_id: Option<i64>,
+        file_name: String,
+    },
     /// Unknown id, or already archived / not downloading.
     AlreadyDone,
 }
@@ -185,11 +188,7 @@ pub enum ReconcileOutcome {
 /// Disk safety net: if the destination file is present and non-empty, promote
 /// to archived; if `give_up` and still missing, fail the transfer. Never
 /// inserts a second capture.
-pub fn reconcile(
-    core: &Core,
-    download_id: i64,
-    give_up: bool,
-) -> Result<ReconcileOutcome> {
+pub fn reconcile(core: &Core, download_id: i64, give_up: bool) -> Result<ReconcileOutcome> {
     let Some(row) = progress_row(core, download_id)? else {
         return Ok(ReconcileOutcome::AlreadyDone);
     };
@@ -197,9 +196,7 @@ pub fn reconcile(
         return Ok(ReconcileOutcome::AlreadyDone);
     }
     if file_ready(&row.path) {
-        let size = std::fs::metadata(&row.path)
-            .ok()
-            .map(|m| m.len() as i64);
+        let size = std::fs::metadata(&row.path).ok().map(|m| m.len() as i64);
         let finished = complete(core, download_id, size, None, None)?;
         return Ok(ReconcileOutcome::Completed(finished));
     }

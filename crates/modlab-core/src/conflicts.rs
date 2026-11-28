@@ -1,5 +1,5 @@
 //! File conflicts — the same relative path provided by more than one mod.
-//! See docs/01-architecture-decidee.md §5 ("indicateurs de conflit par
+//! See .bframe/ARCHITECTURE.md ("indicateurs de conflit par
 //! fichier"). Generic, not Skyrim-specific: any game whose mods are
 //! folders of files has this same concept.
 //!

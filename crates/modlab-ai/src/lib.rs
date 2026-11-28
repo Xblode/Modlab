@@ -1,4 +1,4 @@
-//! ModLab's local AI layer — `docs/01-architecture-decidee.md` §6.
+//! ModLab's local AI layer — `.bframe/ARCHITECTURE.md`
 //!
 //! The split is deliberate and non-negotiable: the **rules engine** produces
 //! the diagnosis from Core facts, and the LLM (when present) only *phrases*

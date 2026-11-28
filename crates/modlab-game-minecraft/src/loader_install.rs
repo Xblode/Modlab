@@ -141,10 +141,7 @@ pub fn versions_installed(
 
 /// Relative paths of NeoForge jars produced by installer processors (not on CDN
 /// as empty-URL version-JSON libs in modern NeoForge).
-pub fn missing_neoforge_processor_artifacts(
-    instance_root: &Path,
-    loader_ver: &str,
-) -> Vec<String> {
+pub fn missing_neoforge_processor_artifacts(instance_root: &Path, loader_ver: &str) -> Vec<String> {
     let ver = loader_ver.trim();
     if ver.is_empty() {
         return vec!["(version NeoForge vide)".to_string()];
@@ -205,11 +202,7 @@ pub fn list_installed_game_versions(instance_root: &Path) -> Vec<String> {
 
 /// Loader builds already on disk for `loader` + `mc` (source of truth:
 /// [`versions_installed`]). Empty for vanilla — use [`list_installed_game_versions`].
-pub fn list_installed_loader_versions(
-    instance_root: &Path,
-    loader: &str,
-    mc: &str,
-) -> Vec<String> {
+pub fn list_installed_loader_versions(instance_root: &Path, loader: &str, mc: &str) -> Vec<String> {
     let loader = loader.trim().to_lowercase();
     let mc = mc.trim();
     if loader.is_empty() || mc.is_empty() || loader == "vanilla" {
@@ -292,11 +285,7 @@ fn extract_loader_version_from_folder(loader: &str, mc: &str, folder_name: &str)
             let prefix = format!("{mc}-");
             let rest = folder_name.strip_prefix(&prefix)?;
             // Installer may produce `{mc}-{ver}` or `{mc}-forge-{ver}`.
-            Some(
-                rest.strip_prefix("forge-")
-                    .unwrap_or(rest)
-                    .to_string(),
-            )
+            Some(rest.strip_prefix("forge-").unwrap_or(rest).to_string())
         }
         "neoforge" => {
             if let Some(rest) = folder_name.strip_prefix("neoforge-") {
@@ -304,11 +293,7 @@ fn extract_loader_version_from_folder(loader: &str, mc: &str, folder_name: &str)
             }
             let prefix = format!("{mc}-");
             let rest = folder_name.strip_prefix(&prefix)?;
-            Some(
-                rest.strip_prefix("neoforge-")
-                    .unwrap_or(rest)
-                    .to_string(),
-            )
+            Some(rest.strip_prefix("neoforge-").unwrap_or(rest).to_string())
         }
         _ => None,
     }
@@ -453,13 +438,7 @@ pub fn install(
     let loader = loader.trim().to_lowercase();
     emit(progress, loadout_id, "start", "Démarrage…", false);
     if !force && versions_installed(instance_root, &loader, mc, loader_ver) {
-        emit(
-            progress,
-            loadout_id,
-            "done",
-            "Déjà installé.",
-            true,
-        );
+        emit(progress, loadout_id, "done", "Déjà installé.", true);
         return Ok(());
     }
     match loader.as_str() {
@@ -2171,9 +2150,8 @@ mod tests {
             serde_json::to_vec_pretty(&detail).unwrap(),
         )
         .unwrap();
-        let loader_jar = root.join(
-            "libraries/net/neoforged/fancymodloader/loader/12.0.17/loader-12.0.17.jar",
-        );
+        let loader_jar =
+            root.join("libraries/net/neoforged/fancymodloader/loader/12.0.17/loader-12.0.17.jar");
         fs::create_dir_all(loader_jar.parent().unwrap()).unwrap();
         fs::write(&loader_jar, b"fml").unwrap();
         assert!(
@@ -2205,7 +2183,11 @@ mod tests {
         let id = "neoforge-26.3.0.118";
         let version_dir = root.join("versions").join(id);
         fs::create_dir_all(&version_dir).unwrap();
-        fs::write(version_dir.join(format!("{id}.json")), b"{\"id\":\"neoforge\"}").unwrap();
+        fs::write(
+            version_dir.join(format!("{id}.json")),
+            b"{\"id\":\"neoforge\"}",
+        )
+        .unwrap();
         let patched = root
             .join("libraries")
             .join(neoforge_patched_client_rel(ver));

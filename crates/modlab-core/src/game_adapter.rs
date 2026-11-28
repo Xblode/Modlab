@@ -1,4 +1,4 @@
-//! The `GameAdapter` contract — see docs/01-architecture-decidee.md §3.1.
+//! The `GameAdapter` contract — see .bframe/ARCHITECTURE.md.
 //!
 //! This module defines the shape every game integration follows. It
 //! implements none of it: the Core must never know what "Skyrim" is, or

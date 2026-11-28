@@ -310,7 +310,15 @@ pub fn prepare_launch(
         .map_err(|e| format!("Impossible de copier SKSE dans le dossier du jeu : {e}"))?;
     let status = detect_with_version(install_root, game_version);
     match status.launch_refusal() {
-        Some(reason) => Err(reason),
+        Some(reason) => {
+            // Copies from this attempt must not linger when launch is refused
+            // (missing DLL, wrong version on disk after a failed ensure, …).
+            if !report.copied.is_empty() {
+                let _ =
+                    crate::engine::uninstall_root_files(install_root, store, Some(&report.copied));
+            }
+            Err(reason)
+        }
         None => Ok((report, status)),
     }
 }

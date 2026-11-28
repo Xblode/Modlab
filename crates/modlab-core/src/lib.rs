@@ -1,7 +1,7 @@
 //! ModLab engine core.
 //!
 //! This crate is the single owner of ModLab's state — see
-//! `docs/01-architecture-decidee.md` §3 ("one engine, many clients") before
+//! `.bframe/ARCHITECTURE.md` ("one engine, many clients") before
 //! adding anything here. It must never know about a specific game (that's a
 //! `GameAdapter`, implemented by the per-game crates) or a specific mod
 //! platform (that's a `Provider`, not implemented yet).
@@ -273,8 +273,8 @@ impl Core {
     }
 
     fn migrate(&self) -> Result<()> {
-        // Event log described in docs/01-architecture-decidee.md §5, plus a
-        // first slice of the Loadout/Mod/LoadoutEntry domain (§5's data
+        // Event log described in .bframe/ARCHITECTURE.md, plus a
+        // first slice of the Loadout/Mod/LoadoutEntry domain (the data
         // model, simplified: no Archive/Blob/ModFile/LoadoutRevision yet —
         // those need the CAS-backed install pipeline this doesn't have).
         // `mod` isn't a valid bare table name (reserved in some SQL
@@ -914,13 +914,8 @@ impl Core {
         let result = (|| -> Result<(i64, i64)> {
             let mod_id = self.insert_downloading_mod(mod_name, path)?;
             self.insert_loadout_entry(loadout_id, mod_id, false, position)?;
-            let download_id = self.insert_download(
-                url,
-                file_name,
-                path,
-                None,
-                crate::download::PHASE_QUEUED,
-            )?;
+            let download_id =
+                self.insert_download(url, file_name, path, None, crate::download::PHASE_QUEUED)?;
             self.set_download_target(download_id, loadout_id, mod_id)?;
             // The row is on screen as soon as the transfer starts, so the
             // date is this capture's — the same instant, not a later finish.

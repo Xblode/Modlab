@@ -104,10 +104,7 @@ fn append_jarjar_ids<R: Read + Seek>(archive: &mut ZipArchive<R>, ids: &mut Vec<
             let entry = archive.by_index(index).ok()?;
             let name = entry.name().replace('\\', "/");
             let lower = name.to_ascii_lowercase();
-            if lower.starts_with("meta-inf/jarjar/")
-                && lower.ends_with(".jar")
-                && !entry.is_dir()
-            {
+            if lower.starts_with("meta-inf/jarjar/") && lower.ends_with(".jar") && !entry.is_dir() {
                 Some(name)
             } else {
                 None
@@ -1212,10 +1209,7 @@ type="required"
         let jar = zip_bytes(&[("META-INF/neoforge.mods.toml", toml)]);
         let meta = read_bytes("xaerominimap.jar", &jar);
         let ids: Vec<&str> = meta.dependencies.iter().map(|d| d.id.as_str()).collect();
-        assert_eq!(
-            ids,
-            ["neoforge", "openpartiesandclaims", "xaeroworldmap"]
-        );
+        assert_eq!(ids, ["neoforge", "openpartiesandclaims", "xaeroworldmap"]);
         assert!(!meta.dependencies.iter().any(|d| d.id == "xaerolib"));
         assert_eq!(
             meta.dependencies

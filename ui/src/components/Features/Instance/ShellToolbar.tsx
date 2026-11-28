@@ -25,7 +25,7 @@ import "./shell-toolbar.css";
  * `Select` (`--ctl-sm`). Default = `Select` + `PopoverMenu`; when a loader must
  * be installed it swaps to a bordered `Button` « Installer … », then returns.
  *
- * Compaction (see `shell-toolbar.css` / DESIGN.md): at narrow container widths,
+ * Compaction (see `shell-toolbar.css` / .bframe/DESIGN.md): at narrow container widths,
  * labels hide (`.btn-label`, `.select-label`, `.tbar-unit`) while controls keep
  * their type; tips carry the missing text. Borders stay on primary actions only.
  * The install CTA in the primary slot keeps its label (not icon-only).

@@ -5,7 +5,7 @@ import type { CSSProperties, ReactNode } from "react";
  *
  * `float` is the inset card: 8 px inset, `--r` on all four corners, raised
  * surface, float shadow. `column` is the shell's resizable right column
- * (class `utility-col`). See `ui/src/shell/README.md` and `shell/utilityColumnChrome.ts`.
+ * (class `utility-col`). See `ui/README.md` (section "Le shell") and `shell/utilityColumnChrome.ts`.
  * The shell only treats the slot as that column when
  * the element it receives carries `utility-col` on its props — pass the
  * class through from the caller, don't rely on this default alone.

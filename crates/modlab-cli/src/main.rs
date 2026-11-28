@@ -2,7 +2,7 @@
 //!
 //! Every command should eventually support `--json` so Claude Code can
 //! drive this as efficiently as a human — see
-//! docs/01-architecture-decidee.md §7.1.
+//! .bframe/ARCHITECTURE.md.
 //!
 //! Data root: the same resolution as the UI (`modlab_core::resolve_data_root`).
 //! `MODLAB_DATA_ROOT` wins, otherwise `F:\ModLab` when that database or

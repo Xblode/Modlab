@@ -398,12 +398,8 @@ pub fn finalize_by_id(app: &AppHandle, download_id: i64, give_up: bool) -> Final
             path.display()
         );
         let _ = take_in_flight_by_id(&state, download_id);
-        let abandoned = abandon_in_progress(
-            &state,
-            None,
-            Some(path.as_path()),
-            Some(file_name.as_str()),
-        );
+        let abandoned =
+            abandon_in_progress(&state, None, Some(path.as_path()), Some(file_name.as_str()));
         let _ = app.emit(
             "download://failed",
             DownloadFailed {
@@ -417,10 +413,7 @@ pub fn finalize_by_id(app: &AppHandle, download_id: i64, give_up: bool) -> Final
 
     // Completing: drop in-flight so a duplicate Finished is a no-op.
     let _ = take_in_flight_by_id(&state, download_id);
-    eprintln!(
-        "[dl] reconcile disque #{download_id} → {}",
-        path.display()
-    );
+    eprintln!("[dl] reconcile disque #{download_id} → {}", path.display());
     match promote_tracked(app, &state, download_id, &url, &path, &file_name, None) {
         PromoteResult::Emitted => FinalizeOutcome::Completed,
         PromoteResult::Failed => FinalizeOutcome::Abandoned,
@@ -495,7 +488,11 @@ fn finish(app: &AppHandle, url: &str, path: Option<PathBuf>, success: bool, mode
         .as_ref()
         .map(|item| item.download_id)
         .or_else(|| download::in_progress_at(&core, &path).ok().flatten())
-        .or_else(|| download::in_progress_named(&core, &file_name).ok().flatten());
+        .or_else(|| {
+            download::in_progress_named(&core, &file_name)
+                .ok()
+                .flatten()
+        });
 
     if let Some(download_id) = in_progress {
         drop(core);
@@ -634,12 +631,7 @@ fn promote_tracked(
             eprintln!("[dl] fin du téléchargement non enregistrée ({url}) : {e}");
             let loadout_id = tracked.map(|item| item.loadout_id);
             drop(core);
-            let abandoned = abandon_in_progress(
-                state,
-                tracked,
-                Some(path),
-                Some(file_name),
-            );
+            let abandoned = abandon_in_progress(state, tracked, Some(path), Some(file_name));
             let _ = app.emit(
                 "download://failed",
                 DownloadFailed {
@@ -654,7 +646,11 @@ fn promote_tracked(
 }
 
 fn download_already_filed(core: &Core, path: &Path, file_name: &str) -> bool {
-    if download::in_progress_at(core, path).ok().flatten().is_some() {
+    if download::in_progress_at(core, path)
+        .ok()
+        .flatten()
+        .is_some()
+    {
         return false;
     }
     if download::in_progress_named(core, file_name)
@@ -853,6 +849,9 @@ mod matching_tests {
         let begin = "https://cdn.modrinth.com/data/AANobbMI/versions/x/sodium.jar";
         let finish = "https://cdn.modrinth.com/data/AANobbMI/versions/x/sodium.jar?token=abc";
         assert!(urls_match(begin, finish));
-        assert!(!urls_match(begin, "https://cdn.modrinth.com/data/other/sodium.jar"));
+        assert!(!urls_match(
+            begin,
+            "https://cdn.modrinth.com/data/other/sodium.jar"
+        ));
     }
 }

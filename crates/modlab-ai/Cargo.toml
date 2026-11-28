@@ -3,7 +3,7 @@ name = "modlab-ai"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "ModLab local AI layer: the rules engine diagnoses from Core facts; an optional llama.cpp backend only phrases them (docs/01-architecture-decidee.md S6)."
+description = "ModLab local AI layer: the rules engine diagnoses from Core facts; an optional llama.cpp backend only phrases them (.bframe/ARCHITECTURE.md)."
 
 [dependencies]
 llama-cpp-2 = { version = "=0.1.156", optional = true }

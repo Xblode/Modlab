@@ -33,7 +33,7 @@ const PATCHES: readonly {
 ];
 
 /** Communauté → Atelier de patchs — a static preview of the shared-fix
- * workflow from `docs/deep-research-report.md`. Own page, own nav entry
+ * workflow from `.bframe/VISION.md`. Own page, own nav entry
  * (`CommunityMenu`): not a Réglages subsection. */
 export function PatchWorkshopPage({ onUnwired }: { onUnwired: (label: string) => void }) {
   return (

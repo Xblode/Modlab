@@ -4,10 +4,14 @@
 //! known keys (or appends them to `[Display]` if the file never had them);
 //! every other line, section and key — including ones this module doesn't
 //! understand — passes through byte-for-byte untouched.
+//!
+//! Before any write, callers should [`backup_aside`] under ModLab's data root
+//! so the previous file can be restored by hand if needed.
 
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const SECTION: &str = "[Display]";
 const KEYS: [&str; 6] = [
@@ -99,6 +103,34 @@ fn render_key(key: &str, s: &GraphicsSettings) -> Option<String> {
         "bFXAAEnabled" => s.fxaa.map(|v| format!("bFXAAEnabled={}", render_bool(v))),
         _ => None,
     }
+}
+
+/// Copy `prefs` aside under `<data_root>/backup/prefs/` before a write.
+/// Returns `Ok(None)` when the file does not exist yet (nothing to keep).
+/// The backup name is timestamped so successive writes never overwrite each
+/// other; a numbered suffix is added if that second collides.
+pub fn backup_aside(data_root: &Path, prefs: &Path) -> io::Result<Option<PathBuf>> {
+    if !prefs.is_file() {
+        return Ok(None);
+    }
+    let dir = data_root.join("backup").join("prefs");
+    fs::create_dir_all(&dir)?;
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let base = format!("SkyrimPrefs.ini.{secs}");
+    let mut dest = dir.join(&base);
+    if dest.exists() {
+        for n in 1u32.. {
+            dest = dir.join(format!("{base}.{n}"));
+            if !dest.exists() {
+                break;
+            }
+        }
+    }
+    fs::copy(prefs, &dest)?;
+    Ok(Some(dest))
 }
 
 /// Write `new`'s fields into `[Display]`, creating the file (and the
@@ -270,6 +302,24 @@ mod tests {
                 antialiasing: Some(0),
                 fxaa: Some(false),
             }
+        );
+    }
+
+    #[test]
+    fn backup_aside_copies_existing_prefs_under_data_root() {
+        let data = tempfile::tempdir().unwrap();
+        let prefs_dir = tempfile::tempdir().unwrap();
+        let prefs = prefs_dir.path().join("SkyrimPrefs.ini");
+        fs::write(&prefs, b"[Display]\r\niSize W=1920\r\n").unwrap();
+
+        let dest = backup_aside(data.path(), &prefs).unwrap().unwrap();
+
+        assert!(dest.starts_with(data.path().join("backup").join("prefs")));
+        assert_eq!(fs::read(&dest).unwrap(), b"[Display]\r\niSize W=1920\r\n");
+        assert!(
+            backup_aside(data.path(), &prefs_dir.path().join("missing.ini"))
+                .unwrap()
+                .is_none()
         );
     }
 }

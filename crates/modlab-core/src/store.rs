@@ -1,4 +1,4 @@
-//! Content-addressed store (CAS) — see docs/01-architecture-decidee.md §5.
+//! Content-addressed store (CAS) — see .bframe/ARCHITECTURE.md.
 //!
 //! Every unique file content is stored exactly once, named by its hash.
 //! Two mods that ship the same texture share one blob. This is the

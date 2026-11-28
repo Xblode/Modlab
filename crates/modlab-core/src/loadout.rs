@@ -1,5 +1,5 @@
 //! Loadouts — a named, versionable mod profile.
-//! See docs/01-architecture-decidee.md §5. First slice: creating a named
+//! See .bframe/ARCHITECTURE.md. First slice: creating a named
 //! loadout and importing mods into it from some external source (an MO2
 //! profile, eventually a Vortex export, ...). Revisions (immutable
 //! snapshots) and plugin load order are real domain work for a later pass,
@@ -355,7 +355,7 @@ pub fn list_trash(core: &Core) -> Result<Vec<LoadoutSummary>> {
 /// client), but nothing about it is destroyed — its row and its
 /// `loadout_entry`/`event` history stay exactly as they were, and `restore`
 /// undoes this. Per the project's "internal trash, never real deletion"
-/// rule (`docs/01-architecture-decidee.md`), just applied to Core metadata
+/// rule (`.bframe/ARCHITECTURE.md`), just applied to Core metadata
 /// rather than a game file.
 pub fn delete(core: &Core, loadout_id: i64) -> Result<()> {
     core.soft_delete_loadout(loadout_id)?;

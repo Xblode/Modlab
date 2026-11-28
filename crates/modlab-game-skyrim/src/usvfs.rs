@@ -1,6 +1,6 @@
 //! FFI binding to `usvfs` (`usvfs_x64.dll`) — the C++ virtual filesystem
 //! engine MO2 uses to deploy mods without touching the real `Data/` folder.
-//! See `docs/01-architecture-decidee.md` §4/§8 and `spikes/README.md`'s
+//! See `.bframe/ARCHITECTURE.md` and `spikes/README.md`'s
 //! "USVFS FFI" entry: that spike proved the DLL exports a clean, unmangled C
 //! ABI (`dumpbin /EXPORTS` on Benjamin's real `usvfs_x64.dll`); this module
 //! is the real binding built on top of that.
@@ -55,10 +55,33 @@ const WAIT_TIMEOUT: u32 = 0x0000_0102;
 /// recursively rather than just its immediate children.
 const LINKFLAG_RECURSIVE: u32 = 0x0000_0008;
 
+/// Expected on-disk file name for the USVFS controller DLL (MO2). Compared
+/// case-insensitively before any `LoadLibrary` so an IPC override cannot
+/// point ModLab at an arbitrary DLL.
+pub const USVFS_DLL_FILE_NAME: &str = "usvfs_x64.dll";
+
+/// Exports required before `usvfsCreateVFS`. Names match the mixed ABI
+/// documented at the top of this module (modern `usvfs*` parameter helpers
+/// + unprefixed VFS operations on Benjamin's 0.5.5.1 build).
+const REQUIRED_EXPORTS: &[&[u8]] = &[
+    b"usvfsCreateParameters\0",
+    b"usvfsSetInstanceName\0",
+    b"usvfsCreateVFS\0",
+    b"usvfsFreeParameters\0",
+    b"DisconnectVFS\0",
+    b"VirtualLinkDirectoryStatic\0",
+    b"CreateProcessHooked\0",
+    b"GetVFSProcessList\0",
+];
+
 #[derive(Debug, thiserror::Error)]
 pub enum UsvfsError {
+    #[error("refusing to load {0}: file name must be {USVFS_DLL_FILE_NAME} (case-insensitive)")]
+    InvalidDllName(PathBuf),
     #[error("failed to load {0}: {1}")]
     LoadLibrary(PathBuf, libloading::Error),
+    #[error("required export missing from usvfs_x64.dll before CreateVFS: {0}")]
+    MissingExport(String),
     #[error("symbol missing from usvfs_x64.dll: {0}")]
     Symbol(#[from] libloading::Error),
     #[error("instance name contains a nul byte: {0:?}")]
@@ -87,6 +110,46 @@ pub enum UsvfsError {
         "usvfs instance '{instance}' disconnect could not be confirmed — {remaining} process(es) still registered"
     )]
     DisconnectNotConfirmed { instance: String, remaining: usize },
+}
+
+/// Refuse any path whose final component is not `usvfs_x64.dll`
+/// (case-insensitive). Call before `LoadLibrary` and when storing an IPC
+/// override for the `usvfs_dll` slot.
+pub fn check_usvfs_dll_file_name(path: &Path) -> Result<(), UsvfsError> {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if !name.eq_ignore_ascii_case(USVFS_DLL_FILE_NAME) {
+        return Err(UsvfsError::InvalidDllName(path.to_path_buf()));
+    }
+    Ok(())
+}
+
+fn export_label(nul_terminated: &[u8]) -> String {
+    let end = nul_terminated
+        .iter()
+        .position(|&b| b == 0)
+        .unwrap_or(nul_terminated.len());
+    String::from_utf8_lossy(&nul_terminated[..end]).into_owned()
+}
+
+/// Confirm every symbol this binding calls exists *before* `usvfsCreateVFS`,
+/// so a renamed DLL that still loads cannot run half-initialized.
+fn ensure_required_exports(lib: &Library) -> Result<(), UsvfsError> {
+    for name in REQUIRED_EXPORTS {
+        // Type is irrelevant: we only need GetProcAddress to succeed.
+        let found = unsafe { lib.get::<*const ()>(*name) };
+        if found.is_err() {
+            return Err(UsvfsError::MissingExport(export_label(name)));
+        }
+    }
+    // `VirtualLinkFile` was renamed mid-migration; either export is enough.
+    let has_link_file = unsafe {
+        lib.get::<*const ()>(b"VirtualLinkFile\0").is_ok()
+            || lib.get::<*const ()>(b"usvfsVirtualLinkFile\0").is_ok()
+    };
+    if !has_link_file {
+        return Err(UsvfsError::MissingExport("VirtualLinkFile".to_string()));
+    }
+    Ok(())
 }
 
 /// Deterministic, stable VFS instance name for a given game + loadout.
@@ -180,8 +243,10 @@ impl Vfs {
     /// retries for a name outside our namespace — that's some other tool's
     /// instance, and blindly disconnecting it would be destructive.
     pub fn create(dll_path: &Path, instance_name: &str) -> Result<Self, UsvfsError> {
+        check_usvfs_dll_file_name(dll_path)?;
         let lib = unsafe { Library::new(dll_path) }
             .map_err(|e| UsvfsError::LoadLibrary(dll_path.to_path_buf(), e))?;
+        ensure_required_exports(&lib)?;
 
         match Self::try_create_vfs(&lib, instance_name) {
             Ok(()) => {}
@@ -790,6 +855,24 @@ mod tests {
             elapsed < Duration::from_secs(15),
             "took too long ({elapsed:?}) — de-registration may never be observed"
         );
+    }
+
+    #[test]
+    fn refuses_load_when_file_name_is_not_usvfs_x64_dll() {
+        let dir = tempfile::tempdir().unwrap();
+        let evil = dir.path().join("kernel32.dll");
+        fs::write(&evil, b"not usvfs").unwrap();
+        let err = match Vfs::create(&evil, "modlab-test-bad-dll") {
+            Ok(_) => panic!("expected InvalidDllName, create succeeded"),
+            Err(e) => e,
+        };
+        assert!(
+            matches!(err, UsvfsError::InvalidDllName(_)),
+            "expected InvalidDllName, got {err}"
+        );
+        assert!(check_usvfs_dll_file_name(&evil).is_err());
+        assert!(check_usvfs_dll_file_name(Path::new(r"C:\MO2\USVFS_X64.DLL")).is_ok());
+        assert!(check_usvfs_dll_file_name(Path::new("usvfs_x64.dll")).is_ok());
     }
 
     #[test]

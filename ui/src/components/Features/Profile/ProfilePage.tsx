@@ -82,7 +82,7 @@ function ActivityHeatmap() {
  * avatar, not a Réglages subsection: this is identity, not configuration,
  * and (eventually) something every account has one of, not a preference you
  * tune. The rich part (stats, activity, titles, lineage) still sits behind
- * the "Communauté" flag from `docs/deep-research-report.md` (toggled in
+ * the "Communauté" flag from `.bframe/VISION.md` (toggled in
  * Réglages → Général) — only the account row is unconditional.
  */
 export function ProfilePage({

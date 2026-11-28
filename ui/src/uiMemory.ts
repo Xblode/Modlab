@@ -44,7 +44,7 @@ export type UiMemory = {
   rightTabs: FixedRightTab[];
   llm: string;
   /** Experimental "Profil / Communauté / Économie" screens (see
-   * `docs/deep-research-report.md`) — not part of the locked architecture
+   * `.bframe/VISION.md`) — not part of the locked architecture
    * yet, so this stays a client-side preference gate rather than a Core
    * flag. Off by default: nobody sees the mockup screens unless they opt in
    * from Réglages → Général. */

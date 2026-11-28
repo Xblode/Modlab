@@ -617,7 +617,7 @@ export function SettingsPane({
   dataRoot: string | undefined;
   onSelectModel: (id: string, name: string) => void;
   /** Whether the experimental "Profil / Communauté / Économie" preview
-   * (`docs/deep-research-report.md`) is switched on — the actual toggle
+   * (`.bframe/VISION.md`) is switched on — the actual toggle
    * lives in the `"general"` branch below. */
   communityUpdate: boolean;
   onToggleCommunityUpdate: () => void;
@@ -815,7 +815,7 @@ export function SettingsPane({
         <SettingsGroup title="Serveur MCP">
           <SettingsRow
             title="Outils exposés à une IA compatible MCP"
-            desc="Lecture, mutation réversible et transactionnel (inspect_game, install_mod, modlab_plan…) — voir docs/01-architecture-decidee.md §7."
+            desc="Lecture, mutation réversible et transactionnel (inspect_game, install_mod, modlab_plan…)"
             control={<Badge tone="root">Phase 3</Badge>}
           />
           <SettingsRow
@@ -887,7 +887,7 @@ export function SettingsPane({
       <SettingsGroup title="Communauté">
         <SettingsRow
           title="Mises à jour communautaires"
-          desc="Active les écrans expérimentaux Profil, Atelier de patchs et Boutique (voir docs/deep-research-report.md) : profil social, stats, titres, patchs partagés et cosmétiques. Aperçu visuel seulement — aucune économie ni synchronisation réelle pour l'instant."
+          desc="Active les écrans expérimentaux Profil, Atelier de patchs et Boutique : profil social, stats, titres, patchs partagés et cosmétiques. Aperçu visuel seulement — aucune économie ni synchronisation réelle pour l'instant."
           control={<Switch checked={communityUpdate} onToggle={onToggleCommunityUpdate} />}
         />
       </SettingsGroup>

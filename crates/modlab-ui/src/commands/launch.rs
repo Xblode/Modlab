@@ -394,8 +394,7 @@ pub(crate) async fn test_launch_minecraft(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "Player".to_string());
-    let (done_tx, done_rx) =
-        std::sync::mpsc::channel::<Result<MinecraftSmokeResultDto, String>>();
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<Result<MinecraftSmokeResultDto, String>>();
     std::thread::Builder::new()
         .name("modlab-mc-smoke".into())
         .spawn(move || run_minecraft_smoke_session(&app, loadout_id, player, &done_tx))
@@ -501,9 +500,7 @@ fn run_minecraft_smoke_session(
     if let Some(n) = &cmd.notice {
         notes.push(n.clone());
     }
-    notes.push(
-        "Test de lancement : fenêtre 1×1 (pas de headless GLFW sous Windows).".to_string(),
-    );
+    notes.push("Test de lancement : fenêtre 1×1 (pas de headless GLFW sous Windows).".to_string());
 
     let mut child = match modlab_game_minecraft::launch::spawn_launch(&cmd) {
         Ok(c) => c,
@@ -531,14 +528,10 @@ fn run_minecraft_smoke_session(
             },
         );
         if !sodium_hint_sent {
-            if let Some(hint) =
-                modlab_game_minecraft::launch::explain_minecraft_exit(text, "")
-            {
+            if let Some(hint) = modlab_game_minecraft::launch::explain_minecraft_exit(text, "") {
                 sodium_hint_sent = true;
-                let _ = app_for_log.emit(
-                    GAME_LAUNCH_HINT_EVENT,
-                    GameLaunchHintDto { message: hint },
-                );
+                let _ =
+                    app_for_log.emit(GAME_LAUNCH_HINT_EVENT, GameLaunchHintDto { message: hint });
             }
         }
     };
@@ -660,14 +653,10 @@ fn run_minecraft_session(
         // closes it — surface the known Sodium/LWJGL hint as soon as the
         // stacktrace hits the log, not only on process exit.
         if !sodium_hint_sent {
-            if let Some(hint) =
-                modlab_game_minecraft::launch::explain_minecraft_exit(text, "")
-            {
+            if let Some(hint) = modlab_game_minecraft::launch::explain_minecraft_exit(text, "") {
                 sodium_hint_sent = true;
-                let _ = app_for_log.emit(
-                    GAME_LAUNCH_HINT_EVENT,
-                    GameLaunchHintDto { message: hint },
-                );
+                let _ =
+                    app_for_log.emit(GAME_LAUNCH_HINT_EVENT, GameLaunchHintDto { message: hint });
             }
         }
     };
@@ -847,12 +836,20 @@ fn start_game_session(state: &AppState, loadout_id: i64) -> Result<LaunchedSessi
     // `engine`), then the folder must really hold a loader and the DLL of
     // this game's version. No silent fallback to the vanilla exe: that would
     // look like a modded launch and load nothing.
+    let engine_store = engine_store_dir(&state.data_root);
     let (engine_report, _status) = modlab_game_skyrim::skse::prepare_launch(
         &rows,
         &install_root,
         modlab_game_skyrim::skse::read_exe_version(&game_exe),
-        &engine_store_dir(&state.data_root),
+        &engine_store,
     )?;
+    // Hold copies under a guard until spawn succeeds; Drop restores the
+    // install root if VFS/deploy/launch fails after prepare_launch.
+    let mut engine_guard = modlab_game_skyrim::engine::EngineInstallGuard::after_install(
+        install_root.clone(),
+        engine_store,
+        engine_report.copied.clone(),
+    );
     if !engine_report.copied.is_empty() || !engine_report.backed_up.is_empty() {
         let core = state.core.lock().map_err(|e| e.to_string())?;
         let mut tx = transaction::Transaction::new(&core, "skyrim.engine");
@@ -873,48 +870,77 @@ fn start_game_session(state: &AppState, loadout_id: i64) -> Result<LaunchedSessi
     // launching independently must never reconnect to the same VFS session
     // (see modlab_game_skyrim::usvfs::instance_name's doc).
     let instance_name = modlab_game_skyrim::usvfs::instance_name("skyrim", loadout_id);
-    let vfs = modlab_game_skyrim::usvfs::Vfs::create(&usvfs_dll, &instance_name)
+    let mut vfs = modlab_game_skyrim::usvfs::Vfs::create(&usvfs_dll, &instance_name)
         .map_err(|e| e.to_string())?;
     {
         let core = state.core.lock().map_err(|e| e.to_string())?;
         let mut tx = transaction::Transaction::new(&core, "skyrim.usvfs");
         tx.step(format!("usvfs instance '{instance_name}' connected"));
-        tx.commit().map_err(|e| e.to_string())?;
+        if let Err(e) = tx.commit() {
+            let _ = vfs.disconnect();
+            return Err(e.to_string());
+        }
     }
-    modlab_game_skyrim::usvfs::deploy_enabled_mods(&vfs, &vfs_rows, &data_dir)
-        .map_err(|e| e.to_string())?;
+
+    // Explicit disconnect on every Err after create — Drop alone cannot
+    // confirm teardown, and a half-session must not linger for the next launch.
+    if let Err(e) = modlab_game_skyrim::usvfs::deploy_enabled_mods(&vfs, &vfs_rows, &data_dir) {
+        let _ = vfs.disconnect();
+        return Err(e.to_string());
+    }
     // Skyrim loads only the plugins its `Plugins.txt` lists. Write the
     // instance's own (in the data root) and link it onto the game's path
     // for the hooked process only — the real AppData file is never touched.
-    let game_plugins_txt = plugins::find_game_plugins_txt()
-        .ok_or_else(|| "%LOCALAPPDATA% introuvable — impossible de lier plugins.txt".to_string())?;
+    let game_plugins_txt = match plugins::find_game_plugins_txt() {
+        Some(p) => p,
+        None => {
+            let _ = vfs.disconnect();
+            return Err("%LOCALAPPDATA% introuvable — impossible de lier plugins.txt".to_string());
+        }
+    };
     let game_ctx = plugins::GameContext {
         install_root: Some(install_root.clone()),
         data_dir: Some(data_dir.clone()),
     };
-    let order = modlab_game_skyrim::usvfs::deploy_plugins_txt(
+    let order = match modlab_game_skyrim::usvfs::deploy_plugins_txt(
         &vfs,
         &vfs_rows,
         &game_ctx,
         &instance_plugins_txt(&state.data_root, loadout_id),
         &game_plugins_txt,
-    )
-    .map_err(|e| e.to_string())?;
+    ) {
+        Ok(o) => o,
+        Err(e) => {
+            let _ = vfs.disconnect();
+            return Err(e.to_string());
+        }
+    };
     {
-        let core = state.core.lock().map_err(|e| e.to_string())?;
+        let core = match state.core.lock() {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = vfs.disconnect();
+                return Err(e.to_string());
+            }
+        };
         let (full, light) = order.active_counts();
         let mut tx = transaction::Transaction::new(&core, "skyrim.plugins_txt");
         tx.step(format!(
             "plugins.txt linked: {full} full + {light} light active, {} issue(s)",
             order.issues.len()
         ));
-        tx.commit().map_err(|e| e.to_string())?;
+        if let Err(e) = tx.commit() {
+            let _ = vfs.disconnect();
+            return Err(e.to_string());
+        }
     }
 
     let started_at = SystemTime::now();
-    let _loader_pid = vfs
-        .launch_hooked_visible(&format!("\"{}\"", loader.display()), &install_root)
-        .map_err(|e| e.to_string())?;
+    if let Err(e) = vfs.launch_hooked_visible(&format!("\"{}\"", loader.display()), &install_root) {
+        let _ = vfs.disconnect();
+        return Err(e.to_string());
+    }
+    engine_guard.commit();
     Ok(LaunchedSession {
         vfs,
         instance_name,
@@ -1074,8 +1100,8 @@ pub(crate) fn skyrim_graphics_settings(
 /// Mutation réversible tier (§7.2): writes straight to `SkyrimPrefs.ini`,
 /// but only the handful of keys this dialog exposes, and every other line
 /// in the file is preserved untouched (see `modlab_game_skyrim::graphics`'s
-/// doc) — nothing here can corrupt an install, and the previous values are
-/// always still readable/restorable by hand if a human wants to undo it.
+/// doc). A copy of the previous file is first set aside under the data root
+/// (`backup/prefs/`) so a human can restore by hand if needed.
 #[tauri::command]
 pub(crate) fn set_skyrim_graphics_settings(
     state: State<AppState>,
@@ -1083,6 +1109,8 @@ pub(crate) fn set_skyrim_graphics_settings(
 ) -> Result<GraphicsSettingsDto, String> {
     let core = state.core.lock().map_err(|e| e.to_string())?;
     let path = prefs_ini_path(&core)?;
+    modlab_game_skyrim::graphics::backup_aside(&state.data_root, &path)
+        .map_err(|e| format!("Impossible de sauvegarder SkyrimPrefs.ini : {e}"))?;
     modlab_game_skyrim::graphics::write(&path, &settings.into()).map_err(|e| e.to_string())?;
     modlab_game_skyrim::graphics::read(&path)
         .map(GraphicsSettingsDto::from)

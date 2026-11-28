@@ -1,7 +1,7 @@
 //! Reading — and writing into — a real modded Minecraft instance's `mods/`
 //! folder. Everything here is allowed to know what a `.jar` is and how
 //! Fabric/Quilt/Forge declare themselves; none of it belongs in
-//! `modlab-core`. See `docs/01-architecture-decidee.md` §3.1.
+//! `modlab-core`. See `.bframe/ARCHITECTURE.md`.
 //!
 //! Same read/decide-then-act split as `modlab_game_skyrim::mo2`: `scan_dir`
 //! and `read_jar` only parse, `to_import_entries` maps to the Core's generic
@@ -614,8 +614,8 @@ pub fn remove_mod(
 
     let mut guards = Vec::new();
     for path in &to_trash {
-        if let Some(guard) = modlab_core::files::trash_for_rollback(data_root, path)
-            .map_err(|e| e.to_string())?
+        if let Some(guard) =
+            modlab_core::files::trash_for_rollback(data_root, path).map_err(|e| e.to_string())?
         {
             guards.push(guard);
         }
@@ -1058,9 +1058,11 @@ mod tests {
         let trash = data.path().join("trash");
         assert!(
             trash.is_dir()
-                && fs::read_dir(&trash)
+                && fs::read_dir(&trash).unwrap().any(|e| e
                     .unwrap()
-                    .any(|e| e.unwrap().file_name().to_string_lossy().contains("sodium")),
+                    .file_name()
+                    .to_string_lossy()
+                    .contains("sodium")),
             "jar must sit in the data-root trash, not be deleted"
         );
     }

@@ -176,11 +176,11 @@ fn emit_progress(app: &AppHandle, url: &str, received: u64, total: Option<u64>) 
 mod platform {
     use super::{emit_progress, Gate};
     use std::cell::Cell;
+    use std::path::PathBuf;
     use std::rc::Rc;
     use std::time::Instant;
     use tauri::webview::PlatformWebview;
     use tauri::AppHandle;
-    use std::path::PathBuf;
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         ICoreWebView2DownloadOperation, ICoreWebView2DownloadStartingEventArgs, ICoreWebView2_4,
         COREWEBVIEW2_DOWNLOAD_STATE, COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED,
@@ -435,10 +435,7 @@ mod tests {
         assert_eq!(ProgressTarget::Row(2).download_id(), Some(2));
         assert_eq!(ProgressTarget::Unfiled.download_id(), None);
         assert!(urls_match(url, "https://example.com/file.7z"));
-        assert!(urls_match(
-            url,
-            "https://example.com/file.7z?token=rotated"
-        ));
+        assert!(urls_match(url, "https://example.com/file.7z?token=rotated"));
         assert!(!urls_match(url, "https://example.com/other.7z"));
     }
 }

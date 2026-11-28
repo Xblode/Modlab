@@ -12,7 +12,7 @@ const ENTRIES: readonly (readonly [CommunityMenuId, string, string])[] = [
  * Communauté's own side nav — same `SideBack` + grouped-list shape as
  * Réglages' `SideMenu`, but a separate, smaller tree: this isn't a
  * configuration surface, it's the "Communauté" preview from
- * `docs/deep-research-report.md` (Atelier de patchs, Boutique), reached from
+ * `.bframe/VISION.md` (Atelier de patchs, Boutique), reached from
  * `SidebarProfile`'s own icon, not from Réglages.
  */
 export function CommunityMenu({

@@ -16,7 +16,7 @@
 //! LOOT itself is built on, covered by its own tests against real plugins, and
 //! it only pulls four small dependencies. A hand-written reader would
 //! duplicate those rules with fewer tests. Its licence (GPL-3.0) matches the
-//! workspace's. `docs/01-architecture-decidee.md` §4 already names it as
+//! workspace's. `.bframe/ARCHITECTURE.md` already names it as
 //! sufficient for load-order sorting (not for record-level analysis).
 //!
 //! # Ordering rules (no LOOT)
